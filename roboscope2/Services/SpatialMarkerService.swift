@@ -57,21 +57,23 @@ final class SpatialMarkerService: ObservableObject {
         // Calculate the reference distance from camera to center
         let referenceDistance = simd_distance(cameraPosition, centerPosition)
         
-        // Now project each corner to the same distance
+        // Now raycast from each corner and use actual hit positions
         var hitPoints: [SIMD3<Float>] = []
         
         for corner in targetCorners {
-            // Get ray direction for this corner
-            guard let query = arView.makeRaycastQuery(from: corner, allowing: .estimatedPlane, alignment: .any) else {
-                print("Failed to create raycast query for corner")
+            let results = arView.raycast(from: corner, allowing: .estimatedPlane, alignment: .any)
+            
+            if let firstResult = results.first {
+                let worldPosition = SIMD3<Float>(
+                    firstResult.worldTransform.columns.3.x,
+                    firstResult.worldTransform.columns.3.y,
+                    firstResult.worldTransform.columns.3.z
+                )
+                hitPoints.append(worldPosition)
+            } else {
+                print("No raycast hit for corner: \(corner)")
                 return
             }
-            
-            // Calculate the 3D position at the reference distance
-            let direction = normalize(SIMD3<Float>(query.direction.x, query.direction.y, query.direction.z))
-            let position = cameraPosition + direction * referenceDistance
-            
-            hitPoints.append(position)
         }
         
         // Need 4 hit points for a valid marker
@@ -83,9 +85,9 @@ final class SpatialMarkerService: ObservableObject {
         // Create marker entity
         let anchorEntity = AnchorEntity(world: .zero)
         
-        // Create nodes (black spheres, radius 2cm) with flat material
+        // Create nodes (black spheres, radius 1cm - 2x smaller) with flat material
         for (index, position) in hitPoints.enumerated() {
-            let nodeMesh = MeshResource.generateSphere(radius: 0.02) // 2cm
+            let nodeMesh = MeshResource.generateSphere(radius: 0.01) // 1cm
             var nodeMaterial = UnlitMaterial(color: .black)
             let nodeEntity = ModelEntity(mesh: nodeMesh, materials: [nodeMaterial])
             nodeEntity.position = position
@@ -105,9 +107,9 @@ final class SpatialMarkerService: ObservableObject {
             let direction = end - start
             let length = simd_length(direction)
             
-            // Create cylinder (radius 0.0005m = 0.5mm - very thin)
+            // Create cylinder (radius 0.0005m = 0.5mm - very thin) with flat light blue material
             let edgeMesh = MeshResource.generateCylinder(height: length, radius: 0.0005)
-            var edgeMaterial = UnlitMaterial(color: .white)
+            var edgeMaterial = UnlitMaterial(color: UIColor(red: 0.5, green: 0.8, blue: 1.0, alpha: 1.0))
             let edgeEntity = ModelEntity(mesh: edgeMesh, materials: [edgeMaterial])
             
             // Position and orient the cylinder

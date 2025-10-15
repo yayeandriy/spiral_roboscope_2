@@ -66,9 +66,9 @@ struct ContentView : View {
         let screenSize = arView.bounds.size
         let centerX = screenSize.width / 2
         
-        // Target size (150x150 points), positioned 80px from top
+        // Target size (150x150 points), positioned higher to match visual position
         let targetSize: CGFloat = 150
-        let targetY: CGFloat = 80 + targetSize / 2
+        let targetY: CGFloat = 200  // Adjusted to match where marker appears
         let halfSize = targetSize / 2
         
         // Calculate 4 corner positions in screen space
