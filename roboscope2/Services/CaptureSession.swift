@@ -41,10 +41,6 @@ final class CaptureSession: NSObject, ObservableObject {
         session.pause()
         isRunning = false
     }
-    
-    func getCurrentWorldOrigin() -> simd_float4x4 {
-        return session.currentFrame?.camera.transform ?? .identity
-    }
 }
 
 // MARK: - ARSessionDelegate
@@ -56,13 +52,5 @@ extension CaptureSession: ARSessionDelegate {
         gravityUp = normalize(SIMD3<Float>(camera.transform.columns.1.x,
                                            camera.transform.columns.1.y,
                                            camera.transform.columns.1.z))
-    }
-    
-    func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-        // Mesh anchors will be handled by MeshFusionService
-    }
-    
-    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        // Mesh updates handled by MeshFusionService
     }
 }
