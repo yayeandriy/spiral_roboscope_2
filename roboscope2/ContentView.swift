@@ -16,6 +16,9 @@ struct ContentView : View {
     @State private var isExpanded: Bool = false
     @State private var arView: ARView?
     @Namespace private var namespace
+    @State private var isHoldingScreen = false
+    @State private var moveUpdateTimer: Timer?
+    @State private var markerTrackingTimer: Timer?
 
     var body: some View {
         ZStack {
@@ -28,11 +31,46 @@ struct ContentView : View {
             .onAppear {
                 // Start AR immediately when view appears
                 captureSession.start()
+                
+                // Start tracking markers continuously
+                markerTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                    checkMarkersInTarget()
+                }
+            }
+            .onDisappear {
+                markerTrackingTimer?.invalidate()
+                markerTrackingTimer = nil
             }
             .onChange(of: arView) { newValue in
                 // Connect marker service to AR view
                 markerService.arView = newValue
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        if !isHoldingScreen {
+                            isHoldingScreen = true
+                            // Try to start moving if a marker is selected
+                            if markerService.selectedMarkerID != nil {
+                                startMovingMarker()
+                            }
+                        }
+                    }
+                    .onEnded { _ in
+                        isHoldingScreen = false
+                        stopMovingMarker()
+                    }
+            )
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.3)
+                    .onEnded { _ in
+                        selectMarkerInTarget()
+                        // If selection successful, start moving immediately
+                        if isHoldingScreen && markerService.selectedMarkerID != nil {
+                            startMovingMarker()
+                        }
+                    }
+            )
             
             // Target overlay (150pt size, 80px from top)
             TargetOverlayView()
@@ -45,7 +83,7 @@ struct ContentView : View {
                 Button {
                     placeMarker()
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: isHoldingScreen ? "hand.point.up.fill" : "plus")
                         .font(.system(size: 36))
                         .foregroundStyle(.white)
                         .frame(width: 90, height: 90)
@@ -80,6 +118,56 @@ struct ContentView : View {
         ]
         
         markerService.placeMarker(targetCorners: corners)
+    }
+    
+    private func getTargetRect() -> CGRect {
+        guard let arView = arView else { return .zero }
+        
+        let screenSize = arView.bounds.size
+        let centerX = screenSize.width / 2
+        let targetSize: CGFloat = 150
+        let targetY: CGFloat = 200
+        
+        return CGRect(
+            x: centerX - targetSize / 2,
+            y: targetY - targetSize / 2,
+            width: targetSize,
+            height: targetSize
+        )
+    }
+    
+    private func checkMarkersInTarget() {
+        guard let arView = arView else { return }
+        
+        let targetRect = getTargetRect()
+        markerService.updateMarkersInTarget(targetRect: targetRect)
+    }
+    
+    private func selectMarkerInTarget() {
+        guard let arView = arView else { return }
+        
+        let targetRect = getTargetRect()
+        markerService.selectMarkerInTarget(targetRect: targetRect)
+    }
+    
+    private func startMovingMarker() {
+        guard let arView = arView,
+              markerService.selectedMarkerID != nil else { return }
+        
+        // Start moving the selected marker
+        if markerService.startMovingSelectedMarker() {
+            // Update marker position continuously while holding
+            moveUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { _ in
+                markerService.updateMovingMarker()
+            }
+            print("Started moving selected marker")
+        }
+    }
+    
+    private func stopMovingMarker() {
+        moveUpdateTimer?.invalidate()
+        moveUpdateTimer = nil
+        markerService.stopMovingMarker()
     }
 }
 
