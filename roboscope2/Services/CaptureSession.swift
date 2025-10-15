@@ -30,7 +30,8 @@ final class CaptureSession: NSObject, ObservableObject {
         
         let config = ARWorldTrackingConfiguration()
         
-        // Minimal configuration for fast performance
+        // Enable plane detection for raycasting
+        config.planeDetection = [.horizontal, .vertical]
         config.worldAlignment = .gravity
         
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
