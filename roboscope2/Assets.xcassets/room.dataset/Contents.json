@@ -1,0 +1,13 @@
+{
+  "data" : [
+    {
+      "filename" : "room.usdc",
+      "idiom" : "universal",
+      "universal-type-identifier" : "com.pixar.universal-scene-description-binary"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

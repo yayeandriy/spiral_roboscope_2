@@ -7,38 +7,34 @@
 
 import SwiftUI
 import RealityKit
+import ARKit
 
 struct ContentView : View {
+    @StateObject private var captureSession = CaptureSession()
+    
     @State private var isExpanded: Bool = false
+    @State private var arView: ARView?
     @Namespace private var namespace
 
     var body: some View {
         ZStack {
-            RealityView { content in
-
-                // Create a cube model
-                let model = Entity()
-                let mesh = MeshResource.generateBox(size: 0.1, cornerRadius: 0.005)
-                let material = SimpleMaterial(color: .gray, roughness: 0.15, isMetallic: true)
-                model.components.set(ModelComponent(mesh: mesh, materials: [material]))
-                model.position = [0, 0.05, 0]
-
-                // Create horizontal plane anchor for the content
-                let anchor = AnchorEntity(.plane(.horizontal, classification: .any, minimumBounds: SIMD2<Float>(0.2, 0.2)))
-                anchor.addChild(model)
-
-                // Add the horizontal plane anchor to the scene
-                content.add(anchor)
-
-                content.camera = .spatialTracking
-
-            }
+            // AR View
+            ARViewContainer(
+                session: captureSession.session,
+                arView: $arView
+            )
             .edgesIgnoringSafeArea(.all)
+            .onAppear {
+                // Start AR immediately when view appears
+                captureSession.start()
+            }
+            
+            
             
             // Liquid glass buttons with morphing animation
             GlassEffectContainer(spacing: 20) {
                 if isExpanded {
-                    // Two circular buttons after split - sliding out like liquid drops
+                    // Two circular buttons after split
                     HStack(spacing: 20) {
                         Button {
                             withAnimation(.smooth(duration: 0.5)) {
@@ -58,9 +54,11 @@ struct ContentView : View {
                         .offset(x: isExpanded ? 0 : 40)
                         
                         Button {
-                            print("Play tapped")
+                            withAnimation(.smooth(duration: 0.5)) {
+                                isExpanded = false
+                            }
                         } label: {
-                            Image(systemName: "play.fill")
+                            Image(systemName: "checkmark")
                                 .font(.title2)
                                 .foregroundStyle(.white)
                                 .frame(width: 60, height: 60)
@@ -77,6 +75,7 @@ struct ContentView : View {
                     Button {
                         withAnimation(.smooth(duration: 0.5)) {
                             isExpanded = true
+                            handleStartInspection()
                         }
                     } label: {
                         Text("Start inspection")
@@ -94,7 +93,31 @@ struct ContentView : View {
             }
         }
     }
+    
+    private func handleStartInspection() {
+        // AR already running, just trigger the animation
+        print("Inspection started")
+    }
+}
 
+// MARK: - ARView Container
+
+struct ARViewContainer: UIViewRepresentable {
+    let session: ARSession
+    @Binding var arView: ARView?
+    
+    func makeUIView(context: Context) -> ARView {
+        let view = ARView(frame: .zero)
+        view.session = session
+        
+        DispatchQueue.main.async {
+            arView = view
+        }
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: ARView, context: Context) {}
 }
 
 #Preview {
