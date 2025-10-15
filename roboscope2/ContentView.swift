@@ -17,6 +17,7 @@ struct ContentView : View {
     @State private var arView: ARView?
     @Namespace private var namespace
     @State private var isHoldingScreen = false
+    @State private var isTwoFingers = false
     @State private var moveUpdateTimer: Timer?
     @State private var markerTrackingTimer: Timer?
 
@@ -47,9 +48,25 @@ struct ContentView : View {
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
+                    .onChanged { value in
+                        // Single finger - just track holding
                         if !isHoldingScreen {
                             isHoldingScreen = true
+                        }
+                    }
+                    .onEnded { _ in
+                        isHoldingScreen = false
+                        isTwoFingers = false
+                        stopMovingMarker()
+                    }
+            )
+            .simultaneousGesture(
+                MagnificationGesture(minimumScaleDelta: 0)
+                    .onChanged { _ in
+                        // Two fingers detected
+                        if !isTwoFingers {
+                            isTwoFingers = true
+                            print("Two fingers detected - starting move")
                             // Try to start moving if a marker is selected
                             if markerService.selectedMarkerID != nil {
                                 startMovingMarker()
@@ -57,7 +74,8 @@ struct ContentView : View {
                         }
                     }
                     .onEnded { _ in
-                        isHoldingScreen = false
+                        isTwoFingers = false
+                        print("Two fingers released - stopping move")
                         stopMovingMarker()
                     }
             )
@@ -65,10 +83,6 @@ struct ContentView : View {
                 LongPressGesture(minimumDuration: 0.3)
                     .onEnded { _ in
                         selectMarkerInTarget()
-                        // If selection successful, start moving immediately
-                        if isHoldingScreen && markerService.selectedMarkerID != nil {
-                            startMovingMarker()
-                        }
                     }
             )
             
@@ -83,7 +97,7 @@ struct ContentView : View {
                 Button {
                     placeMarker()
                 } label: {
-                    Image(systemName: isHoldingScreen ? "hand.point.up.fill" : "plus")
+                    Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
                         .font(.system(size: 36))
                         .foregroundStyle(.white)
                         .frame(width: 90, height: 90)
@@ -128,11 +142,14 @@ struct ContentView : View {
         let targetSize: CGFloat = 150
         let targetY: CGFloat = 200
         
+        // Expand target by 10% for detection
+        let expandedSize = targetSize * 1.1
+        
         return CGRect(
-            x: centerX - targetSize / 2,
-            y: targetY - targetSize / 2,
-            width: targetSize,
-            height: targetSize
+            x: centerX - expandedSize / 2,
+            y: targetY - expandedSize / 2,
+            width: expandedSize,
+            height: expandedSize
         )
     }
     

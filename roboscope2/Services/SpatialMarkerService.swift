@@ -19,10 +19,12 @@ final class SpatialMarkerService: ObservableObject {
     // Tracking state
     @Published var markersInTarget: Set<UUID> = []
     @Published var selectedMarkerID: UUID?
+    private var markerEdgesInTarget: [UUID: Set<Int>] = [:] // Stores which edges (0-3) are in target for each marker
     
     // Moving state
     private var movingMarkerIndex: Int?
     private var nodeScreenPositions: [CGPoint] = []
+    private var updateCounter: Int = 0
     
     struct SpatialMarker: Identifiable {
         let id = UUID()
@@ -167,7 +169,6 @@ final class SpatialMarkerService: ObservableObject {
     func updateMarkersInTarget(targetRect: CGRect) {
         guard let arView = arView,
               let frame = arView.session.currentFrame else {
-            print("updateMarkersInTarget: No arView or frame")
             return
         }
         
@@ -176,52 +177,58 @@ final class SpatialMarkerService: ObservableObject {
         }
         
         var newMarkersInTarget = Set<UUID>()
+        var newMarkerEdgesInTarget: [UUID: Set<Int>] = [:]
+        
+        // Edge indices: 0:(0,1), 1:(1,2), 2:(2,3), 3:(3,0)
+        let edgeNodePairs = [(0, 1), (1, 2), (2, 3), (3, 0)]
         
         for (markerIndex, marker) in markers.enumerated() {
-            // Check if any node of this marker is within the target rect
-            var nodesInTarget = 0
-            var screenPositions: [CGPoint] = []
+            // Project all nodes to screen
+            var screenPositions: [CGPoint?] = []
             
-            for (nodeIndex, nodePos) in marker.nodes.enumerated() {
-                if let screenPos = projectWorldToScreen(worldPosition: nodePos, frame: frame, arView: arView) {
-                    screenPositions.append(screenPos)
+            for nodePos in marker.nodes {
+                let screenPos = projectWorldToScreen(worldPosition: nodePos, frame: frame, arView: arView)
+                screenPositions.append(screenPos)
+            }
+            
+            // Check which edges have both nodes in target
+            var edgesInTarget = Set<Int>()
+            
+            for (edgeIndex, (node1, node2)) in edgeNodePairs.enumerated() {
+                if let pos1 = screenPositions[node1],
+                   let pos2 = screenPositions[node2] {
+                    let node1InTarget = targetRect.contains(pos1)
+                    let node2InTarget = targetRect.contains(pos2)
                     
-                    let isInTarget = targetRect.contains(screenPos)
-                    if isInTarget {
-                        nodesInTarget += 1
-                    }
-                    
-                    // Debug every 30 frames (roughly every 3 seconds at 10fps tracking)
-                    if markerIndex == 0 && nodeIndex == 0 {
-                        let frameCount = Int(Date().timeIntervalSince1970 * 10) % 30
-                        if frameCount == 0 {
-                            print("Target rect: \(targetRect)")
-                            print("Node \(nodeIndex) world: \(nodePos), screen: \(screenPos), inTarget: \(isInTarget)")
-                        }
+                    // Edge is in target if both its nodes are in target
+                    if node1InTarget && node2InTarget {
+                        edgesInTarget.insert(edgeIndex)
                     }
                 }
             }
             
-            // If at least 2 nodes are in target, consider the marker "in target"
-            if nodesInTarget >= 2 {
+            // Marker is in target if at least one edge (2 connected nodes) is in target
+            if !edgesInTarget.isEmpty {
                 let wasInTarget = markersInTarget.contains(marker.id)
                 newMarkersInTarget.insert(marker.id)
+                newMarkerEdgesInTarget[marker.id] = edgesInTarget
                 
-                // Update color to blue if newly entered target
-                if !wasInTarget {
-                    print("✓ Marker \(markerIndex) ENTERED TARGET (\(nodesInTarget)/4 nodes)")
-                    updateMarkerColor(index: markerIndex, isSelected: false, isInTarget: true)
+                // Update colors
+                if !wasInTarget || markerEdgesInTarget[marker.id] != edgesInTarget {
+                    print("✓ Marker \(markerIndex) IN TARGET - Edges: \(edgesInTarget)")
+                    updateMarkerColorWithEdges(index: markerIndex, isSelected: false, isInTarget: true, edgesInTarget: edgesInTarget)
                 }
             } else {
                 // If was in target but no longer, reset color
                 if markersInTarget.contains(marker.id) {
                     print("✗ Marker \(markerIndex) LEFT TARGET")
-                    updateMarkerColor(index: markerIndex, isSelected: false, isInTarget: false)
+                    updateMarkerColorWithEdges(index: markerIndex, isSelected: false, isInTarget: false, edgesInTarget: [])
                 }
             }
         }
         
         markersInTarget = newMarkersInTarget
+        markerEdgesInTarget = newMarkerEdgesInTarget
     }
     
     /// Select a marker that is in the target area
@@ -261,14 +268,15 @@ final class SpatialMarkerService: ObservableObject {
             for index in markers.indices {
                 markers[index].isSelected = false
                 let isInTarget = markersInTarget.contains(markers[index].id)
-                updateMarkerColor(index: index, isSelected: false, isInTarget: isInTarget)
+                let edgesInTarget = markerEdgesInTarget[markers[index].id] ?? []
+                updateMarkerColorWithEdges(index: index, isSelected: false, isInTarget: isInTarget, edgesInTarget: edgesInTarget)
             }
             
             // Select this marker
             if let index = markers.firstIndex(where: { $0.id == markerToSelect.id }) {
                 markers[index].isSelected = true
                 selectedMarkerID = markerToSelect.id
-                updateMarkerColor(index: index, isSelected: true, isInTarget: true)
+                updateMarkerColorWithEdges(index: index, isSelected: true, isInTarget: true, edgesInTarget: [])
                 
                 // Haptic feedback
                 let generator = UIImpactFeedbackGenerator(style: .medium)
@@ -281,27 +289,25 @@ final class SpatialMarkerService: ObservableObject {
     
     /// Update marker color based on selection and target state
     private func updateMarkerColor(index: Int, isSelected: Bool, isInTarget: Bool = false) {
+        updateMarkerColorWithEdges(index: index, isSelected: isSelected, isInTarget: isInTarget, edgesInTarget: [])
+    }
+    
+    /// Update marker color with specific edges highlighted
+    private func updateMarkerColorWithEdges(index: Int, isSelected: Bool, isInTarget: Bool, edgesInTarget: Set<Int>) {
         guard index < markers.count else { return }
         
         let marker = markers[index]
         let anchorEntity = marker.anchorEntity
         
-        // Determine colors based on state
+        // Determine node color based on state
         let nodeColor: UIColor
-        let edgeColor: UIColor
         
         if isSelected {
-            // Selected: bright blue for both
             nodeColor = UIColor.systemBlue
-            edgeColor = UIColor.systemBlue
         } else if isInTarget {
-            // In target: blue nodes and edges
             nodeColor = UIColor.systemBlue
-            edgeColor = UIColor.systemBlue
         } else {
-            // Default: black nodes, light blue edges
             nodeColor = UIColor.black
-            edgeColor = UIColor(red: 0.5, green: 0.8, blue: 1.0, alpha: 1.0)
         }
         
         // Update node colors
@@ -312,10 +318,25 @@ final class SpatialMarkerService: ObservableObject {
             }
         }
         
-        // Update edge colors
-        let edgeIndices = [(0, 1), (1, 2), (2, 3), (3, 0)]
-        for (i, j) in edgeIndices {
+        // Update edge colors - highlight edges in target with RED
+        let edgeNodePairs = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        for (edgeIndex, (i, j)) in edgeNodePairs.enumerated() {
             if let edgeEntity = anchorEntity.children.first(where: { $0.name == "edge_\(i)_\(j)" }) as? ModelEntity {
+                let edgeColor: UIColor
+                
+                if isSelected {
+                    edgeColor = UIColor.systemBlue
+                } else if edgesInTarget.contains(edgeIndex) {
+                    // Highlight edges in target with RED
+                    edgeColor = UIColor.systemRed
+                } else if isInTarget {
+                    // Other edges when marker is in target - blue
+                    edgeColor = UIColor.systemBlue
+                } else {
+                    // Default: light blue
+                    edgeColor = UIColor(red: 0.5, green: 0.8, blue: 1.0, alpha: 1.0)
+                }
+                
                 var edgeMaterial = UnlitMaterial(color: edgeColor)
                 edgeEntity.model?.materials = [edgeMaterial]
             }
@@ -401,15 +422,20 @@ final class SpatialMarkerService: ObservableObject {
               let markerIndex = movingMarkerIndex,
               markerIndex < markers.count,
               nodeScreenPositions.count == 4 else {
-            print("updateMovingMarker: Guard failed - arView: \(arView != nil), markerIndex: \(movingMarkerIndex), positions: \(nodeScreenPositions.count)")
+            return
+        }
+        
+        updateCounter += 1
+        
+        // Only do full raycast every 2 frames to reduce load
+        guard updateCounter % 2 == 0 else {
             return
         }
         
         // Raycast from stored screen positions to update node positions
         var newNodePositions: [SIMD3<Float>] = []
-        var failedRaycasts = 0
         
-        for (idx, screenPos) in nodeScreenPositions.enumerated() {
+        for screenPos in nodeScreenPositions {
             let results = arView.raycast(from: screenPos, allowing: .estimatedPlane, alignment: .any)
             
             if let firstResult = results.first {
@@ -420,18 +446,13 @@ final class SpatialMarkerService: ObservableObject {
                 )
                 newNodePositions.append(worldPosition)
             } else {
-                // If any raycast fails, don't update but log it
-                failedRaycasts += 1
-                if failedRaycasts == 1 {
-                    print("Raycast failed for node \(idx) at screen pos \(screenPos)")
-                }
+                // If any raycast fails, skip this update
                 return
             }
         }
         
         // Update marker nodes
         guard newNodePositions.count == 4 else { 
-            print("Not enough positions: \(newNodePositions.count)")
             return 
         }
         
@@ -445,50 +466,51 @@ final class SpatialMarkerService: ObservableObject {
             }
         }
         
-        // Update edge entities
-        let edgeIndices = [(0, 1), (1, 2), (2, 3), (3, 0)]
-        for (i, j) in edgeIndices {
-            guard let edgeEntity = anchorEntity.children.first(where: { $0.name == "edge_\(i)_\(j)" }) as? ModelEntity,
-                  let currentMaterial = edgeEntity.model?.materials.first else {
-                continue
-            }
-            
-            let start = newNodePositions[i]
-            let end = newNodePositions[j]
-            
-            let midpoint = (start + end) / 2
-            let direction = end - start
-            let length = simd_length(direction)
-            
-            // Recreate mesh with new length
-            let edgeMesh = MeshResource.generateCylinder(height: length, radius: 0.0005)
-            edgeEntity.model = ModelComponent(mesh: edgeMesh, materials: [currentMaterial])
-            
-            // Update position
-            edgeEntity.position = midpoint
-            
-            // Update orientation
-            let up = normalize(direction)
-            let defaultUp = SIMD3<Float>(0, 1, 0)
-            
-            let dotProduct = dot(defaultUp, up)
-            if abs(dotProduct) < 0.999 { // Not parallel
-                let axis = normalize(cross(defaultUp, up))
-                let angle = acos(max(-1, min(1, dotProduct))) // Clamp to avoid NaN
-                edgeEntity.orientation = simd_quatf(angle: angle, axis: axis)
-            } else if dotProduct < 0 {
-                // Pointing down, rotate 180 degrees
-                edgeEntity.orientation = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
+        // Update edge entities (only every 3rd update to reduce CPU load)
+        if updateCounter % 6 == 0 {
+            let edgeIndices = [(0, 1), (1, 2), (2, 3), (3, 0)]
+            for (i, j) in edgeIndices {
+                guard let edgeEntity = anchorEntity.children.first(where: { $0.name == "edge_\(i)_\(j)" }) as? ModelEntity,
+                      let currentMaterial = edgeEntity.model?.materials.first else {
+                    continue
+                }
+                
+                let start = newNodePositions[i]
+                let end = newNodePositions[j]
+                
+                let midpoint = (start + end) / 2
+                let direction = end - start
+                let length = simd_length(direction)
+                
+                // Recreate mesh with new length
+                let edgeMesh = MeshResource.generateCylinder(height: length, radius: 0.0005)
+                edgeEntity.model = ModelComponent(mesh: edgeMesh, materials: [currentMaterial])
+                
+                // Update position
+                edgeEntity.position = midpoint
+                
+                // Update orientation
+                let up = normalize(direction)
+                let defaultUp = SIMD3<Float>(0, 1, 0)
+                
+                let dotProduct = dot(defaultUp, up)
+                if abs(dotProduct) < 0.999 { // Not parallel
+                    let axis = normalize(cross(defaultUp, up))
+                    let angle = acos(max(-1, min(1, dotProduct))) // Clamp to avoid NaN
+                    edgeEntity.orientation = simd_quatf(angle: angle, axis: axis)
+                } else if dotProduct < 0 {
+                    // Pointing down, rotate 180 degrees
+                    edgeEntity.orientation = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
+                }
             }
         }
-        
-        print("Updated marker positions")
     }
     
     /// Stop moving the marker
     func stopMovingMarker() {
         movingMarkerIndex = nil
         nodeScreenPositions.removeAll()
+        updateCounter = 0
         print("Stopped moving marker")
     }
     
