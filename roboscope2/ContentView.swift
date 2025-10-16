@@ -26,6 +26,11 @@ struct ContentView : View {
     @State private var hasScanData = false
     @State private var showShareSheet = false
     @State private var exportURL: URL?
+    
+    // Export progress
+    @State private var isExporting = false
+    @State private var exportProgress: Double = 0.0
+    @State private var exportStatus: String = ""
 
     var body: some View {
         ZStack {
@@ -143,6 +148,28 @@ struct ContentView : View {
                 .lgCircle(tint: .white)
                 .padding(.bottom, 50)
             }
+            
+            // Export progress overlay
+            if isExporting {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 20) {
+                        ProgressView(value: exportProgress)
+                            .progressViewStyle(.linear)
+                            .frame(width: 200)
+                            .tint(.white)
+                        
+                        Text(exportStatus)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .lgCapsule(tint: .white)
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showShareSheet) {
             if let url = exportURL {
@@ -250,10 +277,22 @@ struct ContentView : View {
     }
     
     private func exportSpatialData() {
-        captureSession.exportMeshData { url in
-            if let url = url {
-                exportURL = url
-                showShareSheet = true
+        isExporting = true
+        exportProgress = 0.0
+        exportStatus = "Preparing export..."
+        
+        captureSession.exportMeshData { progress, status in
+            DispatchQueue.main.async {
+                self.exportProgress = progress
+                self.exportStatus = status
+            }
+        } completion: { url in
+            DispatchQueue.main.async {
+                self.isExporting = false
+                if let url = url {
+                    self.exportURL = url
+                    self.showShareSheet = true
+                }
             }
         }
     }

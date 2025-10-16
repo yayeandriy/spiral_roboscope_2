@@ -78,7 +78,10 @@ final class CaptureSession: NSObject, ObservableObject {
         print("Stopped mesh scanning - captured \(meshAnchors.count) mesh anchors")
     }
     
-    func exportMeshData(completion: @escaping (URL?) -> Void) {
+    func exportMeshData(
+        progress: @escaping (Double, String) -> Void,
+        completion: @escaping (URL?) -> Void
+    ) {
         guard !meshAnchors.isEmpty else {
             print("No mesh data to export")
             completion(nil)
@@ -91,11 +94,17 @@ final class CaptureSession: NSObject, ObservableObject {
                 return
             }
             
+            let totalAnchors = self.meshAnchors.count
             let mdlAsset = MDLAsset()
             
-            for anchor in self.meshAnchors {
-                let mdlMesh = self.convertARMeshToMDLMesh(anchor.geometry)
+            progress(0.0, "Processing \(totalAnchors) mesh tiles...")
+            
+            for (index, anchor) in self.meshAnchors.enumerated() {
+                let mdlMesh = self.convertARMeshToMDLMesh(anchor.geometry, transform: anchor.transform)
                 mdlAsset.add(mdlMesh)
+                
+                let currentProgress = Double(index + 1) / Double(totalAnchors) * 0.8 // 80% for processing
+                progress(currentProgress, "Processing tile \(index + 1) of \(totalAnchors)...")
             }
             
             // Create export URL
@@ -107,10 +116,16 @@ final class CaptureSession: NSObject, ObservableObject {
             let exportURL = documentsPath.appendingPathComponent("spatial_scan_\(timestamp).obj")
             
             // Export as OBJ
+            progress(0.85, "Writing OBJ file...")
+            
             do {
                 try mdlAsset.export(to: exportURL)
                 print("Exported mesh data to: \(exportURL.path)")
-                DispatchQueue.main.async {
+                
+                progress(1.0, "Export complete!")
+                
+                // Small delay to show completion
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     completion(exportURL)
                 }
             } catch {
@@ -122,7 +137,7 @@ final class CaptureSession: NSObject, ObservableObject {
         }
     }
     
-    private func convertARMeshToMDLMesh(_ geometry: ARMeshGeometry) -> MDLMesh {
+    private func convertARMeshToMDLMesh(_ geometry: ARMeshGeometry, transform: simd_float4x4) -> MDLMesh {
         let vertices = geometry.vertices
         let faces = geometry.faces
         
@@ -135,13 +150,50 @@ final class CaptureSession: NSObject, ObservableObject {
         // Create MDL vertex descriptor
         let allocator = MDLMeshBufferDataAllocator()
         
-        // Create vertex buffer
-        let vertexData = Data(bytes: vertexBuffer.contents(), count: vertexStride * vertexCount)
+        // Transform vertices to world space
+        // CRITICAL: Use stride to read vertices correctly (not tightly packed)
+        let sourcePtr = vertexBuffer.contents()
+        var transformedVertices: [SIMD3<Float>] = []
+        transformedVertices.reserveCapacity(vertexCount)
+        
+        for i in 0..<vertexCount {
+            // Read vertex at correct offset using stride
+            let offset = i * vertexStride
+            let vertexPtr = sourcePtr.advanced(by: offset).assumingMemoryBound(to: Float.self)
+            let localVertex = SIMD3<Float>(vertexPtr[0], vertexPtr[1], vertexPtr[2])
+            
+            // Apply anchor transform to move from local mesh space to world space
+            let worldVertex4 = transform * SIMD4<Float>(localVertex.x, localVertex.y, localVertex.z, 1.0)
+            transformedVertices.append(SIMD3<Float>(worldVertex4.x, worldVertex4.y, worldVertex4.z))
+        }
+        
+        // Create vertex buffer with transformed data
+        let vertexData = Data(bytes: transformedVertices, count: MemoryLayout<SIMD3<Float>>.stride * vertexCount)
         let mdlVertexBuffer = allocator.newBuffer(with: vertexData, type: .vertex)
         
         // Create index buffer
+        // ARMeshGeometry uses specific index types - need to read correctly
         let indexCount = faces.count * faces.indexCountPerPrimitive
-        let indexData = Data(bytes: faceBuffer.contents(), count: indexCount * MemoryLayout<UInt32>.size)
+        let bytesPerIndex = faces.bytesPerIndex
+        
+        var indices: [UInt32] = []
+        indices.reserveCapacity(indexCount)
+        
+        let facePtr = faceBuffer.contents()
+        for i in 0..<indexCount {
+            let offset = i * bytesPerIndex
+            if bytesPerIndex == MemoryLayout<UInt16>.size {
+                // 16-bit indices
+                let index = facePtr.advanced(by: offset).assumingMemoryBound(to: UInt16.self).pointee
+                indices.append(UInt32(index))
+            } else {
+                // 32-bit indices
+                let index = facePtr.advanced(by: offset).assumingMemoryBound(to: UInt32.self).pointee
+                indices.append(index)
+            }
+        }
+        
+        let indexData = Data(bytes: indices, count: indices.count * MemoryLayout<UInt32>.size)
         let mdlIndexBuffer = allocator.newBuffer(with: indexData, type: .index)
         
         // Create submesh
@@ -161,7 +213,7 @@ final class CaptureSession: NSObject, ObservableObject {
             offset: 0,
             bufferIndex: 0
         )
-        vertexDescriptor.layouts[0] = MDLVertexBufferLayout(stride: vertexStride)
+        vertexDescriptor.layouts[0] = MDLVertexBufferLayout(stride: MemoryLayout<SIMD3<Float>>.stride)
         
         // Create MDL mesh
         let mdlMesh = MDLMesh(
