@@ -20,6 +20,12 @@ struct ContentView : View {
     @State private var isTwoFingers = false
     @State private var moveUpdateTimer: Timer?
     @State private var markerTrackingTimer: Timer?
+    
+    // Scanning states
+    @State private var isScanning = false
+    @State private var hasScanData = false
+    @State private var showShareSheet = false
+    @State private var exportURL: URL?
 
     var body: some View {
         ZStack {
@@ -90,6 +96,38 @@ struct ContentView : View {
             TargetOverlayView()
                 .allowsHitTesting(false)
             
+            // Top bar with scan controls
+            VStack {
+                HStack(spacing: 20.0) {
+                    // Send spatial data button (top-left)
+                    if hasScanData && !isScanning {
+                        Button("Send spatial data") {
+                            exportSpatialData()
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .lgCapsule(tint: .white)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
+                    
+                    Spacer()
+                    
+                    // Scan/Stop scan button (top-right)
+                    Button(isScanning ? "Stop scan" : "Scan") {
+                        toggleScanning()
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .lgCapsule(tint: isScanning ? .red : .white)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 60)
+                
+                Spacer()
+            }
+            
             // Place Marker Button at bottom - liquid glass style
             VStack {
                 Spacer()
@@ -99,14 +137,16 @@ struct ContentView : View {
                 } label: {
                     Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
                         .font(.system(size: 36))
-                        .foregroundStyle(.white)
-                        .frame(width: 90, height: 90)
+                        .frame(width: 80, height: 80)
                 }
-                .contentShape(Circle())
-                .glassEffect(.clear.interactive())
-                .clipShape(Circle())
                 .buttonStyle(.plain)
+                .lgCircle(tint: .white)
                 .padding(.bottom, 50)
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = exportURL {
+                ShareSheet(activityItems: [url])
             }
         }
     }
@@ -186,6 +226,37 @@ struct ContentView : View {
         moveUpdateTimer = nil
         markerService.stopMovingMarker()
     }
+    
+    // MARK: - Scanning Functions
+    
+    private func toggleScanning() {
+        if isScanning {
+            stopScanning()
+        } else {
+            startScanning()
+        }
+    }
+    
+    private func startScanning() {
+        isScanning = true
+        hasScanData = false
+        captureSession.startScanning()
+    }
+    
+    private func stopScanning() {
+        isScanning = false
+        captureSession.stopScanning()
+        hasScanData = true
+    }
+    
+    private func exportSpatialData() {
+        captureSession.exportMeshData { url in
+            if let url = url {
+                exportURL = url
+                showShareSheet = true
+            }
+        }
+    }
 }
 
 // MARK: - Target Overlay View
@@ -262,6 +333,61 @@ struct ARViewContainer: UIViewRepresentable {
     func updateUIView(_ uiView: ARView, context: Context) {}
 }
 
+// MARK: - Share Sheet
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: nil
+        )
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// (Using Apple’s built-in Liquid Glass APIs — no local stubs)
+
 #Preview {
     ContentView()
+}
+
+// MARK: - Liquid Glass Helpers (iOS 18+ with graceful fallback)
+
+extension View {
+    @ViewBuilder
+    func lgCapsule(tint: Color? = nil) -> some View {
+        if #available(iOS 18.0, *) {
+            let appliedTint = tint ?? .white
+            self
+                .tint(appliedTint)
+                .glassEffect(in: .capsule)
+        } else {
+            // Fallback for iOS < 18: approximate with material
+            let appliedTint = tint ?? .white
+            self
+                .background(.thinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.25)))
+                .overlay(Capsule().fill(appliedTint.opacity(0.18)))
+        }
+    }
+
+    @ViewBuilder
+    func lgCircle(tint: Color? = nil) -> some View {
+        if #available(iOS 18.0, *) {
+            let appliedTint = tint ?? .white
+            self
+                .tint(appliedTint)
+                .glassEffect(in: .circle)
+        } else {
+            let appliedTint = tint ?? .white
+            self
+                .background(.thinMaterial, in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.25)))
+                .overlay(Circle().fill(appliedTint.opacity(0.18)))
+        }
+    }
 }

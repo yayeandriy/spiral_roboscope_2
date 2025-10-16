@@ -9,6 +9,8 @@
 - Liquid glass effects for interactive elements
 - Transparent, see-through UI components
 - Minimal, functional design
+- **Always follow Apple Human Interface Guidelines for UI**
+- Use Apple's official liquid glass components and materials
 
 ## Last Updated
-14 October 2025
+16 October 2025
