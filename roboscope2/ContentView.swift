@@ -31,6 +31,15 @@ struct ContentView : View {
     @State private var isExporting = false
     @State private var exportProgress: Double = 0.0
     @State private var exportStatus: String = ""
+    
+    // Model placement
+    @State private var roomModel: ModelEntity?
+    @State private var isModelPlaced = false
+    @State private var placedModelAnchor: AnchorEntity?
+    
+    // Model alignment
+    @State private var isAlignmentScanning = false
+    @State private var alignmentScanData = false
 
     var body: some View {
         ZStack {
@@ -43,6 +52,9 @@ struct ContentView : View {
             .onAppear {
                 // Start AR immediately when view appears
                 captureSession.start()
+                
+                // Load room model
+                loadRoomModel()
                 
                 // Start tracking markers continuously
                 markerTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
@@ -133,19 +145,48 @@ struct ContentView : View {
                 Spacer()
             }
             
-            // Place Marker Button at bottom - liquid glass style
+            // Bottom buttons - liquid glass style
             VStack {
                 Spacer()
                 
-                Button {
-                    placeMarker()
-                } label: {
-                    Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
-                        .font(.system(size: 36))
-                        .frame(width: 80, height: 80)
+                HStack(spacing: 20) {
+                    // Place Marker Button (bottom-center)
+                    Button {
+                        placeMarker()
+                    } label: {
+                        Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
+                            .font(.system(size: 36))
+                            .frame(width: 80, height: 80)
+                    }
+                    .buttonStyle(.plain)
+                    .lgCircle(tint: .white)
+                    
+                    Spacer()
+                    
+                    // Fix Model Button (appears when model is placed, bottom-right)
+                    if isModelPlaced {
+                        Button(isAlignmentScanning ? "Stop scan" : "Fix model") {
+                            toggleAlignmentScanning()
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .lgCapsule(tint: isAlignmentScanning ? .red : .orange)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                    
+                    // Place Model Button (bottom-right)
+                    Button {
+                        placeRoomModel()
+                    } label: {
+                        Image(systemName: isModelPlaced ? "cube.fill" : "cube")
+                            .font(.system(size: 24))
+                            .frame(width: 70, height: 70)
+                    }
+                    .buttonStyle(.plain)
+                    .lgCircle(tint: isModelPlaced ? .green : .white)
                 }
-                .buttonStyle(.plain)
-                .lgCircle(tint: .white)
+                .padding(.horizontal, 30)
                 .padding(.bottom, 50)
             }
             
@@ -295,6 +336,308 @@ struct ContentView : View {
                 }
             }
         }
+    }
+    
+    // MARK: - Model Placement
+    
+    private func loadRoomModel() {
+        Task {
+            do {
+                // Try multiple loading approaches
+                var entity: Entity?
+                
+                // Approach 1: Try loading from Models subdirectory
+                if let url = Bundle.main.url(forResource: "room", withExtension: "usdc", subdirectory: "Models") {
+                    print("Found room.usdc at: \(url.path)")
+                    entity = try await Entity.load(contentsOf: url)
+                }
+                // Approach 2: Try loading from bundle root
+                else if let url = Bundle.main.url(forResource: "room", withExtension: "usdc") {
+                    print("Found room.usdc in bundle root at: \(url.path)")
+                    entity = try await Entity.load(contentsOf: url)
+                }
+                // Approach 3: Try named resource (for Reality Composer scenes)
+                else {
+                    print("Trying to load as named resource 'room'")
+                    entity = try await Entity.load(named: "room")
+                }
+                
+                guard let loadedEntity = entity else {
+                    print("Failed to find room.usdc in any location")
+                    return
+                }
+                
+                await MainActor.run {
+                    if let modelEntity = loadedEntity as? ModelEntity {
+                        roomModel = modelEntity
+                        print("Room model loaded successfully as ModelEntity")
+                    } else {
+                        // If it's not a ModelEntity, wrap it in one
+                        let model = ModelEntity()
+                        model.addChild(loadedEntity)
+                        roomModel = model
+                        print("Room model wrapped in ModelEntity")
+                    }
+                }
+            } catch {
+                print("Failed to load room model: \(error)")
+            }
+        }
+    }
+    
+    private func placeRoomModel() {
+        guard let arView = arView,
+              let model = roomModel else {
+            print("AR view or model not ready")
+            return
+        }
+        
+        // Get camera transform for placement
+        guard let cameraTransform = arView.session.currentFrame?.camera.transform else {
+            print("No camera transform available")
+            return
+        }
+        
+        if isModelPlaced, let anchor = placedModelAnchor {
+            // Remove existing model
+            arView.scene.removeAnchor(anchor)
+            placedModelAnchor = nil
+            isModelPlaced = false
+            isAlignmentScanning = false
+            alignmentScanData = false
+            print("Model removed")
+        } else {
+            // Place model at world origin with no rotation (identity)
+            // Since the model is now Y-up (matching ARKit), it should appear correctly oriented
+            let modelTransform = Transform(
+                scale: SIMD3<Float>(1, 1, 1),
+                rotation: simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), // Identity rotation
+                translation: SIMD3<Float>(0, 0, 0) // World origin
+            )
+            
+            // Create anchor and add model clone
+            let anchor = AnchorEntity(world: modelTransform.matrix)
+            let clonedModel = model.clone(recursive: true)
+            anchor.addChild(clonedModel)
+            arView.scene.addAnchor(anchor)
+            
+            placedModelAnchor = anchor
+            isModelPlaced = true
+            print("Model placed at: \(modelTransform.translation)")
+        }
+    }
+    
+    // MARK: - Model Alignment
+    
+    private func toggleAlignmentScanning() {
+        if isAlignmentScanning {
+            stopAlignmentScanning()
+        } else {
+            startAlignmentScanning()
+        }
+    }
+    
+    private func startAlignmentScanning() {
+        isAlignmentScanning = true
+        alignmentScanData = false
+        captureSession.startScanning()
+        print("Started alignment scanning")
+    }
+    
+    private func stopAlignmentScanning() {
+        isAlignmentScanning = false
+        captureSession.stopScanning()
+        alignmentScanData = true
+        print("Stopped alignment scanning, preparing to align model")
+        
+        // Start alignment process
+        alignModelWithServer()
+    }
+    
+    private func alignModelWithServer() {
+        guard let anchor = placedModelAnchor else {
+            print("No model placed to align")
+            return
+        }
+        
+        isExporting = true
+        exportProgress = 0.0
+        exportStatus = "Preparing scan for alignment..."
+        
+        // Export mesh data for alignment
+        captureSession.exportMeshData { progress, status in
+            DispatchQueue.main.async {
+                self.exportProgress = progress * 0.5 // First 50% for export
+                self.exportStatus = status
+            }
+        } completion: { url in
+            guard let url = url else {
+                DispatchQueue.main.async {
+                    self.isExporting = false
+                    print("Failed to export scan data")
+                }
+                return
+            }
+            
+            // Send to alignment server (after triggering local network permission if needed)
+            Task {
+                await withCheckedContinuation { cont in
+                    LocalNetworkPermission.shared.request {
+                        cont.resume()
+                    }
+                }
+                await self.sendScanToAlignmentServer(scanURL: url, modelAnchor: anchor)
+            }
+        }
+    }
+    
+    private func sendScanToAlignmentServer(scanURL: URL, modelAnchor: AnchorEntity) async {
+        do {
+            await MainActor.run {
+                exportProgress = 0.5
+                exportStatus = "Sending to alignment server..."
+            }
+            
+            // Read scan data
+            let scanData = try Data(contentsOf: scanURL)
+            
+            // TODO: Replace with your actual server URL
+            let serverURL = "http://192.168.0.115:6000/align"
+            
+            // Create request
+            var request = URLRequest(url: URL(string: serverURL)!)
+            request.httpMethod = "POST"
+            request.httpBody = scanData
+            request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 30 // 30 second timeout
+            
+            await MainActor.run {
+                exportProgress = 0.6
+                exportStatus = "Processing alignment..."
+            }
+            
+            // Send request (first attempt)
+            var (data, response) = try await URLSession.shared.data(for: request)
+
+            // If not OK, try a one-time retry after re-triggering permission
+            if (response as? HTTPURLResponse)?.statusCode == nil {
+                await withCheckedContinuation { cont in
+                    LocalNetworkPermission.shared.request { cont.resume() }
+                }
+                (data, response) = try await URLSession.shared.data(for: request)
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌ No HTTP response received")
+                throw URLError(.badServerResponse)
+            }
+            
+            print("Server response status: \(httpResponse.statusCode)")
+            
+            // Log response body for debugging
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("Server response body: \(responseString.prefix(500))")
+            }
+            
+            // Parse response JSON
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                print("❌ Failed to parse JSON response")
+                throw URLError(.cannotParseResponse)
+            }
+            
+            // Check for error response (400/500 status codes)
+            if let errorMessage = json["error"] as? String {
+                print("❌ Server error: \(errorMessage)")
+                await MainActor.run {
+                    self.exportStatus = "Server error: \(errorMessage)"
+                }
+                throw URLError(.badServerResponse)
+            }
+            
+            guard httpResponse.statusCode == 200 else {
+                print("❌ Server returned status: \(httpResponse.statusCode)")
+                throw URLError(.badServerResponse)
+            }
+            
+            await MainActor.run {
+                exportProgress = 0.8
+                exportStatus = "Applying transformation..."
+            }
+            
+            // Extract transformation matrix
+            guard let matrixArray = json["matrix"] as? [[Double]] else {
+                print("❌ No 'matrix' field in response or wrong format")
+                print("Response keys: \(json.keys)")
+                if let matrixFloat = json["matrix"] as? [[Float]] {
+                    print("Note: matrix is Float not Double, converting...")
+                    // Try Float conversion
+                    let transform = parseTransformMatrix(from: matrixFloat.map { $0.map { Double($0) } })
+                    await MainActor.run {
+                        modelAnchor.transform = Transform(matrix: transform)
+                        exportProgress = 1.0
+                        exportStatus = "Model aligned!"
+                        print("✅ Model aligned successfully!")
+                        print("Translation: \(transform.columns.3)")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            self.isExporting = false
+                            self.alignmentScanData = false
+                        }
+                    }
+                    return
+                }
+                throw URLError(.cannotParseResponse)
+            }
+            
+            // Convert to simd_float4x4
+            let modelToScanTransform = parseTransformMatrix(from: matrixArray)
+            
+            // Apply transformation to model
+            // The server returns MODEL→SCAN transform, which is exactly what we need
+            // to position the model in the scan's coordinate frame
+            await MainActor.run {
+                modelAnchor.transform = Transform(matrix: modelToScanTransform)
+                
+                exportProgress = 1.0
+                exportStatus = "Model aligned!"
+                
+                print("✅ Model aligned successfully!")
+                print("Model→Scan Translation: \(modelToScanTransform.columns.3)")
+                
+                // Extract and log additional info if available
+                if let translation = json["translation"] as? [Double] {
+                    print("Translation: [\(translation[0]), \(translation[1]), \(translation[2])]")
+                }
+                if let rotationAngle = json["rotation_angle_degrees"] as? Double {
+                    print("Rotation: \(rotationAngle)°")
+                }
+                
+                // Hide progress after a short delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.isExporting = false
+                    self.alignmentScanData = false
+                }
+            }
+            
+        } catch {
+            await MainActor.run {
+                self.isExporting = false
+                print("❌ Alignment failed: \(error)")
+                
+                // Show error to user
+                self.exportStatus = "Alignment failed: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    private func parseTransformMatrix(from matrixArray: [[Double]]) -> simd_float4x4 {
+        // Server sends column-major format (perfect for simd_float4x4)
+        // Convert Double to Float for simd_float4x4
+        let col0 = SIMD4<Float>(Float(matrixArray[0][0]), Float(matrixArray[0][1]), Float(matrixArray[0][2]), Float(matrixArray[0][3]))
+        let col1 = SIMD4<Float>(Float(matrixArray[1][0]), Float(matrixArray[1][1]), Float(matrixArray[1][2]), Float(matrixArray[1][3]))
+        let col2 = SIMD4<Float>(Float(matrixArray[2][0]), Float(matrixArray[2][1]), Float(matrixArray[2][2]), Float(matrixArray[2][3]))
+        let col3 = SIMD4<Float>(Float(matrixArray[3][0]), Float(matrixArray[3][1]), Float(matrixArray[3][2]), Float(matrixArray[3][3]))
+        
+        return simd_float4x4(columns: (col0, col1, col2, col3))
     }
 }
 

@@ -100,7 +100,7 @@ final class CaptureSession: NSObject, ObservableObject {
             progress(0.0, "Processing \(totalAnchors) mesh tiles...")
             
             for (index, anchor) in self.meshAnchors.enumerated() {
-                let mdlMesh = self.convertARMeshToMDLMesh(anchor.geometry, transform: anchor.transform)
+                let mdlMesh = self.convertARMeshToMDLMesh(anchor.geometry, transform: anchor.transform, decimationFactor: 3.0)
                 mdlAsset.add(mdlMesh)
                 
                 let currentProgress = Double(index + 1) / Double(totalAnchors) * 0.8 // 80% for processing
@@ -137,7 +137,7 @@ final class CaptureSession: NSObject, ObservableObject {
         }
     }
     
-    private func convertARMeshToMDLMesh(_ geometry: ARMeshGeometry, transform: simd_float4x4) -> MDLMesh {
+    private func convertARMeshToMDLMesh(_ geometry: ARMeshGeometry, transform: simd_float4x4, decimationFactor: Float = 1.0) -> MDLMesh {
         let vertices = geometry.vertices
         let faces = geometry.faces
         
@@ -167,10 +167,6 @@ final class CaptureSession: NSObject, ObservableObject {
             transformedVertices.append(SIMD3<Float>(worldVertex4.x, worldVertex4.y, worldVertex4.z))
         }
         
-        // Create vertex buffer with transformed data
-        let vertexData = Data(bytes: transformedVertices, count: MemoryLayout<SIMD3<Float>>.stride * vertexCount)
-        let mdlVertexBuffer = allocator.newBuffer(with: vertexData, type: .vertex)
-        
         // Create index buffer
         // ARMeshGeometry uses specific index types - need to read correctly
         let indexCount = faces.count * faces.indexCountPerPrimitive
@@ -193,13 +189,27 @@ final class CaptureSession: NSObject, ObservableObject {
             }
         }
         
-        let indexData = Data(bytes: indices, count: indices.count * MemoryLayout<UInt32>.size)
+        // Apply decimation if requested
+        var finalVertices = transformedVertices
+        var finalIndices = indices
+        
+        if decimationFactor > 1.0 {
+            let decimated = decimateMesh(vertices: transformedVertices, indices: indices, factor: decimationFactor)
+            finalVertices = decimated.vertices
+            finalIndices = decimated.indices
+        }
+        
+        // Create vertex buffer with final data
+        let finalVertexData = Data(bytes: finalVertices, count: MemoryLayout<SIMD3<Float>>.stride * finalVertices.count)
+        let finalMdlVertexBuffer = allocator.newBuffer(with: finalVertexData, type: .vertex)
+        
+        let indexData = Data(bytes: finalIndices, count: finalIndices.count * MemoryLayout<UInt32>.size)
         let mdlIndexBuffer = allocator.newBuffer(with: indexData, type: .index)
         
         // Create submesh
         let submesh = MDLSubmesh(
             indexBuffer: mdlIndexBuffer,
-            indexCount: indexCount,
+            indexCount: finalIndices.count,
             indexType: .uInt32,
             geometryType: .triangles,
             material: nil
@@ -217,13 +227,65 @@ final class CaptureSession: NSObject, ObservableObject {
         
         // Create MDL mesh
         let mdlMesh = MDLMesh(
-            vertexBuffer: mdlVertexBuffer,
-            vertexCount: vertexCount,
+            vertexBuffer: finalMdlVertexBuffer,
+            vertexCount: finalVertices.count,
             descriptor: vertexDescriptor,
             submeshes: [submesh]
         )
         
         return mdlMesh
+    }
+    
+    // MARK: - Mesh Decimation
+    
+    private func decimateMesh(vertices: [SIMD3<Float>], indices: [UInt32], factor: Float) -> (vertices: [SIMD3<Float>], indices: [UInt32]) {
+        // Simple grid-based decimation
+        // Group vertices into voxel grid and merge nearby vertices
+        let voxelSize = 0.01 * factor // Larger voxel = more decimation (in meters)
+        
+        var voxelMap: [SIMD3<Int>: UInt32] = [:]
+        var newVertices: [SIMD3<Float>] = []
+        var vertexMapping: [UInt32: UInt32] = [:]
+        
+        // Process each vertex
+        for (oldIndex, vertex) in vertices.enumerated() {
+            // Compute voxel grid coordinate
+            let voxelKey = SIMD3<Int>(
+                Int(vertex.x / voxelSize),
+                Int(vertex.y / voxelSize),
+                Int(vertex.z / voxelSize)
+            )
+            
+            if let existingIndex = voxelMap[voxelKey] {
+                // Reuse existing vertex in this voxel
+                vertexMapping[UInt32(oldIndex)] = existingIndex
+            } else {
+                // Create new vertex
+                let newIndex = UInt32(newVertices.count)
+                newVertices.append(vertex)
+                voxelMap[voxelKey] = newIndex
+                vertexMapping[UInt32(oldIndex)] = newIndex
+            }
+        }
+        
+        // Remap indices and remove degenerate triangles
+        var newIndices: [UInt32] = []
+        let triangleCount = indices.count / 3
+        
+        for i in 0..<triangleCount {
+            let i0 = vertexMapping[indices[i * 3]] ?? 0
+            let i1 = vertexMapping[indices[i * 3 + 1]] ?? 0
+            let i2 = vertexMapping[indices[i * 3 + 2]] ?? 0
+            
+            // Skip degenerate triangles (all vertices collapsed to same point)
+            if i0 != i1 && i1 != i2 && i0 != i2 {
+                newIndices.append(i0)
+                newIndices.append(i1)
+                newIndices.append(i2)
+            }
+        }
+        
+        return (newVertices, newIndices)
     }
 }
 
