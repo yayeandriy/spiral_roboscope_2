@@ -88,3 +88,5 @@ For production use, enhance:
 - No bold typography (per project constitution)
 - Liquid glass UI elements
 - Minimal, functional interface
+
+See `roboscope2/LIQUID_GLASS_GUIDE.md` for the precise implementation of Liquid Glass with iOS-version-aware helpers and usage examples.
