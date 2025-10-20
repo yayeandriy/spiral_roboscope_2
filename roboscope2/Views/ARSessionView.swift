@@ -100,7 +100,6 @@ struct ARSessionView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: session.sessionType.icon)
-                    .foregroundColor(.blue)
                 
                 Text(session.sessionType.displayName)
                     .font(.headline)
@@ -115,11 +114,9 @@ struct ARSessionView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Markers")
                         .font(.caption)
-                        .foregroundColor(.secondary)
                     Text("\(markerService.markers.count)")
                         .font(.title2)
                         .fontWeight(.bold)
-                        .foregroundColor(.blue)
                 }
                 Spacer()
             }

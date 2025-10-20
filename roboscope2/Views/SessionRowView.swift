@@ -32,11 +32,9 @@ struct SessionRowView: View {
                     if let space = associatedSpace {
                         Text(space.name)
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
                     } else {
                         Text("Space: \(session.spaceId.uuidString.prefix(8))...")
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 
@@ -53,7 +51,6 @@ struct SessionRowView: View {
                             .foregroundColor(.green)
                         Text("Started: \(startedAt, formatter: dateFormatter)")
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 
@@ -63,7 +60,6 @@ struct SessionRowView: View {
                             .foregroundColor(.blue)
                         Text("Completed: \(completedAt, formatter: dateFormatter)")
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 
@@ -73,7 +69,6 @@ struct SessionRowView: View {
                             .foregroundColor(.orange)
                         Text("Duration: \(formatDuration(duration))")
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 
@@ -83,11 +78,9 @@ struct SessionRowView: View {
                     if let createdAt = session.createdAt {
                         Text("Created: \(createdAt, formatter: dateFormatter)")
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     } else {
                         Text("Created: Unknown")
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
             }

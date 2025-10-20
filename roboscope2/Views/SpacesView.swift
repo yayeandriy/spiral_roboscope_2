@@ -9,7 +9,6 @@ import SwiftUI
 
 struct SpacesView: View {
     @StateObject private var spaceService = SpaceService.shared
-    @State private var searchText = ""
     @State private var showingCreateSheet = false
     
     var body: some View {
@@ -38,7 +37,7 @@ struct SpacesView: View {
                     .disabled(spaceService.isLoading)
                 }
             }
-            .searchable(text: $searchText, prompt: "Search spaces")
+            // Search removed for simplified UI
             .refreshable {
                 await refreshSpaces()
             }
@@ -52,7 +51,7 @@ struct SpacesView: View {
     
     private var spacesList: some View {
         List {
-            ForEach(filteredSpaces) { space in
+            ForEach(spaceService.spaces) { space in
                 SpaceRowView(space: space)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
@@ -94,16 +93,7 @@ struct SpacesView: View {
     
     // MARK: - Computed Properties
     
-    private var filteredSpaces: [Space] {
-        if searchText.isEmpty {
-            return spaceService.spaces
-        }
-        return spaceService.spaces.filter { space in
-            space.name.localizedCaseInsensitiveContains(searchText) ||
-            space.key.localizedCaseInsensitiveContains(searchText) ||
-            (space.description?.localizedCaseInsensitiveContains(searchText) ?? false)
-        }
-    }
+    // Search removed
     
     // MARK: - Actions
     

@@ -8,32 +8,33 @@
 import SwiftUI
 
 struct MainTabView: View {
+    // Default to Sessions tab
     @State private var selectedTab = 0
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            // AR Scanner Tab
-            ContentView()
-                .tabItem {
-                    Label("Scanner", systemImage: "viewfinder")
-                }
-                .tag(0)
-            
-            // Sessions Tab
+            // Sessions Tab (first)
             SessionsView()
                 .tabItem {
                     Label("Sessions", systemImage: "list.clipboard")
                 }
-                .tag(1)
-            
-            // Spaces Tab (future)
+                .tag(0)
+
+            // Spaces Tab (second)
             SpacesView()
                 .tabItem {
                     Label("Spaces", systemImage: "cube")
                 }
+                .tag(1)
+
+            // Scanner Tab (just before settings)
+            ContentView()
+                .tabItem {
+                    Label("Scanner", systemImage: "viewfinder")
+                }
                 .tag(2)
-            
-            // Settings Tab (future)
+
+            // Settings Tab
             SettingsPlaceholderView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")

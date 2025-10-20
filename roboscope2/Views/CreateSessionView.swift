@@ -32,26 +32,22 @@ struct CreateSessionView: View {
                     } label: {
                         HStack {
                             Text("Space")
-                                .foregroundColor(.primary)
                             
                             Spacer()
                             
                             if let selectedSpace = selectedSpace {
                                 VStack(alignment: .trailing) {
                                     Text(selectedSpace.name)
-                                        .foregroundColor(.primary)
                                     Text(selectedSpace.key)
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        
                                 }
                             } else {
                                 Text("Select Space")
-                                    .foregroundColor(.secondary)
                             }
                             
                             Image(systemName: "chevron.right")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
                         }
                     }
                 } header: {
@@ -60,22 +56,22 @@ struct CreateSessionView: View {
                     Text("Choose the space where this work session will take place")
                 }
                 
-                // Session Type
-                Section {
-                    Picker("Session Type", selection: $sessionType) {
-                        ForEach(WorkSessionType.allCases, id: \.self) { type in
+                // Session Type - separate rows
+                Section("Session Type") {
+                    ForEach(WorkSessionType.allCases, id: \.self) { type in
+                        Button {
+                            sessionType = type
+                        } label: {
                             HStack {
                                 Image(systemName: type.icon)
                                 Text(type.displayName)
+                                Spacer()
+                                if sessionType == type {
+                                    Image(systemName: "checkmark")
+                                }
                             }
-                            .tag(type)
                         }
                     }
-                    .pickerStyle(SegmentedPickerStyle())
-                } header: {
-                    Text("Session Type")
-                } footer: {
-                    Text(sessionTypeDescription)
                 }
                 
                 // Session Options
@@ -97,7 +93,6 @@ struct CreateSessionView: View {
                         Spacer()
                         Text("This will be the initial status")
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 } header: {
                     Text("Initial Status")

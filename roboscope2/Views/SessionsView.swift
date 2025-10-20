@@ -15,20 +15,12 @@ struct SessionsView: View {
     @State private var showingEditSheet = false
     @State private var showingDeleteAlert = false
     @State private var sessionToDelete: WorkSession?
-    @State private var searchText = ""
-    @State private var filterStatus: WorkSessionStatus?
-    @State private var filterType: WorkSessionType?
+    // Search and filters removed for a simpler UI
     @State private var arSession: WorkSession?
     
     var body: some View {
         NavigationView {
-            VStack {
-                // Filter Controls
-                filterControls
-                
-                // Sessions List
-                sessionsList
-            }
+            VStack { sessionsList }
             .navigationTitle("Work Sessions")
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -47,7 +39,7 @@ struct SessionsView: View {
                     }
                 }
             }
-            .searchable(text: $searchText, prompt: "Search sessions...")
+            // Search removed
             .sheet(isPresented: $showingCreateSheet) {
                 CreateSessionView { newSession in
                     // Session created, refresh list
@@ -86,51 +78,7 @@ struct SessionsView: View {
         }
     }
     
-    // MARK: - Filter Controls
-    
-    private var filterControls: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                // Status Filter
-                Menu {
-                    Button("All Statuses") {
-                        filterStatus = nil
-                    }
-                    
-                    ForEach(WorkSessionStatus.allCases, id: \.self) { status in
-                        Button(status.displayName) {
-                            filterStatus = status
-                        }
-                    }
-                } label: {
-                    FilterChip(
-                        title: filterStatus?.displayName ?? "All Statuses",
-                        isSelected: filterStatus != nil
-                    )
-                }
-                
-                // Type Filter
-                Menu {
-                    Button("All Types") {
-                        filterType = nil
-                    }
-                    
-                    ForEach(WorkSessionType.allCases, id: \.self) { type in
-                        Button(type.displayName) {
-                            filterType = type
-                        }
-                    }
-                } label: {
-                    FilterChip(
-                        title: filterType?.displayName ?? "All Types",
-                        isSelected: filterType != nil
-                    )
-                }
-            }
-            .padding(.horizontal)
-        }
-        .padding(.vertical, 8)
-    }
+    // Filters removed
     
     // MARK: - Sessions List
     
@@ -139,11 +87,11 @@ struct SessionsView: View {
             if workSessionService.isLoading && workSessionService.workSessions.isEmpty {
                 ProgressView("Loading sessions...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredSessions.isEmpty {
+            } else if allSessions.isEmpty {
                 emptyStateView
             } else {
                 List {
-                    ForEach(filteredSessions) { session in
+                    ForEach(allSessions) { session in
                         SessionRowView(session: session) {
                             // Start AR Session
                             startARSession(session)
@@ -221,35 +169,11 @@ struct SessionsView: View {
     
     // MARK: - Computed Properties
     
-    private var filteredSessions: [WorkSession] {
-        var sessions = workSessionService.workSessions
-        
-        // Apply status filter
-        if let filterStatus = filterStatus {
-            sessions = sessions.filter { $0.status == filterStatus }
-        }
-        
-        // Apply type filter
-        if let filterType = filterType {
-            sessions = sessions.filter { $0.sessionType == filterType }
-        }
-        
-        // Apply search filter
-        if !searchText.isEmpty {
-            sessions = sessions.filter { session in
-                // Search by space name if we have space data
-                if let space = spaceService.spaces.first(where: { $0.id == session.spaceId }) {
-                    return space.name.localizedCaseInsensitiveContains(searchText) ||
-                           space.key.localizedCaseInsensitiveContains(searchText)
-                }
-                return false
-            }
-        }
-        
+    private var allSessions: [WorkSession] {
         // Sort by creation date (newest first)
-        return sessions.sorted { 
-            guard let date0 = $0.createdAt, let date1 = $1.createdAt else { 
-                return $0.createdAt != nil // Sessions with dates come first
+        return workSessionService.workSessions.sorted {
+            guard let date0 = $0.createdAt, let date1 = $1.createdAt else {
+                return $0.createdAt != nil
             }
             return date0 > date1
         }
@@ -287,23 +211,7 @@ struct SessionsView: View {
     }
 }
 
-// MARK: - Supporting Views
-
-struct FilterChip: View {
-    let title: String
-    let isSelected: Bool
-    
-    var body: some View {
-        Text(title)
-            .font(.caption)
-            .fontWeight(.medium)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(isSelected ? Color.blue : Color(.systemGray6))
-            .foregroundColor(isSelected ? .white : .primary)
-            .cornerRadius(16)
-    }
-}
+// Supporting filter chip removed
 
 // MARK: - Preview
 

@@ -51,9 +51,9 @@ enum WorkSessionType: String, Codable, CaseIterable {
     
     var icon: String {
         switch self {
-        case .inspection: return "magnifyingglass"
-        case .repair: return "wrench.and.screwdriver.fill"
-        case .other: return "ellipsis.circle"
+        case .inspection: return "doc.text.magnifyingglass"
+        case .repair: return "hammer"
+        case .other: return "sparkles"
         }
     }
 }

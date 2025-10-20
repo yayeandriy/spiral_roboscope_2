@@ -39,7 +39,6 @@ struct EditSessionView: View {
                         Spacer()
                         Text(session.id.uuidString.prefix(8) + "...")
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                     
                     HStack {
@@ -48,11 +47,9 @@ struct EditSessionView: View {
                         if let createdAt = session.createdAt {
                             Text(createdAt, formatter: dateTimeFormatter)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
                         } else {
                             Text("Unknown")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
                         }
                     }
                     
@@ -61,7 +58,6 @@ struct EditSessionView: View {
                         Spacer()
                         Text("\(session.version)")
                             .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 } header: {
                     Text("Session Information")
@@ -88,32 +84,32 @@ struct EditSessionView: View {
                                 }
                             } else {
                                 Text("Loading...")
-                                    .foregroundColor(.secondary)
                             }
                             
                             Image(systemName: "chevron.right")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
                         }
                     }
                 } header: {
                     Text("Location")
                 }
                 
-                // Session Type
-                Section {
-                    Picker("Session Type", selection: $sessionType) {
-                        ForEach(WorkSessionType.allCases, id: \.self) { type in
+                // Session Type - separate rows
+                Section("Session Type") {
+                    ForEach(WorkSessionType.allCases, id: \.self) { type in
+                        Button {
+                            sessionType = type
+                        } label: {
                             HStack {
                                 Image(systemName: type.icon)
                                 Text(type.displayName)
+                                Spacer()
+                                if sessionType == type {
+                                    Image(systemName: "checkmark")
+                                }
                             }
-                            .tag(type)
                         }
                     }
-                    .pickerStyle(SegmentedPickerStyle())
-                } header: {
-                    Text("Session Type")
                 }
                 
                 // Status
@@ -141,7 +137,6 @@ struct EditSessionView: View {
                             Text("Started At")
                             Spacer()
                             Text(startedAt, formatter: dateTimeFormatter)
-                                .foregroundColor(.secondary)
                         }
                     }
                     
@@ -150,7 +145,6 @@ struct EditSessionView: View {
                             Text("Completed At")
                             Spacer()
                             Text(completedAt, formatter: dateTimeFormatter)
-                                .foregroundColor(.secondary)
                         }
                     }
                     
@@ -159,7 +153,6 @@ struct EditSessionView: View {
                             Text("Duration")
                             Spacer()
                             Text(formatDuration(duration))
-                                .foregroundColor(.secondary)
                         }
                     }
                 } header: {
@@ -174,7 +167,6 @@ struct EditSessionView: View {
                         } label: {
                             HStack {
                                 Image(systemName: "play.circle.fill")
-                                    .foregroundColor(.green)
                                 Text("Start Session")
                             }
                         }
@@ -186,7 +178,6 @@ struct EditSessionView: View {
                         } label: {
                             HStack {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.blue)
                                 Text("Complete Session")
                             }
                         }
@@ -198,7 +189,6 @@ struct EditSessionView: View {
                         } label: {
                             HStack {
                                 Image(systemName: "archivebox.fill")
-                                    .foregroundColor(.purple)
                                 Text("Archive Session")
                             }
                         }
