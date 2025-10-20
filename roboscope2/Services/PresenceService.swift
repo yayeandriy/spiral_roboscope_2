@@ -125,7 +125,7 @@ final class PresenceService: ObservableObject {
         let heartbeat = PresenceHeartbeat(userId: userId)
         
         try await networkManager.post(
-            endpoint: "/presence/\(sessionId.uuidString)/heartbeat",
+            endpoint: "/presence/\(sessionId.uuidString)",
             body: heartbeat
         )
     }

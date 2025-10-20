@@ -16,8 +16,9 @@ struct ARSessionView: View {
     @StateObject private var captureSession = CaptureSession()
     @StateObject private var markerService = SpatialMarkerService()
     @StateObject private var workSessionService = WorkSessionService.shared
-    @StateObject private var presenceService = PresenceService.shared
-    @StateObject private var lockService = LockService.shared
+    // Realtime features temporarily disabled
+    // @StateObject private var presenceService = PresenceService.shared
+    // @StateObject private var lockService = LockService.shared
     
     @State private var arView: ARView?
     @State private var isSessionActive = false
@@ -112,18 +113,6 @@ struct ARSessionView: View {
             
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Active Users")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text("\(presenceService.activeUsers.count)")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.green)
-                }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: 4) {
                     Text("Markers")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -132,6 +121,7 @@ struct ARSessionView: View {
                         .fontWeight(.bold)
                         .foregroundColor(.blue)
                 }
+                Spacer()
             }
         }
         .padding()
@@ -157,32 +147,7 @@ struct ARSessionView: View {
             
             Spacer()
             
-            // Lock Status
-            if lockService.holdsLock(sessionId: session.id) {
-                VStack(spacing: 4) {
-                    Image(systemName: "lock.fill")
-                        .font(.title)
-                        .foregroundColor(.green)
-                    Text("Locked")
-                        .font(.caption)
-                        .foregroundColor(.green)
-                }
-            } else {
-                Button {
-                    Task {
-                        await acquireLock()
-                    }
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "lock.open")
-                            .font(.title)
-                        Text("Lock")
-                            .font(.caption)
-                    }
-                }
-                .foregroundColor(.orange)
-            }
-            
+            // Lock controls removed while realtime features are disabled
             Spacer()
             
             // Clear Markers Button
@@ -208,44 +173,13 @@ struct ARSessionView: View {
         // Start AR capture
         captureSession.start()
         
-        // Join presence session
-        Task {
-            do {
-                try await presenceService.joinSession(session.id)
-                
-                // Try to acquire lock for collaborative editing
-                await acquireLock()
-                
-                isSessionActive = true
-            } catch {
-                errorMessage = "Failed to join session: \(error.localizedDescription)"
-            }
-        }
+        // Realtime features (presence/locks) are disabled for now
+        isSessionActive = true
     }
     
     private func endARSession() {
-        // Leave presence session
-        presenceService.leaveCurrentSession()
-        
-        // Release lock if we have it
-        if lockService.holdsLock(sessionId: session.id) {
-            Task {
-                try? await lockService.releaseLock(sessionId: session.id)
-            }
-        }
-        
+        // Realtime features disabled: no presence leave / lock release
         isSessionActive = false
-    }
-    
-    private func acquireLock() async {
-        do {
-            let acquired = try await lockService.acquireLock(sessionId: session.id)
-            if !acquired {
-                errorMessage = "Another user is currently editing this session"
-            }
-        } catch {
-            errorMessage = "Failed to acquire lock: \(error.localizedDescription)"
-        }
     }
     
     private func addMarkerAtCenter() {
