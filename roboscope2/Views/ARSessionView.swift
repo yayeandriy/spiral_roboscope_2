@@ -11,166 +11,150 @@ import ARKit
 
 struct ARSessionView: View {
     let session: WorkSession
-    
     @Environment(\.dismiss) private var dismiss
     @StateObject private var captureSession = CaptureSession()
     @StateObject private var markerService = SpatialMarkerService()
     @StateObject private var workSessionService = WorkSessionService.shared
-    // Realtime features temporarily disabled
-    // @StateObject private var presenceService = PresenceService.shared
-    // @StateObject private var lockService = LockService.shared
-    
+
     @State private var arView: ARView?
     @State private var isSessionActive = false
     @State private var showingEndSessionAlert = false
     @State private var errorMessage: String?
-    
+
+    // Match scanning interactions
+    @State private var isHoldingScreen = false
+    @State private var isTwoFingers = false
+    @State private var moveUpdateTimer: Timer?
+    @State private var markerTrackingTimer: Timer?
+
     var body: some View {
-        NavigationView {
-            ZStack {
-                // AR View
-                ARViewContainer(
-                    session: captureSession.session,
-                    arView: $arView
-                )
-                .edgesIgnoringSafeArea(.all)
-                .onAppear {
-                    startARSession()
+        ZStack {
+            // AR View
+            ARViewContainer(
+                session: captureSession.session,
+                arView: $arView
+            )
+            .edgesIgnoringSafeArea(.all)
+            .onAppear {
+                startARSession()
+                // Start tracking markers continuously
+                markerTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                    checkMarkersInTarget()
                 }
-                .onDisappear {
-                    endARSession()
-                }
-                .onChange(of: arView) { newValue in
-                    markerService.arView = newValue
-                }
-                
-                // Session Info Overlay
-                VStack {
-                    sessionInfoCard
-                    
+            }
+            .onDisappear {
+                markerTrackingTimer?.invalidate()
+                markerTrackingTimer = nil
+                stopMovingMarker()
+                endARSession()
+            }
+            .onChange(of: arView) { newValue in
+                markerService.arView = newValue
+            }
+            // Gestures similar to Scan screen
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        if !isHoldingScreen { isHoldingScreen = true }
+                    }
+                    .onEnded { _ in
+                        isHoldingScreen = false
+                        isTwoFingers = false
+                        stopMovingMarker()
+                    }
+            )
+            .simultaneousGesture(
+                MagnificationGesture(minimumScaleDelta: 0)
+                    .onChanged { _ in
+                        if !isTwoFingers {
+                            isTwoFingers = true
+                            if markerService.selectedMarkerID != nil {
+                                startMovingMarker()
+                            }
+                        }
+                    }
+                    .onEnded { _ in
+                        isTwoFingers = false
+                        stopMovingMarker()
+                    }
+            )
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.3)
+                    .onEnded { _ in
+                        selectMarkerInTarget()
+                    }
+            )
+
+            // Target overlay (same as Scan)
+            TargetOverlayView()
+                .allowsHitTesting(false)
+
+            // Top controls styled like Scan
+            VStack {
+                HStack(spacing: 20) {
+                    Button("End Session") { showingEndSessionAlert = true }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .lgCapsule(tint: .red)
                     Spacer()
-                    
-                    // Controls
-                    sessionControls
+                    Button("Done") { dismiss() }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .lgCapsule(tint: .white)
                 }
-                .padding()
+                .padding(.horizontal, 20)
+                .padding(.top, 60)
+                Spacer()
             }
-            .navigationTitle("AR Session")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("End Session") {
-                        showingEndSessionAlert = true
+
+            // Bottom controls styled like Scan
+            VStack {
+                Spacer()
+                HStack(spacing: 20) {
+                    Button { placeMarker() } label: {
+                        Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
+                            .font(.system(size: 36))
+                            .frame(width: 80, height: 80)
                     }
-                    .foregroundColor(.red)
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
+                    .buttonStyle(.plain)
+                    .lgCircle(tint: .white)
+
+                    Spacer()
+
+                    Button { clearAllMarkers() } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 24))
+                            .frame(width: 70, height: 70)
                     }
+                    .buttonStyle(.plain)
+                    .lgCircle(tint: .red)
                 }
+                .padding(.horizontal, 30)
+                .padding(.bottom, 50)
             }
-            .alert("End Session", isPresented: $showingEndSessionAlert) {
-                Button("End Session", role: .destructive) {
-                    Task {
-                        await completeSession()
-                    }
-                }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("Are you sure you want to end this session? This will mark it as completed.")
+        }
+        .alert("End Session", isPresented: $showingEndSessionAlert) {
+            Button("End Session", role: .destructive) {
+                Task { await completeSession() }
             }
-            .alert("Error", isPresented: .constant(errorMessage != nil)) {
-                Button("OK") {
-                    errorMessage = nil
-                }
-            } message: {
-                if let errorMessage = errorMessage {
-                    Text(errorMessage)
-                }
-            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Are you sure you want to end this session? This will mark it as completed.")
+        }
+        .alert("Error", isPresented: .constant(errorMessage != nil)) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            if let errorMessage = errorMessage { Text(errorMessage) }
         }
         .navigationBarBackButtonHidden()
-    }
-    
-    // MARK: - Session Info Card
-    
-    private var sessionInfoCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: session.sessionType.icon)
-                
-                Text(session.sessionType.displayName)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                StatusBadge(status: session.status)
-            }
-            
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Markers")
-                        .font(.caption)
-                    Text("\(markerService.markers.count)")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                }
-                Spacer()
-            }
-        }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-    }
-    
-    // MARK: - Session Controls
-    
-    private var sessionControls: some View {
-        HStack(spacing: 16) {
-            // Add Marker Button
-            Button {
-                addMarkerAtCenter()
-            } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title)
-                    Text("Add Marker")
-                        .font(.caption)
-                }
-            }
-            .foregroundColor(.blue)
-            
-            Spacer()
-            
-            // Lock controls removed while realtime features are disabled
-            Spacer()
-            
-            // Clear Markers Button
-            Button {
-                clearAllMarkers()
-            } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: "trash.circle.fill")
-                        .font(.title)
-                    Text("Clear")
-                        .font(.caption)
-                }
-            }
-            .foregroundColor(.red)
-        }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
     
     // MARK: - Actions
     
     private func startARSession() {
-        // Start AR capture
         captureSession.start()
-        
-        // Realtime features (presence/locks) are disabled for now
         isSessionActive = true
     }
     
@@ -179,55 +163,55 @@ struct ARSessionView: View {
         isSessionActive = false
     }
     
-    private func addMarkerAtCenter() {
+    // MARK: - Marker helpers (aligned with Scan view)
+    private func placeMarker() {
         guard let arView = arView else { return }
-        
-        // Get screen center
-        let screenCenter = CGPoint(
-            x: arView.bounds.midX,
-            y: arView.bounds.midY
-        )
-        
-        // Raycast from center
-        let results = arView.raycast(
-            from: screenCenter,
-            allowing: .estimatedPlane,
-            alignment: .any
-        )
-        
-        guard let result = results.first else {
-            errorMessage = "No surface detected. Point at a surface and try again."
-            return
-        }
-        
-        // Create marker at the hit position
-        let position = SIMD3<Float>(
-            result.worldTransform.columns.3.x,
-            result.worldTransform.columns.3.y,
-            result.worldTransform.columns.3.z
-        )
-        
-        // Create a simple square marker
-        let size: Float = 0.1
-        let points = [
-            SIMD3<Float>(position.x - size/2, position.y, position.z - size/2),
-            SIMD3<Float>(position.x + size/2, position.y, position.z - size/2),
-            SIMD3<Float>(position.x + size/2, position.y, position.z + size/2),
-            SIMD3<Float>(position.x - size/2, position.y, position.z + size/2)
+        let screenSize = arView.bounds.size
+        let centerX = screenSize.width / 2
+        let targetSize: CGFloat = 150
+        let targetY: CGFloat = 200
+        let half = targetSize / 2
+        let corners = [
+            CGPoint(x: centerX - half, y: targetY - half),
+            CGPoint(x: centerX + half, y: targetY - half),
+            CGPoint(x: centerX + half, y: targetY + half),
+            CGPoint(x: centerX - half, y: targetY + half)
         ]
-        
-        markerService.placeMarker(targetCorners: [screenCenter, screenCenter, screenCenter, screenCenter])
-        
-        // TODO: Sync marker to server
-        Task {
-            // This would create the marker on the server
-            // let marker = try await MarkerService.shared.createMarkerFromARPoints(
-            //     workSessionId: session.id,
-            //     points: points,
-            //     label: "Marker \(markerService.markers.count + 1)",
-            //     color: "#FF0000"
-            // )
+        markerService.placeMarker(targetCorners: corners)
+    }
+    
+    private func getTargetRect() -> CGRect {
+        guard let arView = arView else { return .zero }
+        let screenSize = arView.bounds.size
+        let centerX = screenSize.width / 2
+        let targetSize: CGFloat = 150
+        let targetY: CGFloat = 200
+        let expanded = targetSize * 1.1
+        return CGRect(x: centerX - expanded/2, y: targetY - expanded/2, width: expanded, height: expanded)
+    }
+    
+    private func checkMarkersInTarget() {
+        let rect = getTargetRect()
+        markerService.updateMarkersInTarget(targetRect: rect)
+    }
+    
+    private func selectMarkerInTarget() {
+        let rect = getTargetRect()
+        markerService.selectMarkerInTarget(targetRect: rect)
+    }
+    
+    private func startMovingMarker() {
+        if markerService.startMovingSelectedMarker() {
+            moveUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { _ in
+                markerService.updateMovingMarker()
+            }
         }
+    }
+    
+    private func stopMovingMarker() {
+        moveUpdateTimer?.invalidate()
+        moveUpdateTimer = nil
+        markerService.stopMovingMarker()
     }
     
     private func clearAllMarkers() {
