@@ -326,3 +326,61 @@ extension CaptureSession: ARSessionDelegate {
         }
     }
 }
+
+// MARK: - Storage Upload Integration
+
+extension CaptureSession {
+    
+    /// Export mesh data and upload to Spiral Storage
+    /// - Parameters:
+    ///   - sessionId: Work session ID for organized storage
+    ///   - spaceId: Space ID for organized storage
+    ///   - progress: Progress callback with (progress: 0-1, status: String)
+    ///   - completion: Completion callback with (localURL: URL?, cloudURL: String?)
+    func exportAndUploadMeshData(
+        sessionId: UUID?,
+        spaceId: UUID?,
+        progress: @escaping (Double, String) -> Void,
+        completion: @escaping (URL?, String?) -> Void
+    ) {
+        // First export locally
+        exportMeshData(progress: { exportProgress, status in
+            // Export takes 0-80% of total progress
+            progress(exportProgress * 0.8, status)
+        }, completion: { [weak self] localURL in
+            guard let self = self, let localURL = localURL else {
+                completion(nil, nil)
+                return
+            }
+            
+            // Then upload to cloud (20-100% of progress)
+            Task {
+                do {
+                    progress(0.8, "Uploading to cloud...")
+                    
+                    let storageService = SpiralStorageService.shared
+                    let cloudURL = try await storageService.uploadFileWithRetry(
+                        fileURL: localURL,
+                        destinationPath: SpiralStorageService.generatePath(
+                            for: .scan,
+                            fileName: localURL.lastPathComponent,
+                            sessionId: sessionId,
+                            spaceId: spaceId
+                        )
+                    ) { uploadProgress in
+                        let totalProgress = 0.8 + (uploadProgress * 0.2)
+                        progress(totalProgress, "Uploading... \(Int(uploadProgress * 100))%")
+                    }
+                    
+                    progress(1.0, "Upload complete!")
+                    completion(localURL, cloudURL)
+                    
+                } catch {
+                    print("[CaptureSession] Upload failed: \(error)")
+                    // Still return local URL even if upload fails
+                    completion(localURL, nil)
+                }
+            }
+        })
+    }
+}

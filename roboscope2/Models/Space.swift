@@ -18,6 +18,7 @@ struct Space: Codable, Identifiable, Hashable {
     let modelGlbUrl: String?
     let modelUsdcUrl: String?
     let previewUrl: String?
+    let scanUrl: String?
     let meta: [String: AnyCodable]?
     let createdAt: Date?
     let updatedAt: Date?
@@ -27,6 +28,7 @@ struct Space: Codable, Identifiable, Hashable {
         case modelGlbUrl = "model_glb_url"
         case modelUsdcUrl = "model_usdc_url"
         case previewUrl = "preview_url"
+        case scanUrl = "scan_url"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -88,6 +90,7 @@ struct UpdateSpace: Codable {
     let modelGlbUrl: String?
     let modelUsdcUrl: String?
     let previewUrl: String?
+    let scanUrl: String?
     let meta: [String: AnyCodable]?
     
     enum CodingKeys: String, CodingKey {
@@ -95,6 +98,7 @@ struct UpdateSpace: Codable {
         case modelGlbUrl = "model_glb_url"
         case modelUsdcUrl = "model_usdc_url"
         case previewUrl = "preview_url"
+        case scanUrl = "scan_url"
     }
     
     init(
@@ -104,6 +108,7 @@ struct UpdateSpace: Codable {
         modelGlbUrl: String? = nil,
         modelUsdcUrl: String? = nil,
         previewUrl: String? = nil,
+        scanUrl: String? = nil,
         meta: [String: Any]? = nil
     ) {
         self.key = key
@@ -112,6 +117,7 @@ struct UpdateSpace: Codable {
         self.modelGlbUrl = modelGlbUrl
         self.modelUsdcUrl = modelUsdcUrl
         self.previewUrl = previewUrl
+        self.scanUrl = scanUrl
         self.meta = meta?.mapValues { AnyCodable($0) }
     }
 }

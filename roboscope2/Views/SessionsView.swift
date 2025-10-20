@@ -23,20 +23,17 @@ struct SessionsView: View {
             VStack { sessionsList }
             .navigationTitle("Work Sessions")
             .toolbar {
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    Button {
-                        Task {
-                            await refreshData()
-                        }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    
-                    Button {
-                        showingCreateSheet = true
-                    } label: {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: { showingCreateSheet = true }) {
                         Image(systemName: "plus")
                     }
+                }
+                
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: { Task { await refreshData() } }) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(workSessionService.isLoading)
                 }
             }
             // Search removed
