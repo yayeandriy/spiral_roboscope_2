@@ -88,6 +88,7 @@ struct ARSessionView: View {
             // Target overlay (same as Scan)
             TargetOverlayView()
                 .allowsHitTesting(false)
+                .zIndex(1)
 
             // Top controls styled like Scan
             VStack {
@@ -105,9 +106,10 @@ struct ARSessionView: View {
                         .lgCapsule(tint: .white)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 60)
+                .padding(.top, 16)
                 Spacer()
             }
+            .zIndex(2)
 
             // Bottom controls styled like Scan
             VStack {
