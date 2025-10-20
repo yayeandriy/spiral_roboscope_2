@@ -238,6 +238,19 @@ final class MarkerService: ObservableObject {
         return try await listMarkers(workSessionId: sessionId)
     }
     
+    /// Get marker count for a session
+    func getMarkerCountForSession(_ sessionId: UUID) async -> Int {
+        do {
+            print("[MarkerService] Fetching markers for session \(sessionId)")
+            let markers = try await getMarkersForSession(sessionId)
+            print("[MarkerService] Got \(markers.count) markers for session \(sessionId)")
+            return markers.count
+        } catch {
+            print("[MarkerService] Error fetching markers for session \(sessionId): \(error)")
+            return 0
+        }
+    }
+    
     /// Create a simple marker with just position and label
     func createSimpleMarker(
         workSessionId: UUID,

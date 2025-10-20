@@ -16,76 +16,42 @@ struct SessionRowView: View {
     let onDelete: (() -> Void)?
     
     @StateObject private var spaceService = SpaceService.shared
+    @StateObject private var markerService = MarkerService.shared
+    @State private var sessionMarkersCount: Int? = nil
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header with type and status
-            HStack {
-                sessionTypeIcon
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(session.sessionType.displayName)
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    
-                    if let space = associatedSpace {
-                        Text(space.name)
-                            .font(.subheadline)
-                    } else {
-                        Text("Space: \(session.spaceId.uuidString.prefix(8))...")
-                            .font(.caption)
-                    }
-                }
-                
+        VStack(alignment: .leading, spacing: 10) {
+            // Top row: status (left) + time ago (right)
+            HStack(alignment: .firstTextBaseline) {
+                Text(session.status.displayName)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(statusColor)
                 Spacer()
-                
-                StatusBadge(status: session.status)
-            }
-            
-            // Session details
-            VStack(alignment: .leading, spacing: 6) {
-                if let startedAt = session.startedAt {
-                    HStack {
-                        Image(systemName: "play.circle")
-                            .foregroundColor(.green)
-                        Text("Started: \(startedAt, formatter: dateFormatter)")
-                            .font(.caption)
-                    }
-                }
-                
-                if let completedAt = session.completedAt {
-                    HStack {
-                        Image(systemName: "checkmark.circle")
-                            .foregroundColor(.blue)
-                        Text("Completed: \(completedAt, formatter: dateFormatter)")
-                            .font(.caption)
-                    }
-                }
-                
-                if let duration = session.duration {
-                    HStack {
-                        Image(systemName: "clock")
-                            .foregroundColor(.orange)
-                        Text("Duration: \(formatDuration(duration))")
-                            .font(.caption)
-                    }
-                }
-                
-                HStack {
-                    Image(systemName: "calendar")
-                        .foregroundColor(.gray)
-                    if let createdAt = session.createdAt {
-                        Text("Created: \(createdAt, formatter: dateFormatter)")
-                            .font(.caption)
-                    } else {
-                        Text("Created: Unknown")
-                            .font(.caption)
-                    }
+                if let timeAgo = timeAgoString {
+                    Text(timeAgo)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
+
+            // Title: Space name (or fallback)
+            Text(spaceName)
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+
+            // Bottom row: session type (left) + markers badge (right)
+            HStack {
+                Text(session.sessionType.displayName.capitalized)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                Spacer()
+                markersBadge
+            }
             
-            // Action buttons
+            // Optional action (Start AR) below, only for active
             if session.status == .active {
                 HStack {
                     Button(action: onStartAR) {
@@ -113,29 +79,16 @@ struct SessionRowView: View {
         )
         .shadow(color: cardShadowColor, radius: 6, x: 0, y: 2)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .task {
+            // Fetch accurate per-session marker count without mutating global markers
+            print("[SessionRow] Fetching markers for session \(session.id)")
+            let count = await markerService.getMarkerCountForSession(session.id)
+            print("[SessionRow] Got count: \(count) for session \(session.id)")
+            sessionMarkersCount = count
+        }
     }
     
     // MARK: - Computed Properties
-    
-    private var sessionTypeIcon: some View {
-        Image(systemName: session.sessionType.icon)
-            .font(.title2)
-            .foregroundColor(iconColor)
-            .frame(width: 32, height: 32)
-            .background(iconColor.opacity(0.1))
-            .cornerRadius(8)
-    }
-    
-    private var iconColor: Color {
-        switch session.sessionType {
-        case .inspection:
-            return .blue
-        case .repair:
-            return .orange
-        case .other:
-            return .gray
-        }
-    }
     
     private var associatedSpace: Space? {
         spaceService.spaces.first { $0.id == session.spaceId }
@@ -149,6 +102,39 @@ struct SessionRowView: View {
         colorScheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.08)
     }
     
+    private var statusColor: Color {
+        switch session.status {
+        case .draft: return .gray
+        case .active: return .green
+        case .done: return .blue
+        case .archived: return .purple
+        }
+    }
+    
+    private var spaceName: String {
+        if let space = associatedSpace { return space.name }
+        return "Space: \(session.spaceId.uuidString.prefix(8))..."
+    }
+    
+    private var markersCount: Int {
+        let count = sessionMarkersCount ?? markerService.markers.filter { $0.workSessionId == session.id }.count
+        print("[SessionRow] Displaying count: \(count) (exact: \(sessionMarkersCount?.description ?? "nil"), filtered: \(markerService.markers.filter { $0.workSessionId == session.id }.count))")
+        return count
+    }
+    
+    private var markersBadge: some View {
+        Text("\(markersCount) markers")
+            .font(.caption)
+            .foregroundColor(.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
+                    .background(Capsule().fill(Color(.systemBackground)))
+            )
+    }
+    
     // MARK: - Formatters
     
     private var dateFormatter: DateFormatter {
@@ -156,6 +142,14 @@ struct SessionRowView: View {
         formatter.dateStyle = .short
         formatter.timeStyle = .short
         return formatter
+    }
+    
+    private var timeAgoString: String? {
+        let ref = session.updatedAt ?? session.startedAt ?? session.createdAt
+        guard let date = ref else { return nil }
+        let fmt = RelativeDateTimeFormatter()
+        fmt.unitsStyle = .full
+        return fmt.localizedString(for: date, relativeTo: Date())
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
