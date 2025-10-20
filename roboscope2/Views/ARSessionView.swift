@@ -26,6 +26,9 @@ struct ARSessionView: View {
     @State private var isTwoFingers = false
     @State private var moveUpdateTimer: Timer?
     @State private var markerTrackingTimer: Timer?
+    // Transform state (for finger-driven move/resize)
+    @State private var currentDrag: CGSize = .zero
+    @State private var currentScale: CGFloat = 1.0
 
     var body: some View {
         ZStack {
@@ -38,9 +41,12 @@ struct ARSessionView: View {
             .onAppear {
                 startARSession()
                 // Start tracking markers continuously
-                markerTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                let tracking = Timer(timeInterval: 0.1, repeats: true) { _ in
+                    // print("[Timer] Marker tracking tick")
                     checkMarkersInTarget()
                 }
+                RunLoop.main.add(tracking, forMode: .common)
+                markerTrackingTimer = tracking
                 // Load persisted markers for this session
                 Task {
                     do {
@@ -63,36 +69,70 @@ struct ARSessionView: View {
             // Gestures similar to Scan screen
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
+                    .onChanged { value in
                         if !isHoldingScreen { isHoldingScreen = true }
-                    }
-                    .onEnded { _ in
-                        isHoldingScreen = false
-                        isTwoFingers = false
-                        stopMovingMarker()
-                    }
-            )
-            .simultaneousGesture(
-                MagnificationGesture(minimumScaleDelta: 0)
-                    .onChanged { _ in
+                        currentDrag = value.translation
                         if !isTwoFingers {
-                            isTwoFingers = true
-                            if markerService.selectedMarkerID != nil {
-                                startMovingMarker()
+                            // One finger path: start edge move once and keep timer running while finger holds
+                            if moveUpdateTimer == nil {
+                                if markerService.startMoveSelectedEdge() {
+                                    print("[Gesture] Start one-finger move timer (common runloop)")
+                                    let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
+                                        markerService.updateMoveSelectedEdge()
+                                    }
+                                    RunLoop.main.add(timer, forMode: .common)
+                                    moveUpdateTimer = timer
+                                }
                             }
                         }
                     }
                     .onEnded { _ in
-                        isTwoFingers = false
-                        stopMovingMarker()
+                        isHoldingScreen = false
+                        if !isTwoFingers {
+                            markerService.endMoveSelectedEdge()
+                            print("[Gesture] End one-finger move timer")
+                            moveUpdateTimer?.invalidate()
+                            moveUpdateTimer = nil
+                        }
+                        currentDrag = .zero
+                        currentScale = 1.0
                     }
             )
             .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.3)
+                MagnificationGesture(minimumScaleDelta: 0)
+                    .onChanged { scale in
+                        if !isTwoFingers {
+                            isTwoFingers = true
+                            // Begin transform around target center if a marker is selected
+                            if markerService.selectedMarkerID != nil {
+                                let rect = getTargetRect()
+                                let center = CGPoint(x: rect.midX, y: rect.midY)
+                                if moveUpdateTimer == nil {
+                                    if markerService.startTransformSelectedMarker(referenceCenter: center) {
+                                        print("[Gesture] Start two-finger move timer (common runloop)")
+                                        let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
+                                            markerService.updateMovingMarker()
+                                        }
+                                        RunLoop.main.add(timer, forMode: .common)
+                                        moveUpdateTimer = timer
+                                    }
+                                }
+                            }
+                        }
+                        currentScale = scale
+                    }
                     .onEnded { _ in
-                        selectMarkerInTarget()
+                        isTwoFingers = false
+                        // Finish transform
+                        markerService.endTransform()
+                        print("[Gesture] End two-finger move timer")
+                        moveUpdateTimer?.invalidate()
+                        moveUpdateTimer = nil
+                        currentScale = 1.0
+                        currentDrag = .zero
                     }
             )
+            // Removed LongPressGesture: selection is automatic; long-press was cancelling active movement
 
             // Target overlay (same as Scan)
             TargetOverlayView()
