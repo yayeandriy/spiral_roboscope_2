@@ -100,17 +100,40 @@ final class SpatialMarkerService: ObservableObject {
     func removeMarkerByBackendId(_ backendId: UUID) {
         guard let arView = arView else { return }
         if let idx = markers.firstIndex(where: { $0.backendId == backendId }) {
-            print("[Marker] Remove backendId=\(backendId) localId=\(markers[idx].id)")
             arView.scene.removeAnchor(markers[idx].anchorEntity)
+            // Clear selection if we removed the selected marker (compare local id)
+            if selectedMarkerID == markers[idx].id { selectedMarkerID = nil }
             markers.remove(at: idx)
         }
+    }
+
+    /// Backend id of the currently selected marker (if any)
+    var selectedBackendId: UUID? {
+        guard let selId = selectedMarkerID,
+              let m = markers.first(where: { $0.id == selId }) else { return nil }
+        return m.backendId
+    }
+
+    /// Remove selected marker locally (by local id)
+    func removeSelectedMarkerLocal() {
+        guard let arView = arView, let selId = selectedMarkerID,
+              let idx = markers.firstIndex(where: { $0.id == selId }) else { return }
+        arView.scene.removeAnchor(markers[idx].anchorEntity)
+        markers.remove(at: idx)
+        selectedMarkerID = nil
     }
     
     /// Load persisted markers from API models
     func loadPersistedMarkers(_ apiMarkers: [Marker]) {
-        print("[Marker] Load persisted count=\(apiMarkers.count)")
         for m in apiMarkers {
-            addMarker(points: m.points, backendId: m.id, version: m.version)
+            if let idx = markers.firstIndex(where: { $0.backendId == m.id }) {
+                // Update existing visual marker to match backend
+                markers[idx].version = m.version
+                applyNodePositions(markerIndex: idx, newNodePositions: m.points)
+            } else {
+                // Add new marker from backend
+                addMarker(points: m.points, backendId: m.id, version: m.version)
+            }
         }
     }
     
@@ -217,6 +240,48 @@ final class SpatialMarkerService: ObservableObject {
         markers.removeAll()
     }
     
+    // MARK: - Marker Info
+    
+    struct MarkerInfo {
+        let width: Float
+        let length: Float
+        let centerX: Float
+        let centerZ: Float
+    }
+    
+    /// Get info for the currently selected marker
+    var selectedMarkerInfo: MarkerInfo? {
+        guard let selectedID = selectedMarkerID,
+              let marker = markers.first(where: { $0.id == selectedID }) else {
+            return nil
+        }
+        
+        let nodes = marker.nodes
+        guard nodes.count == 4 else { return nil }
+        
+        // Calculate center (average of all 4 nodes)
+        let center = (nodes[0] + nodes[1] + nodes[2] + nodes[3]) / 4.0
+        
+        // Calculate width and length
+        // Assuming nodes are ordered: 0-1-2-3 forming a quadrilateral
+        // Width: distance between edges 0-1 and 2-3 (average)
+        // Length: distance between edges 1-2 and 3-0 (average)
+        let edge01 = simd_distance(nodes[0], nodes[1])
+        let edge23 = simd_distance(nodes[2], nodes[3])
+        let width = (edge01 + edge23) / 2.0
+        
+        let edge12 = simd_distance(nodes[1], nodes[2])
+        let edge30 = simd_distance(nodes[3], nodes[0])
+        let length = (edge12 + edge30) / 2.0
+        
+        return MarkerInfo(
+            width: width,
+            length: length,
+            centerX: center.x,
+            centerZ: center.z
+        )
+    }
+    
     // MARK: - Marker Tracking
     
     /// Continuously check which markers are in the target area
@@ -302,13 +367,11 @@ final class SpatialMarkerService: ObservableObject {
                 
                 // Update colors
                 if !wasInTarget || markerEdgesInTarget[marker.id] != edgesInTarget {
-                    print("[Select] IN TARGET markerIndex=\(markerIndex) id=\(marker.id) edges=\(edgesInTarget)")
                     updateMarkerColorWithEdges(index: markerIndex, isSelected: false, isInTarget: true, edgesInTarget: edgesInTarget)
                 }
             } else {
                 // If was in target but no longer, reset color
                 if markersInTarget.contains(marker.id) {
-                    print("[Select] LEFT TARGET markerIndex=\(markerIndex) id=\(marker.id)")
                     updateMarkerColorWithEdges(index: markerIndex, isSelected: false, isInTarget: false, edgesInTarget: [])
                 }
             }
@@ -320,7 +383,7 @@ final class SpatialMarkerService: ObservableObject {
         // Auto-select marker if needed and choose edge
         if newMarkersInTarget.isEmpty {
             // No selection when nothing qualifies
-            if selectedMarkerID != nil { print("[Select] Auto-deselect (none in target)") }
+            // Auto-deselect silently
             selectedMarkerID = nil
             selectedEdgeIndex = nil
             // Update visuals to non-selected
@@ -346,7 +409,7 @@ final class SpatialMarkerService: ObservableObject {
                 }
             }
             selectedIndex = bestIdx
-            if let si = selectedIndex { selectedMarkerID = markers[si].id; print("[Select] Selected marker index=\(si) id=\(markers[si].id)") }
+            if let si = selectedIndex { selectedMarkerID = markers[si].id }
         }
 
         // Choose selected edge
@@ -380,7 +443,6 @@ final class SpatialMarkerService: ObservableObject {
                 }
             }
             selectedEdgeIndex = choice
-            if let choice = choice { print("[Select] Selected edge=\(choice) for marker id=\(m.id)") }
         } else {
             selectedEdgeIndex = nil
         }
