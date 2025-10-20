@@ -18,9 +18,9 @@ struct Space: Codable, Identifiable, Hashable {
     let modelGlbUrl: String?
     let modelUsdcUrl: String?
     let previewUrl: String?
-    let meta: [String: AnyCodable]
-    let createdAt: Date
-    let updatedAt: Date
+    let meta: [String: AnyCodable]?
+    let createdAt: Date?
+    let updatedAt: Date?
     
     enum CodingKeys: String, CodingKey {
         case id, key, name, description, meta

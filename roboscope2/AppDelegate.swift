@@ -9,9 +9,19 @@ import SwiftUI
 
 @main
 struct roboscope2App: App {
+    
+    init() {
+        // Configure API environment
+        APIConfiguration.shared.useDevelopment()
+        
+        // Start background sync
+        SyncManager.shared.registerBackgroundTasks()
+        SyncManager.shared.startAutoSync()
+    }
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()
         }
     }
 }

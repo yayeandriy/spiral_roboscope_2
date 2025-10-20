@@ -27,12 +27,12 @@ final class NetworkManager {
         // Configure JSON decoder for API date format
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
-        self.decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Note: NOT using convertFromSnakeCase to maintain explicit CodingKeys control
         
         // Configure JSON encoder
         self.encoder = JSONEncoder()
         self.encoder.dateEncodingStrategy = .iso8601
-        self.encoder.keyEncodingStrategy = .convertToSnakeCase
+        // Note: NOT using convertToSnakeCase to maintain explicit CodingKeys control
     }
     
     // MARK: - Generic Request Methods
@@ -183,6 +183,28 @@ final class NetworkManager {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
+            if configuration.enableLogging {
+                print("❌ Decoding error for \(T.self):")
+                print("   Error: \(error)")
+                if let decodingError = error as? DecodingError {
+                    switch decodingError {
+                    case .keyNotFound(let key, let context):
+                        print("   Missing key: \(key.stringValue) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                    case .typeMismatch(let type, let context):
+                        print("   Type mismatch for type \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                        print("   Expected \(type) but found: \(context.debugDescription)")
+                    case .valueNotFound(let type, let context):
+                        print("   Value not found for type \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
+                    case .dataCorrupted(let context):
+                        print("   Data corrupted at \(context.codingPath.map { $0.stringValue }.joined(separator: ".")): \(context.debugDescription)")
+                    @unknown default:
+                        print("   Unknown decoding error")
+                    }
+                }
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    print("   JSON: \(jsonString)")
+                }
+            }
             throw APIError.decodingError(error)
         }
     }

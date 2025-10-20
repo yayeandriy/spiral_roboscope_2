@@ -215,8 +215,12 @@ final class WorkSessionService: ObservableObject {
         let oneWeekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         
         return allSessions.filter { session in
-            session.createdAt > oneWeekAgo
-        }.sorted { $0.createdAt > $1.createdAt }
+            guard let createdAt = session.createdAt else { return false }
+            return createdAt > oneWeekAgo
+        }.sorted { 
+            guard let date0 = $0.createdAt, let date1 = $1.createdAt else { return false }
+            return date0 > date1
+        }
     }
     
     // MARK: - Statistics

@@ -69,9 +69,9 @@ struct WorkSession: Codable, Identifiable, Hashable {
     let startedAt: Date?
     let completedAt: Date?
     let version: Int64
-    let meta: [String: AnyCodable]
-    let createdAt: Date
-    let updatedAt: Date
+    let meta: [String: AnyCodable]?
+    let createdAt: Date?
+    let updatedAt: Date?
     
     enum CodingKeys: String, CodingKey {
         case id, status, version, meta
