@@ -33,20 +33,18 @@ struct SpaceARView: View {
                 .onDisappear { captureSession.stop() }
                 .task { await loadPrimaryModelIfAvailable() }
             
-            // Top bar with close button
+            // Top bar with Done button
             VStack {
                 HStack {
-                    Button {
+                    Spacer()
+                    
+                    Button("Done") {
                         dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .padding(10)
                     }
                     .buttonStyle(.plain)
-                    .lgCircle(tint: .white)
-                    
-                    Spacer()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .lgCapsule(tint: .white)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
@@ -262,10 +260,17 @@ struct SpaceARView: View {
     
     private func updateSpaceWithScanUrl(_ scanUrl: String) async {
         do {
+            print("[SpaceAR] 🔄 Starting space update...")
+            print("[SpaceAR] 📍 Space ID: \(space.id)")
+            print("[SpaceAR] 🔗 Scan URL: \(scanUrl)")
+            
             let update = UpdateSpace(scanUrl: scanUrl)
+            print("[SpaceAR] 📦 Created UpdateSpace DTO")
+            
             let updatedSpace = try await spaceService.updateSpace(id: space.id, update: update)
             
-            print("[SpaceAR] Space updated with scan URL: \(scanUrl)")
+            print("[SpaceAR] ✅ Space updated successfully!")
+            print("[SpaceAR] 📊 Updated space scan_url: \(updatedSpace.scanUrl ?? "nil")")
             
             await MainActor.run {
                 hasScanData = false
@@ -275,7 +280,9 @@ struct SpaceARView: View {
             }
             
         } catch {
-            print("[SpaceAR] Failed to update space: \(error)")
+            print("[SpaceAR] ❌ Failed to update space!")
+            print("[SpaceAR] ❌ Error: \(error)")
+            print("[SpaceAR] ❌ Error description: \(error.localizedDescription)")
             await MainActor.run {
                 exportStatus = "Failed to update space"
             }

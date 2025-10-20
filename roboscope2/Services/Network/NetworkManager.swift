@@ -140,6 +140,12 @@ final class NetworkManager {
         if let body = body {
             do {
                 request.httpBody = try encoder.encode(body)
+                
+                // Log request body for debugging
+                if configuration.enableLogging, let httpBody = request.httpBody,
+                   let bodyString = String(data: httpBody, encoding: .utf8) {
+                    print("📤 Request body: \(bodyString)")
+                }
             } catch {
                 throw APIError.encodingError(error)
             }

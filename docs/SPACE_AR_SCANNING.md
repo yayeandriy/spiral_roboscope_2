@@ -208,7 +208,7 @@ Content-Type: application/json
 ### State 1: Initial (No Scan)
 ```
 ┌─────────────────────────────┐
-│  [○ X]                      │
+│                   [Done]    │
 │                             │
 │       AR View               │
 │                             │
@@ -222,7 +222,7 @@ Content-Type: application/json
 ### State 2: Scanning
 ```
 ┌─────────────────────────────┐
-│  [○ X]                      │
+│                   [Done]    │
 │                             │
 │   AR View (mesh overlay)    │
 │                             │
@@ -236,7 +236,7 @@ Content-Type: application/json
 ### State 3: Scan Complete
 ```
 ┌─────────────────────────────┐
-│  [○ X]                      │
+│                   [Done]    │
 │                             │
 │       AR View               │
 │                             │
@@ -248,7 +248,7 @@ Content-Type: application/json
 └─────────────────────────────┘
 ```
 
-**Note:** All buttons use iOS 18+ Liquid Glass effect (`.lgCapsule()` and `.lgCircle()`) with fallback for earlier iOS versions.
+**Note:** All buttons use iOS 18+ Liquid Glass effect (`.lgCapsule()`) with fallback for earlier iOS versions.
 
 ### State 4: Exporting
 ```

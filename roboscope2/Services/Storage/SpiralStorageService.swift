@@ -26,13 +26,11 @@ class SpiralStorageService {
     
     struct CreateUploadResponse: Codable {
         let uploadId: String
-        let key: String
-        let parts: [PartPresignedUrl]
+        let partUrls: [PartPresignedUrl]
         
         enum CodingKeys: String, CodingKey {
             case uploadId = "upload_id"
-            case key
-            case parts
+            case partUrls = "part_urls"
         }
     }
     
@@ -102,13 +100,13 @@ class SpiralStorageService {
             // Step 2: Upload all parts with progress tracking
             let completedParts = try await uploadParts(
                 fileData: fileData,
-                parts: createResponse.parts,
+                parts: createResponse.partUrls,
                 progress: progress
             )
             
             // Step 3: Complete the upload
             let objectUrl = try await completeMultipartUpload(
-                key: createResponse.key,
+                key: destinationPath,
                 uploadId: createResponse.uploadId,
                 parts: completedParts
             )
@@ -120,7 +118,7 @@ class SpiralStorageService {
             // If upload fails, abort the multipart upload to clean up
             print("[Storage] Upload failed, aborting multipart upload")
             try? await abortMultipartUpload(
-                key: createResponse.key,
+                key: destinationPath,
                 uploadId: createResponse.uploadId
             )
             throw error
@@ -182,7 +180,8 @@ class SpiralStorageService {
         
         let body: [String: Any] = [
             "key": key,
-            "part_count": numberOfParts
+            "content_type": "model/obj",
+            "parts": numberOfParts
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
@@ -196,6 +195,11 @@ class SpiralStorageService {
             let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
             print("[Storage] Create multipart failed: \(httpResponse.statusCode) - \(errorMessage)")
             throw StorageError.serverError(httpResponse.statusCode, errorMessage)
+        }
+        
+        // Log the raw response for debugging
+        if let responseString = String(data: data, encoding: .utf8) {
+            print("[Storage] 📥 Create multipart response: \(responseString)")
         }
         
         return try JSONDecoder().decode(CreateUploadResponse.self, from: data)
