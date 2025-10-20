@@ -50,23 +50,6 @@ struct SessionRowView: View {
                 Spacer()
                 markersBadge
             }
-            
-            // Optional action (Start AR) below, only for active
-            if session.status == .active {
-                HStack {
-                    Button(action: onStartAR) {
-                        Label("Start AR", systemImage: "arkit")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.blue)
-                            .cornerRadius(8)
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
         }
         .padding()
         .background(
@@ -79,6 +62,9 @@ struct SessionRowView: View {
         )
         .shadow(color: cardShadowColor, radius: 6, x: 0, y: 2)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture {
+            onStartAR()
+        }
         .task {
             // Fetch accurate per-session marker count without mutating global markers
             print("[SessionRow] Fetching markers for session \(session.id)")
