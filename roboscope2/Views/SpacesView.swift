@@ -186,6 +186,13 @@ struct SpaceTileView: View {
                         Text("USDC")
                             .font(.caption)
                             .fontWeight(.medium)
+                            .foregroundColor(.blue)
+                    }
+                    
+                    if space.scanUrl != nil {
+                        Text("SCAN")
+                            .font(.caption)
+                            .fontWeight(.medium)
                             .foregroundColor(.orange)
                     }
 
