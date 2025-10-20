@@ -27,19 +27,12 @@ struct MainTabView: View {
                 }
                 .tag(1)
 
-            // Scanner Tab (just before settings)
-            ContentView()
-                .tabItem {
-                    Label("Scanner", systemImage: "viewfinder")
-                }
-                .tag(2)
-
             // Settings Tab
             SettingsPlaceholderView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
-                .tag(3)
+                .tag(2)
         }
     }
 }

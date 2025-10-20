@@ -10,6 +10,7 @@ import SwiftUI
 struct SpacesView: View {
     @StateObject private var spaceService = SpaceService.shared
     @State private var showingCreateSheet = false
+    @State private var selectedSpace: Space?
     
     var body: some View {
         NavigationView {
@@ -24,17 +25,32 @@ struct SpacesView: View {
             }
             .navigationTitle("Spaces")
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingCreateSheet = true }) {
-                        Image(systemName: "plus")
-                    }
-                }
-                
+                // Left: Reload
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: { Task { await refreshSpaces() } }) {
                         Image(systemName: "arrow.clockwise")
                     }
                     .disabled(spaceService.isLoading)
+                }
+
+                // Right: Count pill + plus
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    // Spaces count pill
+                    Text("\(spaceService.spaces.count)")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.primary.opacity(0.12))
+                        )
+                        .foregroundColor(.primary)
+
+                    // Create space button
+                    Button(action: { showingCreateSheet = true }) {
+                        Image(systemName: "plus")
+                    }
                 }
             }
             // Search removed for simplified UI
@@ -44,27 +60,27 @@ struct SpacesView: View {
             .task {
                 await loadInitialData()
             }
+            .fullScreenCover(item: $selectedSpace) { space in
+                SpaceARView(space: space)
+            }
         }
     }
     
     // MARK: - Subviews
     
     private var spacesList: some View {
-        List {
-            ForEach(spaceService.spaces) { space in
-                SpaceRowView(space: space)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            Task {
-                                await deleteSpace(space)
-                            }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
+                ForEach(spaceService.spaces) { space in
+                    SpaceTileView(space: space) {
+                        Task { await deleteSpace(space) }
                     }
+                    .onTapGesture { selectedSpace = space }
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
-        .listStyle(.insetGrouped)
     }
     
     private var emptyStateView: some View {
@@ -118,68 +134,78 @@ struct SpacesView: View {
     }
 }
 
-// MARK: - Space Row View
+// MARK: - Space Tile View (Square Card)
 
-struct SpaceRowView: View {
+struct SpaceTileView: View {
     let space: Space
-    
+    var onDelete: (() -> Void)? = nil
+
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        ZStack {
+            // Card background
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(cardStrokeColor, lineWidth: 0.5)
+                )
+
+            // Content
+            VStack(alignment: .leading, spacing: 8) {
+                // Title
                 Text(space.name)
                     .font(.headline)
-                
-                Spacer()
-                
-                Text(space.key)
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.blue.opacity(0.1))
-                    .foregroundColor(.blue)
-                    .cornerRadius(4)
-            }
-            
-            if let description = space.description {
-                Text(description)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .fontWeight(.semibold)
                     .lineLimit(2)
-            }
-            
-            HStack(spacing: 16) {
-                if space.modelGlbUrl != nil {
-                    Label("GLB", systemImage: "cube.fill")
-                        .font(.caption)
-                        .foregroundColor(.green)
+                    .foregroundColor(.primary)
+
+                // Subtitle/description
+                if let description = space.description {
+                    Text(description)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                } else {
+                    Spacer(minLength: 0)
                 }
-                
-                if space.modelUsdcUrl != nil {
-                    Label("USDC", systemImage: "cube.fill")
-                        .font(.caption)
-                        .foregroundColor(.orange)
-                }
-                
-                if let createdAt = space.createdAt {
-                    HStack {
-                        Image(systemName: "calendar")
-                            .foregroundColor(.gray)
-                        Text("Created: \(createdAt, formatter: dateFormatter)")
+
+                Spacer()
+
+                // Bottom labels
+                HStack(spacing: 12) {
+                    if space.modelGlbUrl != nil {
+                        Text("GLB")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.green)
                     }
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+
+                    if space.modelUsdcUrl != nil {
+                        Text("USDC")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.orange)
+                    }
+
+                    Spacer()
                 }
             }
-            .padding(.top, 4)
+            .padding(16)
         }
-        .padding(.vertical, 4)
+        .aspectRatio(1, contentMode: .fit) // Square card
+        .contextMenu {
+            if let onDelete {
+                Button(role: .destructive) { onDelete() } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
     }
-    
-    private var dateFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
+
+    private var cardStrokeColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06)
     }
 }
 
