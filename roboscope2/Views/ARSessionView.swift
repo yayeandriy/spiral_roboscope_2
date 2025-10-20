@@ -80,7 +80,6 @@ struct ARSessionView: View {
                     isHoldingScreen = true
                     // Cancel any active one-finger edge move
                     if moveUpdateTimer != nil {
-                        print("[Overlay] Cancel one-finger move timer on two-finger start")
                         markerService.endMoveSelectedEdge()
                         moveUpdateTimer?.invalidate()
                         moveUpdateTimer = nil
@@ -90,7 +89,6 @@ struct ARSessionView: View {
                         let rect = getTargetRect()
                         let center = CGPoint(x: rect.midX, y: rect.midY)
                         if markerService.startTransformSelectedMarker(referenceCenter: center) {
-                            print("[Overlay] Start two-finger move timer (common runloop)")
                             let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
                                 markerService.updateTransform(dragTranslation: currentDrag, pinchScale: currentScale)
                             }
@@ -104,7 +102,6 @@ struct ARSessionView: View {
                     if !isTwoFingers && moveUpdateTimer == nil {
                         isHoldingScreen = true
                         if markerService.startMoveSelectedEdge() {
-                            print("[Overlay] Start one-finger move timer (common runloop)")
                             let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
                                 markerService.updateMoveSelectedEdge(withDrag: currentDrag)
                             }
@@ -117,8 +114,21 @@ struct ARSessionView: View {
                     // End one-finger edge move if not in two-finger mode
                     if !isTwoFingers {
                         isHoldingScreen = false
-                        markerService.endMoveSelectedEdge()
-                        print("[Overlay] End one-finger move timer")
+                        if let (backendId, version, updatedNodes) = markerService.endMoveSelectedEdge() {
+                            // Persist updated marker to backend
+                            Task {
+                                do {
+                                    _ = try await markerApi.updateMarkerPosition(
+                                        id: backendId,
+                                        workSessionId: session.id,
+                                        points: updatedNodes,
+                                        version: version
+                                    )
+                                } catch {
+                                    // Silently handle error
+                                }
+                            }
+                        }
                         moveUpdateTimer?.invalidate()
                         moveUpdateTimer = nil
                         currentDrag = .zero
@@ -135,8 +145,21 @@ struct ARSessionView: View {
                     if isTwoFingers {
                         isTwoFingers = false
                         isHoldingScreen = false
-                        markerService.endTransform()
-                        print("[Overlay] End two-finger move timer")
+                        if let (backendId, version, updatedNodes) = markerService.endTransform() {
+                            // Persist updated marker to backend
+                            Task {
+                                do {
+                                    _ = try await markerApi.updateMarkerPosition(
+                                        id: backendId,
+                                        workSessionId: session.id,
+                                        points: updatedNodes,
+                                        version: version
+                                    )
+                                } catch {
+                                    // Silently handle error
+                                }
+                            }
+                        }
                         moveUpdateTimer?.invalidate()
                         moveUpdateTimer = nil
                         currentScale = 1.0
@@ -398,17 +421,14 @@ private struct TwoFingerTouchOverlay: UIViewRepresentable {
         func handleTouchesBegan(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
             trackingTouches.formUnion(touches)
             let touchCount = trackingTouches.count
-            print("[Overlay] Touches began: \(touchCount) total")
             
             if touchCount == 1, let touch = trackingTouches.first {
                 touchStartLocation = touch.location(in: view)
                 currentTranslation = .zero
                 if !twoFingerActive && !oneFingerActive && oneFingerPending == nil {
-                    print("[Overlay] One-finger began, starting grace delay")
                     oneFingerPending = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { [weak self] _ in
                         guard let self = self else { return }
                         if !self.twoFingerActive && !self.oneFingerActive && self.trackingTouches.count == 1 {
-                            print("[Overlay] Grace expired, starting one-finger edge move")
                             self.oneFingerActive = true
                             self.onOneFingerStart()
                         }
@@ -416,7 +436,6 @@ private struct TwoFingerTouchOverlay: UIViewRepresentable {
                 }
             } else if touchCount >= 2 {
                 // Cancel one-finger and start two-finger immediately
-                print("[Overlay] Two fingers detected, cancelling one-finger if any")
                 oneFingerPending?.invalidate(); oneFingerPending = nil
                 if oneFingerActive {
                     oneFingerActive = false
@@ -459,18 +478,15 @@ private struct TwoFingerTouchOverlay: UIViewRepresentable {
         func handleTouchesEnded(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
             trackingTouches.subtract(touches)
             let remaining = trackingTouches.count
-            print("[Overlay] Touches ended: \(remaining) remaining")
             
             if remaining == 0 {
                 oneFingerPending?.invalidate(); oneFingerPending = nil
                 if oneFingerActive {
                     oneFingerActive = false
-                    print("[Overlay] One-finger ended")
                     onOneFingerEnd()
                 }
                 if twoFingerActive {
                     twoFingerActive = false
-                    print("[Overlay] Two-finger ended")
                     onEnd()
                 }
                 currentTranslation = .zero
@@ -478,7 +494,6 @@ private struct TwoFingerTouchOverlay: UIViewRepresentable {
             } else if remaining == 1 && twoFingerActive {
                 // Went from two to one: end two-finger
                 twoFingerActive = false
-                print("[Overlay] Two-finger ended (one finger remains)")
                 onEnd()
             }
         }

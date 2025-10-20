@@ -186,11 +186,13 @@ final class MarkerService: ObservableObject {
     /// Update marker position with new ARKit points
     /// - Parameters:
     ///   - id: Marker UUID
+    ///   - workSessionId: Work session ID (required by backend)
     ///   - points: New 4 corner points
     ///   - version: Current marker version for optimistic locking
     /// - Returns: The updated marker
     func updateMarkerPosition(
         id: UUID,
+        workSessionId: UUID,
         points: [SIMD3<Float>],
         version: Int64
     ) async throws -> Marker {
@@ -199,6 +201,7 @@ final class MarkerService: ObservableObject {
         }
         
         let update = UpdateMarker(
+            workSessionId: workSessionId,
             points: points,
             version: version
         )

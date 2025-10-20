@@ -35,6 +35,7 @@ final class SpatialMarkerService: ObservableObject {
     struct SpatialMarker: Identifiable {
         let id = UUID()
         var backendId: UUID? = nil // Link to server-side marker
+        var version: Int64 = 0 // Track marker version for optimistic locking
         var nodes: [SIMD3<Float>] // 4 corner positions (mutable for moving)
         let anchorEntity: AnchorEntity
         var isSelected: Bool = false
@@ -42,10 +43,10 @@ final class SpatialMarkerService: ObservableObject {
     
     /// Create and add a marker from world-space points (used when loading from server)
     @discardableResult
-    func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil) -> SpatialMarker {
+    func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil, version: Int64 = 0) -> SpatialMarker {
         guard let arView = arView else {
             print("AR view not available")
-            return SpatialMarker(nodes: points, anchorEntity: AnchorEntity(world: .zero))
+            return SpatialMarker(version: version, nodes: points, anchorEntity: AnchorEntity(world: .zero))
         }
         // Create anchor and geometry similar to placeMarker()
         let anchorEntity = AnchorEntity(world: .zero)
@@ -82,9 +83,9 @@ final class SpatialMarkerService: ObservableObject {
         }
         
         arView.scene.addAnchor(anchorEntity)
-        let marker = SpatialMarker(backendId: backendId, nodes: points, anchorEntity: anchorEntity, isSelected: false)
+        let marker = SpatialMarker(backendId: backendId, version: version, nodes: points, anchorEntity: anchorEntity, isSelected: false)
         markers.append(marker)
-        print("[Marker] Added id=\(marker.id) backendId=\(backendId?.uuidString ?? "nil") nodes=\(points)")
+        print("[Marker] Added id=\(marker.id) backendId=\(backendId?.uuidString ?? "nil") version=\(version) nodes=\(points)")
         return marker
     }
     
@@ -109,7 +110,7 @@ final class SpatialMarkerService: ObservableObject {
     func loadPersistedMarkers(_ apiMarkers: [Marker]) {
         print("[Marker] Load persisted count=\(apiMarkers.count)")
         for m in apiMarkers {
-            addMarker(points: m.points, backendId: m.id)
+            addMarker(points: m.points, backendId: m.id, version: m.version)
         }
     }
     
@@ -534,8 +535,6 @@ final class SpatialMarkerService: ObservableObject {
             return false
         }
         
-    print("[Move] Start whole-marker index=\(markerIndex) id=\(selectedID)")
-        
         let marker = markers[markerIndex]
         
         // Project all nodes to screen and store their positions
@@ -547,10 +546,8 @@ final class SpatialMarkerService: ObservableObject {
             // Reset counters to avoid initial lag
             updateCounter = 0
             movingMarkerIndex = markerIndex
-            print("[Move] Whole-marker projected points=\(nodeScreenPositions)")
             return true
         } else {
-            print("[Move] Failed to project all nodes to screen")
             return false
         }
     }
@@ -619,7 +616,6 @@ final class SpatialMarkerService: ObservableObject {
                 newNodePositions.append(worldPosition)
             } else {
                 // If any raycast fails, skip this update
-                print("[Move] Whole-marker raycast miss for screenPos=\(screenPos). Skip tick.")
                 return
             }
         }
@@ -631,15 +627,31 @@ final class SpatialMarkerService: ObservableObject {
         applyNodePositions(markerIndex: markerIndex, newNodePositions: newNodePositions)
     }
     
-    /// Stop moving the marker
-    func stopMovingMarker() {
-        movingMarkerIndex = nil
-        nodeScreenPositions.removeAll()
-        originalNodeScreenPositions.removeAll()
-        lastWorldNodePositions.removeAll()
-        movingEdgeIndices = nil
-        updateCounter = 0
-        print("[Move] Stop movement")
+    /// Stop moving the marker and return the modified marker for persistence
+    /// - Returns: (backendId, version, updatedNodes) if a marker was being moved, nil otherwise
+    func stopMovingMarker() -> (UUID, Int64, [SIMD3<Float>])? {
+        defer {
+            movingMarkerIndex = nil
+            nodeScreenPositions.removeAll()
+            originalNodeScreenPositions.removeAll()
+            lastWorldNodePositions.removeAll()
+            movingEdgeIndices = nil
+            updateCounter = 0
+        }
+        
+        guard let idx = movingMarkerIndex, idx < markers.count else {
+            return nil
+        }
+        
+        let marker = markers[idx]
+        guard let backendId = marker.backendId else {
+            return nil
+        }
+        
+        // Increment version for optimistic locking
+        markers[idx].version += 1
+        
+        return (backendId, marker.version, marker.nodes)
     }
     
     /// Project a world position to screen coordinates
@@ -776,9 +788,10 @@ extension SpatialMarkerService {
         }
     }
 
-    /// End the current transform
-    func endTransform() {
-        stopMovingMarker()
+    /// End the current transform and return the modified marker for persistence
+    /// - Returns: (backendId, updatedNodes) if a marker was being transformed, nil otherwise
+    func endTransform() -> (UUID, Int64, [SIMD3<Float>])? {
+        return stopMovingMarker()
     }
 
     // MARK: - Edge movement (one finger)
@@ -798,14 +811,12 @@ extension SpatialMarkerService {
               let p2 = projectWorldToScreen(worldPosition: marker.nodes[j], frame: frame, arView: arView) else {
             return false
         }
-        print("[Move] Start edge markerIndex=\(markerIdx) edge=(\(i),\(j)) id=\(selID)")
         movingMarkerIndex = markerIdx
         originalNodeScreenPositions = [p1, p2]
         nodeScreenPositions = originalNodeScreenPositions
         lastWorldNodePositions = [marker.nodes[i], marker.nodes[j]]
         movingEdgeIndices = (i, j)
         updateCounter = 0
-        print("[Move] Edge projected points=\(nodeScreenPositions)")
         return true
     }
 
@@ -826,7 +837,6 @@ extension SpatialMarkerService {
             } else if idx < lastWorldNodePositions.count {
                 newWorld.append(lastWorldNodePositions[idx])
             } else {
-                print("[Move] Edge raycast miss for screenPos=\(sp). Skip tick.")
                 return
             }
         }
@@ -878,8 +888,9 @@ extension SpatialMarkerService {
         applyNodePositions(markerIndex: markerIdx, newNodePositions: allNodes)
     }
     
-    func endMoveSelectedEdge() {
-        stopMovingMarker()
+    /// End edge movement and return the modified marker for persistence
+    func endMoveSelectedEdge() -> (UUID, Int64, [SIMD3<Float>])? {
+        return stopMovingMarker()
     }
 }
 
