@@ -838,6 +838,45 @@ extension SpatialMarkerService {
         lastWorldNodePositions = newWorld
         applyNodePositions(markerIndex: markerIdx, newNodePositions: allNodes)
     }
+
+    /// Update the moving edge using a one-finger drag translation in screen space.
+    /// This adjusts the originally projected edge endpoints by the drag delta and raycasts them each tick.
+    func updateMoveSelectedEdge(withDrag dragTranslation: CGSize) {
+        guard let arView = arView,
+              let (i, j) = movingEdgeIndices,
+              let markerIdx = movingMarkerIndex,
+              originalNodeScreenPositions.count == 2 else { return }
+
+        // Compute adjusted screen positions by adding drag delta to the original points
+        let adjusted: [CGPoint] = originalNodeScreenPositions.map { p in
+            CGPoint(x: p.x + dragTranslation.width, y: p.y + dragTranslation.height)
+        }
+        nodeScreenPositions = adjusted
+
+        // Raycast adjusted points
+        var newWorld: [SIMD3<Float>] = []
+        for (idx, sp) in adjusted.enumerated() {
+            let results = arView.raycast(from: sp, allowing: .estimatedPlane, alignment: .any)
+            if let first = results.first {
+                let wp = SIMD3<Float>(first.worldTransform.columns.3.x,
+                                      first.worldTransform.columns.3.y,
+                                      first.worldTransform.columns.3.z)
+                newWorld.append(wp)
+            } else if idx < lastWorldNodePositions.count {
+                // fallback to last known to keep continuity
+                newWorld.append(lastWorldNodePositions[idx])
+            } else {
+                // Skip update if can't resolve both points
+                return
+            }
+        }
+        guard newWorld.count == 2 else { return }
+        var allNodes = markers[markerIdx].nodes
+        allNodes[i] = newWorld[0]
+        allNodes[j] = newWorld[1]
+        lastWorldNodePositions = newWorld
+        applyNodePositions(markerIndex: markerIdx, newNodePositions: allNodes)
+    }
     
     func endMoveSelectedEdge() {
         stopMovingMarker()

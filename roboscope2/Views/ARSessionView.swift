@@ -8,6 +8,7 @@
 import SwiftUI
 import RealityKit
 import ARKit
+import UIKit
 
 struct ARSessionView: View {
     let session: WorkSession
@@ -29,6 +30,7 @@ struct ARSessionView: View {
     // Transform state (for finger-driven move/resize)
     @State private var currentDrag: CGSize = .zero
     @State private var currentScale: CGFloat = 1.0
+    // one-finger edge move is now handled by the overlay's one-finger pan
 
     var body: some View {
         ZStack {
@@ -66,73 +68,84 @@ struct ARSessionView: View {
             .onChange(of: arView) { newValue in
                 markerService.arView = newValue
             }
-            // Gestures similar to Scan screen
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if !isHoldingScreen { isHoldingScreen = true }
-                        currentDrag = value.translation
-                        if !isTwoFingers {
-                            // One finger path: start edge move once and keep timer running while finger holds
-                            if moveUpdateTimer == nil {
-                                if markerService.startMoveSelectedEdge() {
-                                    print("[Gesture] Start one-finger move timer (common runloop)")
-                                    let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
-                                        markerService.updateMoveSelectedEdge()
-                                    }
-                                    RunLoop.main.add(timer, forMode: .common)
-                                    moveUpdateTimer = timer
-                                }
+            // SwiftUI DragGesture removed; we now drive one-finger via the overlay to avoid conflicts
+            // Removed LongPressGesture: selection is automatic; long-press was cancelling active movement
+
+            // Invisible two-finger overlay to detect two-finger contact immediately
+            TwoFingerTouchOverlay(
+                onStart: {
+                    // Two-finger whole-marker move
+                    guard !isTwoFingers else { return }
+                    isTwoFingers = true
+                    isHoldingScreen = true
+                    // Cancel any active one-finger edge move
+                    if moveUpdateTimer != nil {
+                        print("[Overlay] Cancel one-finger move timer on two-finger start")
+                        markerService.endMoveSelectedEdge()
+                        moveUpdateTimer?.invalidate()
+                        moveUpdateTimer = nil
+                    }
+                    // Start whole-marker movement if a marker is selected
+                    if markerService.selectedMarkerID != nil {
+                        let rect = getTargetRect()
+                        let center = CGPoint(x: rect.midX, y: rect.midY)
+                        if markerService.startTransformSelectedMarker(referenceCenter: center) {
+                            print("[Overlay] Start two-finger move timer (common runloop)")
+                            let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
+                                markerService.updateTransform(dragTranslation: currentDrag, pinchScale: currentScale)
                             }
+                            RunLoop.main.add(timer, forMode: .common)
+                            moveUpdateTimer = timer
                         }
                     }
-                    .onEnded { _ in
-                        isHoldingScreen = false
-                        if !isTwoFingers {
-                            markerService.endMoveSelectedEdge()
-                            print("[Gesture] End one-finger move timer")
-                            moveUpdateTimer?.invalidate()
-                            moveUpdateTimer = nil
+                },
+                onOneFingerStart: {
+                    // Start one-finger edge movement with grace already applied inside overlay
+                    if !isTwoFingers && moveUpdateTimer == nil {
+                        isHoldingScreen = true
+                        if markerService.startMoveSelectedEdge() {
+                            print("[Overlay] Start one-finger move timer (common runloop)")
+                            let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
+                                markerService.updateMoveSelectedEdge(withDrag: currentDrag)
+                            }
+                            RunLoop.main.add(timer, forMode: .common)
+                            moveUpdateTimer = timer
                         }
+                    }
+                },
+                onOneFingerEnd: {
+                    // End one-finger edge move if not in two-finger mode
+                    if !isTwoFingers {
+                        isHoldingScreen = false
+                        markerService.endMoveSelectedEdge()
+                        print("[Overlay] End one-finger move timer")
+                        moveUpdateTimer?.invalidate()
+                        moveUpdateTimer = nil
                         currentDrag = .zero
                         currentScale = 1.0
                     }
-            )
-            .simultaneousGesture(
-                MagnificationGesture(minimumScaleDelta: 0)
-                    .onChanged { scale in
-                        if !isTwoFingers {
-                            isTwoFingers = true
-                            // Begin transform around target center if a marker is selected
-                            if markerService.selectedMarkerID != nil {
-                                let rect = getTargetRect()
-                                let center = CGPoint(x: rect.midX, y: rect.midY)
-                                if moveUpdateTimer == nil {
-                                    if markerService.startTransformSelectedMarker(referenceCenter: center) {
-                                        print("[Gesture] Start two-finger move timer (common runloop)")
-                                        let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
-                                            markerService.updateMovingMarker()
-                                        }
-                                        RunLoop.main.add(timer, forMode: .common)
-                                        moveUpdateTimer = timer
-                                    }
-                                }
-                            }
-                        }
-                        currentScale = scale
-                    }
-                    .onEnded { _ in
+                },
+                onChange: { translation, scale in
+                    // Stream pan/pinch changes
+                    currentDrag = translation
+                    currentScale = scale
+                },
+                onEnd: {
+                    // Two-finger ended: stop whole-marker movement
+                    if isTwoFingers {
                         isTwoFingers = false
-                        // Finish transform
+                        isHoldingScreen = false
                         markerService.endTransform()
-                        print("[Gesture] End two-finger move timer")
+                        print("[Overlay] End two-finger move timer")
                         moveUpdateTimer?.invalidate()
                         moveUpdateTimer = nil
                         currentScale = 1.0
                         currentDrag = .zero
                     }
+                }
             )
-            // Removed LongPressGesture: selection is automatic; long-press was cancelling active movement
+            .allowsHitTesting(true)
+            .edgesIgnoringSafeArea(.all)
 
             // Target overlay (same as Scan)
             TargetOverlayView()
@@ -304,6 +317,194 @@ struct ARSessionView: View {
 
 
 // MARK: - Preview
+
+// Private overlay to detect two-finger contacts immediately and forward begin/end.
+private struct TwoFingerTouchOverlay: UIViewRepresentable {
+    let onStart: () -> Void
+    let onOneFingerStart: () -> Void
+    let onOneFingerEnd: () -> Void
+    let onChange: (CGSize, CGFloat) -> Void
+    let onEnd: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onStart: onStart, onOneFingerStart: onOneFingerStart, onOneFingerEnd: onOneFingerEnd, onChange: onChange, onEnd: onEnd) }
+
+    func makeUIView(context: Context) -> UIView {
+        let touchView = TouchPassthroughView()
+        touchView.backgroundColor = .clear
+        touchView.isUserInteractionEnabled = true
+        touchView.coordinator = context.coordinator
+        // Pinch for scale (still useful for two-finger)
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        pinch.cancelsTouchesInView = false
+        pinch.delegate = context.coordinator
+        touchView.addGestureRecognizer(pinch)
+        return touchView
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        if let touchView = uiView as? TouchPassthroughView {
+            touchView.coordinator = context.coordinator
+        }
+    }
+
+    // Custom UIView that directly handles touches and forwards to coordinator
+    class TouchPassthroughView: UIView {
+        weak var coordinator: Coordinator?
+        
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+            super.touchesBegan(touches, with: event)
+            coordinator?.handleTouchesBegan(touches, event: event, in: self)
+        }
+        
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+            super.touchesMoved(touches, with: event)
+            coordinator?.handleTouchesMoved(touches, event: event, in: self)
+        }
+        
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+            super.touchesEnded(touches, with: event)
+            coordinator?.handleTouchesEnded(touches, event: event, in: self)
+        }
+        
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+            super.touchesCancelled(touches, with: event)
+            coordinator?.handleTouchesCancelled(touches, event: event, in: self)
+        }
+    }
+
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        let onStart: () -> Void
+        let onOneFingerStart: () -> Void
+        let onOneFingerEnd: () -> Void
+        let onChange: (CGSize, CGFloat) -> Void
+        let onEnd: () -> Void
+        private var twoFingerActive = false
+        private var oneFingerActive = false
+        private var oneFingerPending: Timer?
+        private var currentScale: CGFloat = 1.0
+        private var currentTranslation: CGSize = .zero
+        private var trackingTouches: Set<UITouch> = []
+        private var touchStartLocation: CGPoint = .zero
+
+        init(onStart: @escaping () -> Void, onOneFingerStart: @escaping () -> Void, onOneFingerEnd: @escaping () -> Void, onChange: @escaping (CGSize, CGFloat) -> Void, onEnd: @escaping () -> Void) {
+            self.onStart = onStart
+            self.onOneFingerStart = onOneFingerStart
+            self.onOneFingerEnd = onOneFingerEnd
+            self.onChange = onChange
+            self.onEnd = onEnd
+        }
+        
+        // Direct touch handling (bypasses gesture recognizers which ARView was blocking)
+        func handleTouchesBegan(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
+            trackingTouches.formUnion(touches)
+            let touchCount = trackingTouches.count
+            print("[Overlay] Touches began: \(touchCount) total")
+            
+            if touchCount == 1, let touch = trackingTouches.first {
+                touchStartLocation = touch.location(in: view)
+                currentTranslation = .zero
+                if !twoFingerActive && !oneFingerActive && oneFingerPending == nil {
+                    print("[Overlay] One-finger began, starting grace delay")
+                    oneFingerPending = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { [weak self] _ in
+                        guard let self = self else { return }
+                        if !self.twoFingerActive && !self.oneFingerActive && self.trackingTouches.count == 1 {
+                            print("[Overlay] Grace expired, starting one-finger edge move")
+                            self.oneFingerActive = true
+                            self.onOneFingerStart()
+                        }
+                    }
+                }
+            } else if touchCount >= 2 {
+                // Cancel one-finger and start two-finger immediately
+                print("[Overlay] Two fingers detected, cancelling one-finger if any")
+                oneFingerPending?.invalidate(); oneFingerPending = nil
+                if oneFingerActive {
+                    oneFingerActive = false
+                    onOneFingerEnd()
+                }
+                if !twoFingerActive {
+                    // Compute initial centroid for two-finger tracking
+                    if let first = trackingTouches.first, let second = trackingTouches.dropFirst().first {
+                        let loc1 = first.location(in: view)
+                        let loc2 = second.location(in: view)
+                        touchStartLocation = CGPoint(x: (loc1.x + loc2.x)/2, y: (loc1.y + loc2.y)/2)
+                    }
+                    twoFingerActive = true
+                    currentScale = 1.0
+                    currentTranslation = .zero
+                    onStart()
+                    onChange(currentTranslation, currentScale)
+                }
+            }
+        }
+        
+        func handleTouchesMoved(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
+            let touchCount = trackingTouches.count
+            if touchCount == 1, let touch = trackingTouches.first, oneFingerActive && !twoFingerActive {
+                let currentLoc = touch.location(in: view)
+                currentTranslation = CGSize(width: currentLoc.x - touchStartLocation.x, height: currentLoc.y - touchStartLocation.y)
+                onChange(currentTranslation, currentScale)
+            } else if touchCount >= 2 && twoFingerActive {
+                // Two-finger pan: compute centroid delta
+                if let first = trackingTouches.first, let second = trackingTouches.dropFirst().first {
+                    let loc1 = first.location(in: view)
+                    let loc2 = second.location(in: view)
+                    let centroid = CGPoint(x: (loc1.x + loc2.x)/2, y: (loc1.y + loc2.y)/2)
+                    currentTranslation = CGSize(width: centroid.x - touchStartLocation.x, height: centroid.y - touchStartLocation.y)
+                    onChange(currentTranslation, currentScale)
+                }
+            }
+        }
+        
+        func handleTouchesEnded(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
+            trackingTouches.subtract(touches)
+            let remaining = trackingTouches.count
+            print("[Overlay] Touches ended: \(remaining) remaining")
+            
+            if remaining == 0 {
+                oneFingerPending?.invalidate(); oneFingerPending = nil
+                if oneFingerActive {
+                    oneFingerActive = false
+                    print("[Overlay] One-finger ended")
+                    onOneFingerEnd()
+                }
+                if twoFingerActive {
+                    twoFingerActive = false
+                    print("[Overlay] Two-finger ended")
+                    onEnd()
+                }
+                currentTranslation = .zero
+                currentScale = 1.0
+            } else if remaining == 1 && twoFingerActive {
+                // Went from two to one: end two-finger
+                twoFingerActive = false
+                print("[Overlay] Two-finger ended (one finger remains)")
+                onEnd()
+            }
+        }
+        
+        func handleTouchesCancelled(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
+            handleTouchesEnded(touches, event: event, in: view)
+        }
+
+        @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+            currentScale = recognizer.scale
+            if !twoFingerActive && recognizer.state == .began {
+                twoFingerActive = true
+                currentTranslation = .zero
+                onStart()
+            }
+            if twoFingerActive {
+                onChange(currentTranslation, currentScale)
+            }
+            // End handled by long press recognizer
+        }
+        // Allow pinch, pan, and long-press to recognize together without blocking ARView
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            return true
+        }
+    }
+}
 
 #Preview {
     ARSessionView(
