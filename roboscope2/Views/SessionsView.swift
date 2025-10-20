@@ -147,15 +147,27 @@ struct SessionsView: View {
                         SessionRowView(session: session) {
                             // Start AR Session
                             startARSession(session)
-                        } onEdit: {
-                            // Edit Session
-                            selectedSession = session
-                            showingEditSheet = true
-                        } onDelete: {
-                            // Delete Session
-                            sessionToDelete = session
-                            showingDeleteAlert = true
+                        } onEdit: { }
+                          onDelete: { }
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                sessionToDelete = session
+                                showingDeleteAlert = true
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            
+                            Button {
+                                selectedSession = session
+                                showingEditSheet = true
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(.blue)
                         }
+                        .listRowBackground(Color.clear)
                     }
                 }
                 .listStyle(PlainListStyle())

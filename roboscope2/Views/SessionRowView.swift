@@ -10,10 +10,13 @@ import SwiftUI
 struct SessionRowView: View {
     let session: WorkSession
     let onStartAR: () -> Void
-    let onEdit: () -> Void
-    let onDelete: () -> Void
+    // These are kept for compatibility but handled via swipe actions in the list
+    // rather than inline buttons in the row. They are optional and unused here.
+    let onEdit: (() -> Void)?
+    let onDelete: (() -> Void)?
     
     @StateObject private var spaceService = SpaceService.shared
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -90,9 +93,8 @@ struct SessionRowView: View {
             }
             
             // Action buttons
-            HStack(spacing: 12) {
-                // Start AR button (only for active sessions)
-                if session.status == .active {
+            if session.status == .active {
+                HStack {
                     Button(action: onStartAR) {
                         Label("Start AR", systemImage: "arkit")
                             .font(.caption)
@@ -103,31 +105,21 @@ struct SessionRowView: View {
                             .background(Color.blue)
                             .cornerRadius(8)
                     }
-                }
-                
-                Spacer()
-                
-                // Edit button
-                Button(action: onEdit) {
-                    Image(systemName: "pencil")
-                        .font(.caption)
-                        .foregroundColor(.blue)
-                        .frame(width: 24, height: 24)
-                }
-                
-                // Delete button
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.caption)
-                        .foregroundColor(.red)
-                        .frame(width: 24, height: 24)
+                    Spacer(minLength: 0)
                 }
             }
         }
         .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(cardStrokeColor, lineWidth: 0.5)
+        )
+        .shadow(color: cardShadowColor, radius: 6, x: 0, y: 2)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
     
     // MARK: - Computed Properties
@@ -154,6 +146,14 @@ struct SessionRowView: View {
     
     private var associatedSpace: Space? {
         spaceService.spaces.first { $0.id == session.spaceId }
+    }
+    
+    private var cardStrokeColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06)
+    }
+    
+    private var cardShadowColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.08)
     }
     
     // MARK: - Formatters
