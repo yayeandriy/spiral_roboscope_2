@@ -15,10 +15,10 @@ struct ARSessionView: View {
     @StateObject private var captureSession = CaptureSession()
     @StateObject private var markerService = SpatialMarkerService()
     @StateObject private var workSessionService = WorkSessionService.shared
+    @StateObject private var markerApi = MarkerService.shared
 
     @State private var arView: ARView?
     @State private var isSessionActive = false
-    @State private var showingEndSessionAlert = false
     @State private var errorMessage: String?
 
     // Match scanning interactions
@@ -40,6 +40,15 @@ struct ARSessionView: View {
                 // Start tracking markers continuously
                 markerTrackingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
                     checkMarkersInTarget()
+                }
+                // Load persisted markers for this session
+                Task {
+                    do {
+                        let persisted = try await markerApi.getMarkersForSession(session.id)
+                        markerService.loadPersistedMarkers(persisted)
+                    } catch {
+                        print("Failed to load markers: \(error)")
+                    }
                 }
             }
             .onDisappear {
@@ -93,11 +102,6 @@ struct ARSessionView: View {
             // Top controls styled like Scan
             VStack {
                 HStack(spacing: 20) {
-                    Button("End Session") { showingEndSessionAlert = true }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .lgCapsule(tint: .red)
                     Spacer()
                     Button("Done") { dismiss() }
                         .buttonStyle(.plain)
@@ -111,39 +115,23 @@ struct ARSessionView: View {
             }
             .zIndex(2)
 
-            // Bottom controls styled like Scan
+            // Bottom control: center plus button
             VStack {
                 Spacer()
-                HStack(spacing: 20) {
-                    Button { placeMarker() } label: {
+                HStack(spacing: 0) {
+                    Spacer()
+                    Button { createAndPersistMarker() } label: {
                         Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
                             .font(.system(size: 36))
                             .frame(width: 80, height: 80)
                     }
                     .buttonStyle(.plain)
                     .lgCircle(tint: .white)
-
                     Spacer()
-
-                    Button { clearAllMarkers() } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 24))
-                            .frame(width: 70, height: 70)
-                    }
-                    .buttonStyle(.plain)
-                    .lgCircle(tint: .red)
                 }
                 .padding(.horizontal, 30)
                 .padding(.bottom, 50)
             }
-        }
-        .alert("End Session", isPresented: $showingEndSessionAlert) {
-            Button("End Session", role: .destructive) {
-                Task { await completeSession() }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Are you sure you want to end this session? This will mark it as completed.")
         }
         .alert("Error", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
@@ -182,6 +170,35 @@ struct ARSessionView: View {
         markerService.placeMarker(targetCorners: corners)
     }
     
+    // Persisted create: place marker in AR and save to backend
+    private func createAndPersistMarker() {
+        guard let arView = arView else { return }
+        let screenSize = arView.bounds.size
+        let centerX = screenSize.width / 2
+        let targetSize: CGFloat = 150
+        let targetY: CGFloat = 200
+        let half = targetSize / 2
+        let corners = [
+            CGPoint(x: centerX - half, y: targetY - half),
+            CGPoint(x: centerX + half, y: targetY - half),
+            CGPoint(x: centerX + half, y: targetY + half),
+            CGPoint(x: centerX - half, y: targetY + half)
+        ]
+        if let spatial = markerService.placeMarkerReturningSpatial(targetCorners: corners) {
+            // Save to backend
+            Task {
+                do {
+                    let created = try await markerApi.createMarker(
+                        CreateMarker(workSessionId: session.id, points: spatial.nodes)
+                    )
+                    markerService.linkSpatialMarker(localId: spatial.id, backendId: created.id)
+                } catch {
+                    print("Failed to persist marker: \(error)")
+                }
+            }
+        }
+    }
+    
     private func getTargetRect() -> CGRect {
         guard let arView = arView else { return .zero }
         let screenSize = arView.bounds.size
@@ -216,13 +233,16 @@ struct ARSessionView: View {
         markerService.stopMovingMarker()
     }
     
-    private func clearAllMarkers() {
-        markerService.markers.removeAll()
-        
-        // TODO: Clear markers from server
+    private func clearAllMarkersPersisted() {
+        // Remove visually
+        markerService.clearMarkers()
+        // Remove persisted markers for this session
         Task {
-            // This would delete all markers for the session
-            // try await MarkerService.shared.deleteAllMarkersForSession(session.id)
+            do {
+                try await markerApi.deleteAllMarkersForSession(session.id)
+            } catch {
+                print("Failed to delete markers: \(error)")
+            }
         }
     }
     

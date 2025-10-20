@@ -28,9 +28,80 @@ final class SpatialMarkerService: ObservableObject {
     
     struct SpatialMarker: Identifiable {
         let id = UUID()
+        var backendId: UUID? = nil // Link to server-side marker
         var nodes: [SIMD3<Float>] // 4 corner positions (mutable for moving)
         let anchorEntity: AnchorEntity
         var isSelected: Bool = false
+    }
+    
+    /// Create and add a marker from world-space points (used when loading from server)
+    @discardableResult
+    func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil) -> SpatialMarker {
+        guard let arView = arView else {
+            print("AR view not available")
+            return SpatialMarker(nodes: points, anchorEntity: AnchorEntity(world: .zero))
+        }
+        // Create anchor and geometry similar to placeMarker()
+        let anchorEntity = AnchorEntity(world: .zero)
+        
+        // Nodes
+        for (index, position) in points.enumerated() {
+            let nodeMesh = MeshResource.generateSphere(radius: 0.01)
+            let nodeEntity = ModelEntity(mesh: nodeMesh, materials: [UnlitMaterial(color: .black)])
+            nodeEntity.position = position
+            nodeEntity.name = "node_\(index)"
+            anchorEntity.addChild(nodeEntity)
+        }
+        
+        // Edges
+        let edgeIndices = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        for (i, j) in edgeIndices {
+            let start = points[i]
+            let end = points[j]
+            let midpoint = (start + end) / 2
+            let direction = end - start
+            let length = simd_length(direction)
+            let edgeMesh = MeshResource.generateCylinder(height: length, radius: 0.0005)
+            let edgeEntity = ModelEntity(mesh: edgeMesh, materials: [UnlitMaterial(color: UIColor(red: 0.5, green: 0.8, blue: 1.0, alpha: 1.0))])
+            edgeEntity.position = midpoint
+            let up = normalize(direction)
+            let defaultUp = SIMD3<Float>(0, 1, 0)
+            if simd_length(cross(defaultUp, up)) > 0.001 {
+                let axis = normalize(cross(defaultUp, up))
+                let angle = acos(dot(defaultUp, up))
+                edgeEntity.orientation = simd_quatf(angle: angle, axis: axis)
+            }
+            edgeEntity.name = "edge_\(i)_\(j)"
+            anchorEntity.addChild(edgeEntity)
+        }
+        
+        arView.scene.addAnchor(anchorEntity)
+        let marker = SpatialMarker(backendId: backendId, nodes: points, anchorEntity: anchorEntity, isSelected: false)
+        markers.append(marker)
+        return marker
+    }
+    
+    /// Link a local spatial marker to a backend marker id
+    func linkSpatialMarker(localId: UUID, backendId: UUID) {
+        if let idx = markers.firstIndex(where: { $0.id == localId }) {
+            markers[idx].backendId = backendId
+        }
+    }
+    
+    /// Remove a marker by backend id
+    func removeMarkerByBackendId(_ backendId: UUID) {
+        guard let arView = arView else { return }
+        if let idx = markers.firstIndex(where: { $0.backendId == backendId }) {
+            arView.scene.removeAnchor(markers[idx].anchorEntity)
+            markers.remove(at: idx)
+        }
+    }
+    
+    /// Load persisted markers from API models
+    func loadPersistedMarkers(_ apiMarkers: [Marker]) {
+        for m in apiMarkers {
+            addMarker(points: m.points, backendId: m.id)
+        }
     }
     
     /// Place a marker by raycasting from target corners
@@ -94,62 +165,35 @@ final class SpatialMarkerService: ObservableObject {
             return
         }
         
-        // Create marker entity
-        let anchorEntity = AnchorEntity(world: .zero)
-        
-        // Create nodes (black spheres, radius 1cm - 2x smaller) with flat material
-        for (index, position) in hitPoints.enumerated() {
-            let nodeMesh = MeshResource.generateSphere(radius: 0.01) // 1cm
-            var nodeMaterial = UnlitMaterial(color: .black)
-            let nodeEntity = ModelEntity(mesh: nodeMesh, materials: [nodeMaterial])
-            nodeEntity.position = position
-            nodeEntity.name = "node_\(index)"
-            anchorEntity.addChild(nodeEntity)
-        }
-        
-        // Create edges (white cylinders connecting nodes, radius 0.33cm - 3x smaller)
-        let edgeIndices = [(0, 1), (1, 2), (2, 3), (3, 0)] // Connect in perimeter
-        
-        for (i, j) in edgeIndices {
-            let start = hitPoints[i]
-            let end = hitPoints[j]
-            
-            // Calculate edge properties
-            let midpoint = (start + end) / 2
-            let direction = end - start
-            let length = simd_length(direction)
-            
-            // Create cylinder (radius 0.0005m = 0.5mm - very thin) with flat light blue material
-            let edgeMesh = MeshResource.generateCylinder(height: length, radius: 0.0005)
-            var edgeMaterial = UnlitMaterial(color: UIColor(red: 0.5, green: 0.8, blue: 1.0, alpha: 1.0))
-            let edgeEntity = ModelEntity(mesh: edgeMesh, materials: [edgeMaterial])
-            
-            // Position and orient the cylinder
-            edgeEntity.position = midpoint
-            
-            // Orient cylinder to point from start to end
-            let up = normalize(direction)
-            let defaultUp = SIMD3<Float>(0, 1, 0)
-            
-            // Calculate rotation to align cylinder
-            if simd_length(cross(defaultUp, up)) > 0.001 {
-                let axis = normalize(cross(defaultUp, up))
-                let angle = acos(dot(defaultUp, up))
-                edgeEntity.orientation = simd_quatf(angle: angle, axis: axis)
-            }
-            
-            edgeEntity.name = "edge_\(i)_\(j)"
-            anchorEntity.addChild(edgeEntity)
-        }
-        
-        // Add anchor to scene
-        arView.scene.addAnchor(anchorEntity)
-        
-        // Save marker
-        let marker = SpatialMarker(nodes: hitPoints, anchorEntity: anchorEntity)
-        markers.append(marker)
+        // Create spatial marker from computed points
+        _ = addMarker(points: hitPoints)
         
         print("Marker placed with \(hitPoints.count) nodes")
+    }
+    
+    /// Place a marker and return the created SpatialMarker (for persistence)
+    @discardableResult
+    func placeMarkerReturningSpatial(targetCorners: [CGPoint]) -> SpatialMarker? {
+        guard let arView = arView,
+              let frame = arView.session.currentFrame else { return nil }
+        // Reuse the standard placement logic
+        // First, raycast center to ensure session has a reference (not strictly needed here)
+        let screenCenter = CGPoint(
+            x: (targetCorners[0].x + targetCorners[2].x) / 2,
+            y: (targetCorners[0].y + targetCorners[2].y) / 2
+        )
+        guard let _ = arView.raycast(from: screenCenter, allowing: .estimatedPlane, alignment: .any).first else {
+            return nil
+        }
+        var hitPoints: [SIMD3<Float>] = []
+        for corner in targetCorners {
+            let results = arView.raycast(from: corner, allowing: .estimatedPlane, alignment: .any)
+            if let first = results.first {
+                let pos = SIMD3<Float>(first.worldTransform.columns.3.x, first.worldTransform.columns.3.y, first.worldTransform.columns.3.z)
+                hitPoints.append(pos)
+            } else { return nil }
+        }
+        return addMarker(points: hitPoints)
     }
     
     /// Clear all markers
