@@ -17,6 +17,10 @@ struct Space3DViewer: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     
+    // Mode switching
+    @State private var currentMode: SpaceMode = .view3D
+    @State private var showARView = false
+    
     enum ModelType: String, CaseIterable {
         case glb = "GLB"
         case usdc = "USDC"
@@ -37,21 +41,34 @@ struct Space3DViewer: View {
             Color.black.ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Top bar
-                topBar
-                
-                // 3D Viewer
+                // 3D Viewer (full screen)
                 modelViewer
-                
-                // Bottom controls
-                if availableModels.count > 1 {
-                    modelSelector
-                }
+            }
+            
+            // Top bar overlay
+            VStack {
+                topBar
+                Spacer()
+            }
+        }
+        .sheet(isPresented: $showARView) {
+            SpaceARView(space: space)
+        }
+        .onChange(of: showARView) { newValue in
+            if !newValue {
+                // When AR view is dismissed, switch back to 3D mode
+                currentMode = .view3D
             }
         }
         .onAppear {
-            // Select first available model
-            if let firstModel = availableModels.first {
+            // Select first available model, preferring USDC over GLB
+            if space.modelUsdcUrl != nil {
+                selectedModel = .usdc
+            } else if space.scanUrl != nil {
+                selectedModel = .scan
+            } else if space.modelGlbUrl != nil {
+                selectedModel = .glb
+            } else if let firstModel = availableModels.first {
                 selectedModel = firstModel
             }
         }
@@ -61,39 +78,32 @@ struct Space3DViewer: View {
     
     private var topBar: some View {
         HStack {
-            // Close button
-            Button(action: { dismiss() }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        Circle()
-                            .fill(Color.white.opacity(0.15))
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.2), lineWidth: 0.5)
-                            )
-                    )
+            // iOS Standard Segmented Control
+            Picker("View Mode", selection: $currentMode) {
+                Label("3D View", systemImage: "cube")
+                    .tag(SpaceMode.view3D)
+                Label("Scan", systemImage: "scanner")
+                    .tag(SpaceMode.scan)
             }
-            .lgCircle()
+            .pickerStyle(.segmented)
+            .onChange(of: currentMode) { newMode in
+                if newMode == .scan {
+                    showARView = true
+                }
+            }
             
             Spacer()
             
-            // Space name
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(space.name)
-                    .font(.headline)
-                    .foregroundColor(.white)
-                
-                Text(selectedModel.rawValue)
-                    .font(.caption)
-                    .foregroundColor(selectedModel.color)
+            Button("Done") {
+                dismiss()
             }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .lgCapsule(tint: .white)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color.black.opacity(0.3))
+        .padding(.top, 16)
     }
     
     private var modelViewer: some View {
@@ -120,41 +130,26 @@ struct Space3DViewer: View {
                 }
             } else {
                 // Show the appropriate viewer based on selected model
+                // Use SceneKit for all formats for better compatibility
                 if selectedModel == .scan, let scanUrl = space.scanUrl {
-                    OBJModelViewer(url: scanUrl)
-                } else if selectedModel == .glb, let glbUrl = space.modelGlbUrl {
-                    RealityKitModelViewer(url: glbUrl, fileExtension: "glb")
-                } else if selectedModel == .usdc, let usdcUrl = space.modelUsdcUrl {
-                    RealityKitModelViewer(url: usdcUrl, fileExtension: "usdz")
-                }
-            }
-        }
-    }
-    
-    private var modelSelector: some View {
-        HStack(spacing: 12) {
-            ForEach(availableModels, id: \.self) { modelType in
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        selectedModel = modelType
+                    SceneKitModelViewer(url: scanUrl, fileExtension: "obj")
+                } else if selectedModel == .glb {
+                    // GLB is not natively supported on iOS, show message
+                    if let usdcUrl = space.modelUsdcUrl {
+                        // Fall back to USDC if available - determine extension from URL
+                        let fileExt = usdcUrl.hasSuffix(".usdz") ? "usdz" : "usdc"
+                        SceneKitModelViewer(url: usdcUrl, fileExtension: fileExt)
+                    } else if let glbUrl = space.modelGlbUrl {
+                        // Try loading GLB anyway (will likely fail)
+                        SceneKitModelViewer(url: glbUrl, fileExtension: "glb")
                     }
-                }) {
-                    Text(modelType.rawValue)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(selectedModel == modelType ? .white : modelType.color)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(selectedModel == modelType ? modelType.color : Color.white.opacity(0.1))
-                        )
+                } else if selectedModel == .usdc, let usdcUrl = space.modelUsdcUrl {
+                    // Determine the actual file extension from the URL
+                    let fileExt = usdcUrl.hasSuffix(".usdz") ? "usdz" : "usdc"
+                    SceneKitModelViewer(url: usdcUrl, fileExtension: fileExt)
                 }
-                .lgCapsule()
             }
         }
-        .padding(16)
-        .background(Color.black.opacity(0.3))
     }
     
     // MARK: - Computed Properties
@@ -183,10 +178,12 @@ struct RealityKitModelViewer: UIViewRepresentable {
     let fileExtension: String
     
     func makeUIView(context: Context) -> ARView {
-        let arView = ARView(frame: .zero)
-        arView.backgroundColor = .clear
+        // Create ARView without AR session (just 3D rendering)
+        let arView = ARView(frame: .zero, cameraMode: .nonAR, automaticallyConfigureSession: false)
+        arView.backgroundColor = .black
+        arView.environment.background = .color(.black)
         
-        // Setup camera
+        // Setup camera for 3D viewing
         let camera = PerspectiveCamera()
         let cameraAnchor = AnchorEntity(world: .zero)
         cameraAnchor.position = [0, 0, 3]
@@ -200,12 +197,26 @@ struct RealityKitModelViewer: UIViewRepresentable {
         arView.scene.addAnchor(anchor)
         arView.scene.addAnchor(cameraAnchor)
         
+        // Add lighting
+        let directionalLight = DirectionalLight()
+        directionalLight.light.intensity = 3000
+        directionalLight.look(at: .zero, from: [2, 2, 2], relativeTo: nil)
+        let lightAnchor = AnchorEntity(world: .zero)
+        lightAnchor.addChild(directionalLight)
+        arView.scene.addAnchor(lightAnchor)
+        
         Task {
             await loadModel(into: anchor, arView: arView)
         }
         
-        // Enable gestures
-        arView.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap)))
+        // Enable rotation gestures
+        let rotationGesture = UIRotationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleRotation(_:)))
+        arView.addGestureRecognizer(rotationGesture)
+        
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        arView.addGestureRecognizer(panGesture)
+        
+        context.coordinator.anchor = anchor
         
         return arView
     }
@@ -213,11 +224,27 @@ struct RealityKitModelViewer: UIViewRepresentable {
     func updateUIView(_ uiView: ARView, context: Context) {}
     
     private func loadModel(into anchor: AnchorEntity, arView: ARView) async {
-        guard let modelURL = URL(string: url) else { return }
+        guard let modelURL = URL(string: url) else {
+            print("[3DViewer] Invalid URL string: \(url)")
+            return
+        }
         
         do {
+            print("[3DViewer] Downloading USDZ from: \(modelURL)")
+            
             // Download the model
-            let (data, _) = try await URLSession.shared.data(from: modelURL)
+            let (data, response) = try await URLSession.shared.data(from: modelURL)
+            
+            print("[3DViewer] Downloaded \(data.count) bytes")
+            if let httpResponse = response as? HTTPURLResponse {
+                print("[3DViewer] Status: \(httpResponse.statusCode), Content-Type: \(httpResponse.allHeaderFields["Content-Type"] ?? "unknown")")
+            }
+            
+            // Validate minimum file size
+            guard data.count > 100 else {
+                print("[3DViewer] File too small (\(data.count) bytes), likely invalid")
+                return
+            }
             
             // Save to temp file
             let tempURL = FileManager.default.temporaryDirectory
@@ -225,29 +252,83 @@ struct RealityKitModelViewer: UIViewRepresentable {
                 .appendingPathExtension(fileExtension)
             try data.write(to: tempURL)
             
-            // Load model entity
-            let modelEntity = try await ModelEntity(contentsOf: tempURL)
+            // Verify file was written
+            let fileSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
+            print("[3DViewer] Saved to temp: \(tempURL)")
+            print("[3DViewer] File size on disk: \(fileSize) bytes")
             
-            // Center and scale the model
-            let bounds = modelEntity.visualBounds(relativeTo: nil)
-            let size = bounds.extents
-            let maxDimension = max(size.x, size.y, size.z)
-            let scale = 1.0 / maxDimension
-            modelEntity.scale = [scale, scale, scale]
+            // Check if file is actually USDZ by reading magic bytes
+            let fileHandle = try FileHandle(forReadingFrom: tempURL)
+            let headerData = fileHandle.readData(ofLength: 4)
+            fileHandle.closeFile()
             
-            // Center the model
-            let center = bounds.center
-            modelEntity.position = -center * scale
+            let magic = headerData.map { String(format: "%02x", $0) }.joined()
+            print("[3DViewer] File header (magic bytes): \(magic)")
             
-            await MainActor.run {
-                anchor.addChild(modelEntity)
+            // Try loading with RealityKit first
+            print("[3DViewer] Attempting to load with RealityKit Entity.load...")
+            
+            do {
+                let entity = try await Entity.load(contentsOf: tempURL)
+                
+                // Wrap in ModelEntity if needed
+                let modelEntity: ModelEntity
+                if let model = entity as? ModelEntity {
+                    modelEntity = model
+                } else {
+                    modelEntity = ModelEntity()
+                    modelEntity.addChild(entity)
+                }
+                
+                // Center and scale the model
+                let bounds = modelEntity.visualBounds(relativeTo: nil)
+                let size = bounds.extents
+                let maxDimension = max(size.x, size.y, size.z)
+                
+                if maxDimension > 0 {
+                    let scale = 1.0 / maxDimension
+                    modelEntity.scale = [scale, scale, scale]
+                    
+                    // Center the model
+                    let center = bounds.center
+                    modelEntity.position = -center * scale
+                }
+                
+                await MainActor.run {
+                    anchor.addChild(modelEntity)
+                    print("[3DViewer] Model loaded successfully with RealityKit")
+                }
+                
+                // Clean up temp file
+                try? FileManager.default.removeItem(at: tempURL)
+                
+            } catch {
+                print("[3DViewer] RealityKit failed: \(error)")
+                print("[3DViewer] Falling back to SceneKit for USDZ...")
+                
+                // Fall back to SceneKit which has better USDZ support
+                do {
+                    let scene = try SCNScene(url: tempURL, options: nil)
+                    print("[3DViewer] USDZ loaded with SceneKit")
+                    
+                    // Create a wrapper to convert SCNScene to RealityKit
+                    // Since we can't easily convert, show an error
+                    await MainActor.run {
+                        print("[3DViewer] Note: This USDZ file can only be viewed with SceneKit")
+                        print("[3DViewer] Please use the scan view or provide a compatible USDZ file")
+                    }
+                    
+                    try? FileManager.default.removeItem(at: tempURL)
+                    
+                } catch {
+                    print("[3DViewer] SceneKit also failed: \(error)")
+                    print("[3DViewer] The USDZ file may be corrupted or incompatible")
+                    try? FileManager.default.removeItem(at: tempURL)
+                }
             }
             
-            // Clean up temp file
-            try? FileManager.default.removeItem(at: tempURL)
-            
         } catch {
-            print("[3DViewer] Failed to load model: \(error)")
+            print("[3DViewer] Download failed: \(error)")
         }
     }
     
@@ -256,20 +337,46 @@ struct RealityKitModelViewer: UIViewRepresentable {
     }
     
     class Coordinator: NSObject {
-        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            // Handle tap for rotation/interaction
+        var anchor: AnchorEntity?
+        var lastRotation: Float = 0
+        
+        @objc func handleRotation(_ gesture: UIRotationGestureRecognizer) {
+            guard let anchor = anchor else { return }
+            
+            if gesture.state == .changed {
+                let rotation = Float(gesture.rotation)
+                let rotationDiff = rotation - lastRotation
+                anchor.transform.rotation *= simd_quatf(angle: rotationDiff, axis: [0, 1, 0])
+                lastRotation = rotation
+            } else if gesture.state == .ended {
+                lastRotation = 0
+            }
+        }
+        
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard let anchor = anchor, let view = gesture.view else { return }
+            
+            let translation = gesture.translation(in: view)
+            let rotationX = Float(translation.y) * 0.01
+            let rotationY = Float(translation.x) * 0.01
+            
+            if gesture.state == .changed {
+                anchor.transform.rotation *= simd_quatf(angle: rotationY, axis: [0, 1, 0])
+                anchor.transform.rotation *= simd_quatf(angle: rotationX, axis: [1, 0, 0])
+            }
         }
     }
 }
 
-// MARK: - OBJ Model Viewer (for Scans)
+// MARK: - SceneKit Model Viewer (for GLB, OBJ, and other formats)
 
-struct OBJModelViewer: UIViewRepresentable {
+struct SceneKitModelViewer: UIViewRepresentable {
     let url: String
+    let fileExtension: String
     
     func makeUIView(context: Context) -> SCNView {
         let sceneView = SCNView()
-        sceneView.backgroundColor = .clear
+        sceneView.backgroundColor = .black
         sceneView.allowsCameraControl = true
         sceneView.autoenablesDefaultLighting = true
         sceneView.antialiasingMode = .multisampling4X
@@ -297,7 +404,7 @@ struct OBJModelViewer: UIViewRepresentable {
         newScene.rootNode.addChildNode(ambientLightNode)
         
         Task {
-            await loadOBJModel(into: newScene, sceneView: sceneView)
+            await loadModel(into: newScene, sceneView: sceneView)
         }
         
         return sceneView
@@ -305,37 +412,248 @@ struct OBJModelViewer: UIViewRepresentable {
     
     func updateUIView(_ uiView: SCNView, context: Context) {}
     
-    private func loadOBJModel(into scene: SCNScene, sceneView: SCNView) async {
+    private func loadModel(into scene: SCNScene, sceneView: SCNView) async {
         guard let modelURL = URL(string: url) else {
             print("[3DViewer] Invalid URL: \(url)")
             return
         }
         
         do {
-            print("[3DViewer] Loading OBJ from: \(modelURL)")
+            print("[3DViewer] Loading \(fileExtension.uppercased()) from: \(modelURL)")
             
-            // Download the OBJ file
-            let (data, _) = try await URLSession.shared.data(from: modelURL)
+            // Download the model file
+            let (data, response) = try await URLSession.shared.data(from: modelURL)
+            
+            print("[3DViewer] Downloaded \(data.count) bytes")
+            if let httpResponse = response as? HTTPURLResponse {
+                print("[3DViewer] Content-Type: \(httpResponse.allHeaderFields["Content-Type"] ?? "unknown")")
+            }
             
             // Save to temp file
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("obj")
+                .appendingPathExtension(fileExtension)
             try data.write(to: tempURL)
             
             print("[3DViewer] Saved to temp: \(tempURL)")
             
-            // Load OBJ using MDLAsset
+            // Verify file exists and has content
+            let fileExists = FileManager.default.fileExists(atPath: tempURL.path)
+            let attributes = try? FileManager.default.attributesOfItem(atPath: tempURL.path)
+            let fileSize = attributes?[.size] as? Int64 ?? 0
+            print("[3DViewer] File exists: \(fileExists), size: \(fileSize) bytes")
+            
+            // Create a container node
+            let node = SCNNode()
+            
+            // Try loading with MDLAsset first
             let asset = MDLAsset(url: tempURL)
             
-            guard let object = asset.object(at: 0) as? MDLMesh else {
-                print("[3DViewer] Failed to extract mesh from OBJ")
+            if asset.count > 0 {
+                // MDLAsset found objects
+                print("[3DViewer] MDLAsset found \(asset.count) objects")
+                for index in 0..<asset.count {
+                    let object = asset.object(at: index)
+                    print("[3DViewer] Object \(index) type: \(type(of: object))")
+                    
+                    // Try different object types
+                    if let mesh = object as? MDLMesh {
+                        let childNode = SCNNode(mdlObject: mesh)
+                        node.addChildNode(childNode)
+                        print("[3DViewer] Added mesh object \(index)")
+                    } else if let mdlObject = object as? MDLObject {
+                        // Try converting any MDLObject to SCNNode
+                        let childNode = SCNNode(mdlObject: mdlObject)
+                        node.addChildNode(childNode)
+                        print("[3DViewer] Added MDLObject \(index)")
+                    } else {
+                        print("[3DViewer] Skipping object \(index) - unsupported type")
+                    }
+                }
+                
+                // If MDLAsset didn't work well, try SCNScene as fallback for USDC
+                if node.childNodes.isEmpty && (fileExtension.lowercased() == "usdc" || fileExtension.lowercased() == "usdz") {
+                    print("[3DViewer] MDLAsset didn't extract nodes, trying SCNScene for USD file")
+                    if let loadedScene = try? SCNScene(url: tempURL, options: nil) {
+                        for child in loadedScene.rootNode.childNodes {
+                            node.addChildNode(child.clone())
+                        }
+                        print("[3DViewer] Loaded \(node.childNodes.count) nodes via SCNScene")
+                    }
+                }
+            } else if fileExtension.lowercased() == "usdz" || fileExtension.lowercased() == "usdc" {
+                print("[3DViewer] Attempting to load \(fileExtension.uppercased()) file with SCNScene")
+                
+                // Check file signature
+                let fileHandle = try FileHandle(forReadingFrom: tempURL)
+                let headerData = fileHandle.readData(ofLength: 4)
+                fileHandle.closeFile()
+                let magic = headerData.map { String(format: "%02x", $0) }.joined()
+                print("[3DViewer] File signature: \(magic)")
+                
+                // USDZ files are ZIP archives (magic: 504b), USDC files start with PXR- (50 58 52 2d)
+                let isZip = magic.hasPrefix("504b")
+                let isUSDC = magic.hasPrefix("5058522d") // PXR-
+                
+                if fileExtension.lowercased() == "usdz" && !isZip {
+                    print("[3DViewer] WARNING: .usdz file doesn't have ZIP signature, might be .usdc")
+                } else if fileExtension.lowercased() == "usdc" && !isUSDC {
+                    print("[3DViewer] WARNING: .usdc file doesn't have expected PXR signature")
+                }
+                
+                if !isZip && !isUSDC {
+                    print("[3DViewer] ERROR: File doesn't match expected USD format")
+                    print("[3DViewer] Expected ZIP (USDZ) or PXR (USDC) signature")
+                    
+                    await MainActor.run {
+                        let errorText = SCNText(string: "Invalid USDZ file\nFile is corrupted", extrusionDepth: 0.05)
+                        errorText.font = UIFont.systemFont(ofSize: 0.3)
+                        errorText.alignmentMode = CATextLayerAlignmentMode.center.rawValue
+                        errorText.firstMaterial?.diffuse.contents = UIColor.red
+                        let errorNode = SCNNode(geometry: errorText)
+                        errorNode.position = SCNVector3(x: -1, y: 0, z: 0)
+                        scene.rootNode.addChildNode(errorNode)
+                    }
+                    
+                    try? FileManager.default.removeItem(at: tempURL)
+                    return
+                }
+                
+                do {
+                    let loadedScene = try SCNScene(url: tempURL, options: [
+                        .checkConsistency: true,
+                        .createNormalsIfAbsent: true
+                    ])
+                    print("[3DViewer] USDZ scene loaded with \(loadedScene.rootNode.childNodes.count) root children")
+                    
+                    // Add all children from the loaded scene
+                    for child in loadedScene.rootNode.childNodes {
+                        node.addChildNode(child.clone())
+                    }
+                    
+                    if node.childNodes.isEmpty {
+                        print("[3DViewer] No nodes found in USDZ root, checking deeper...")
+                        // Sometimes USDZ has nested structure
+                        func addAllChildren(from parent: SCNNode, to target: SCNNode) {
+                            for child in parent.childNodes {
+                                target.addChildNode(child.clone())
+                                if child.childNodes.count > 0 {
+                                    addAllChildren(from: child, to: target)
+                                }
+                            }
+                        }
+                        addAllChildren(from: loadedScene.rootNode, to: node)
+                    }
+                    
+                    if node.childNodes.isEmpty {
+                        print("[3DViewer] ERROR: USDZ loaded but contains no geometry")
+                        print("[3DViewer] The USDZ file may be empty or corrupted")
+                        
+                        await MainActor.run {
+                            let errorText = SCNText(string: "Empty USDZ file\nNo geometry found", extrusionDepth: 0.05)
+                            errorText.font = UIFont.systemFont(ofSize: 0.3)
+                            errorText.alignmentMode = CATextLayerAlignmentMode.center.rawValue
+                            errorText.firstMaterial?.diffuse.contents = UIColor.orange
+                            let errorNode = SCNNode(geometry: errorText)
+                            errorNode.position = SCNVector3(x: -1.5, y: 0, z: 0)
+                            scene.rootNode.addChildNode(errorNode)
+                        }
+                        
+                        try? FileManager.default.removeItem(at: tempURL)
+                        return
+                    }
+                    
+                    print("[3DViewer] USDZ loaded successfully with \(node.childNodes.count) nodes")
+                } catch {
+                    print("[3DViewer] Failed to load USDZ with SCNScene: \(error)")
+                    print("[3DViewer] The USDZ file appears to be corrupted or in an unsupported format")
+                    
+                    await MainActor.run {
+                        let errorText = SCNText(string: "USDZ load failed\n\(error.localizedDescription)", extrusionDepth: 0.05)
+                        errorText.font = UIFont.systemFont(ofSize: 0.25)
+                        errorText.alignmentMode = CATextLayerAlignmentMode.center.rawValue
+                        errorText.firstMaterial?.diffuse.contents = UIColor.red
+                        let errorNode = SCNNode(geometry: errorText)
+                        errorNode.position = SCNVector3(x: -1.5, y: 0, z: 0)
+                        scene.rootNode.addChildNode(errorNode)
+                    }
+                    
+                    try? FileManager.default.removeItem(at: tempURL)
+                    return
+                }
+            } else if fileExtension.lowercased() == "glb" {
+                print("[3DViewer] Attempting to load GLB file")
+                
+                // Try SCNScene with all available options
+                let loadOptions: [SCNSceneSource.LoadingOption: Any] = [
+                    .checkConsistency: true,
+                    .flattenScene: false,
+                    .createNormalsIfAbsent: true,
+                    .preserveOriginalTopology: false
+                ]
+                
+                do {
+                    let loadedScene = try SCNScene(url: tempURL, options: loadOptions)
+                    print("[3DViewer] GLB scene loaded, checking root node children: \(loadedScene.rootNode.childNodes.count)")
+                    
+                    if loadedScene.rootNode.childNodes.isEmpty {
+                        print("[3DViewer] Root node is empty, trying to extract from scene source")
+                        
+                        // Try using SCNSceneSource for more control
+                        let sceneSource = SCNSceneSource(url: tempURL, options: nil)
+                        if let sceneSource = sceneSource {
+                            let entryIDs = sceneSource.identifiersOfEntries(withClass: SCNNode.self)
+                            print("[3DViewer] Found \(entryIDs.count) node entries")
+                            
+                            for identifier in entryIDs {
+                                if let entry = sceneSource.entryWithIdentifier(identifier, withClass: SCNNode.self) as? SCNNode {
+                                    node.addChildNode(entry)
+                                    print("[3DViewer] Added node: \(identifier)")
+                                }
+                            }
+                        }
+                    } else {
+                        for child in loadedScene.rootNode.childNodes {
+                            node.addChildNode(child.clone())
+                        }
+                        print("[3DViewer] GLB loaded with \(loadedScene.rootNode.childNodes.count) children")
+                    }
+                    
+                    if node.childNodes.isEmpty {
+                        print("[3DViewer] No geometry loaded from GLB")
+                        await MainActor.run {
+                            // Show a placeholder or error
+                            let errorGeometry = SCNText(string: "GLB Load Failed", extrusionDepth: 0.1)
+                            errorGeometry.font = UIFont.systemFont(ofSize: 0.5)
+                            let errorNode = SCNNode(geometry: errorGeometry)
+                            scene.rootNode.addChildNode(errorNode)
+                        }
+                        try? FileManager.default.removeItem(at: tempURL)
+                        return
+                    }
+                } catch {
+                    print("[3DViewer] Failed to load GLB: \(error.localizedDescription)")
+                    print("[3DViewer] Note: GLB format is not natively supported on iOS. Please use USDZ/USDC format instead.")
+                    
+                    await MainActor.run {
+                        // Show a helpful error message
+                        let errorText = SCNText(string: "GLB format not supported\nUse USDZ instead", extrusionDepth: 0.05)
+                        errorText.font = UIFont.systemFont(ofSize: 0.3)
+                        errorText.alignmentMode = CATextLayerAlignmentMode.center.rawValue
+                        errorText.firstMaterial?.diffuse.contents = UIColor.orange
+                        let errorNode = SCNNode(geometry: errorText)
+                        errorNode.position = SCNVector3(x: -1, y: 0, z: 0)
+                        scene.rootNode.addChildNode(errorNode)
+                    }
+                    
+                    try? FileManager.default.removeItem(at: tempURL)
+                    return
+                }
+            } else {
+                print("[3DViewer] No objects found in \(fileExtension) file")
                 try? FileManager.default.removeItem(at: tempURL)
                 return
             }
-            
-            // Convert to SCNNode
-            let node = SCNNode(mdlObject: object)
             
             // Calculate bounds and center the model
             let (minBound, maxBound) = node.boundingBox
@@ -352,30 +670,41 @@ struct OBJModelViewer: UIViewRepresentable {
                 z: maxBound.z - minBound.z
             )
             let maxDimension = max(size.x, max(size.y, size.z))
-            let scale = Float(2.0 / maxDimension)
             
-            // Apply transformations
-            node.position = SCNVector3(x: -center.x * scale, y: -center.y * scale, z: -center.z * scale)
-            node.scale = SCNVector3(x: scale, y: scale, z: scale)
+            if maxDimension > 0 {
+                let scale = Float(2.0 / maxDimension)
+                
+                // Apply transformations
+                node.position = SCNVector3(x: -center.x * scale, y: -center.y * scale, z: -center.z * scale)
+                node.scale = SCNVector3(x: scale, y: scale, z: scale)
+            }
             
-            // Add material
-            let material = SCNMaterial()
-            material.diffuse.contents = UIColor.systemGray
-            material.lightingModel = .physicallyBased
-            material.roughness.contents = 0.5
-            material.metalness.contents = 0.0
-            node.geometry?.materials = [material]
+            // Only add node if it has actual content
+            guard !node.childNodes.isEmpty else {
+                print("[3DViewer] ERROR: No geometry was loaded from the file")
+                await MainActor.run {
+                    let errorText = SCNText(string: "No 3D content\nFile may be empty", extrusionDepth: 0.05)
+                    errorText.font = UIFont.systemFont(ofSize: 0.3)
+                    errorText.alignmentMode = CATextLayerAlignmentMode.center.rawValue
+                    errorText.firstMaterial?.diffuse.contents = UIColor.red
+                    let errorNode = SCNNode(geometry: errorText)
+                    errorNode.position = SCNVector3(x: -1, y: 0, z: 0)
+                    scene.rootNode.addChildNode(errorNode)
+                }
+                try? FileManager.default.removeItem(at: tempURL)
+                return
+            }
             
             await MainActor.run {
                 scene.rootNode.addChildNode(node)
-                print("[3DViewer] OBJ model loaded successfully")
+                print("[3DViewer] Model loaded successfully with \(node.childNodes.count) nodes")
             }
             
             // Clean up temp file
             try? FileManager.default.removeItem(at: tempURL)
             
         } catch {
-            print("[3DViewer] Failed to load OBJ: \(error)")
+            print("[3DViewer] Failed to load model: \(error)")
         }
     }
 }
