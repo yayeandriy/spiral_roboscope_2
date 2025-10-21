@@ -28,6 +28,12 @@ struct Space3DViewer: View {
     @State private var showAxes = true
     @State private var cameraAction: CameraControlButtons.CameraAction?
     
+    // Registration state
+    @State private var isRegistering = false
+    @State private var registrationProgress: String = ""
+    @State private var showRegistrationResult = false
+    @State private var registrationMetrics: String = ""
+    
     enum ModelType: String, CaseIterable {
         case glb = "GLB"
         case usdc = "USDC"
@@ -56,6 +62,14 @@ struct Space3DViewer: View {
             VStack {
                 topBar
                 Spacer()
+                
+                // Registration button and progress
+                registrationControls
+            }
+            
+            // Registration result overlay
+            if showRegistrationResult {
+                registrationResultOverlay
             }
         }
         .sheet(isPresented: $showARView) {
@@ -141,10 +155,94 @@ struct Space3DViewer: View {
                     space: space,
                     cameraAction: $cameraAction,
                     showGrid: $showGrid,
-                    showAxes: $showAxes
+                    showAxes: $showAxes,
+                    isRegistering: $isRegistering,
+                    registrationProgress: $registrationProgress,
+                    onRegistrationComplete: { metrics in
+                        isRegistering = false
+                        registrationMetrics = "RMSE: \(String(format: "%.3f", metrics.rmse))m\nInliers: \(String(format: "%.1f", metrics.inlierFraction * 100))%\nIterations: \(metrics.iterations)"
+                        showRegistrationResult = true
+                    }
                 )
             }
         }
+    }
+    
+    // MARK: - Registration Controls
+    
+    private var registrationControls: some View {
+        VStack(spacing: 16) {
+            if isRegistering {
+                VStack(spacing: 8) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                    Text(registrationProgress)
+                        .font(.caption)
+                        .foregroundColor(.white)
+                }
+                .padding(16)
+                .background(.ultraThinMaterial)
+                .cornerRadius(12)
+            } else if space.modelUsdcUrl != nil && space.scanUrl != nil {
+                Button(action: startRegistration) {
+                    Label("Register Models", systemImage: "point.3.connected.trianglepath.dotted")
+                        .font(.headline)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
+                .lgCapsule(tint: .blue)
+            }
+        }
+        .padding(.bottom, 32)
+    }
+    
+    private var registrationResultOverlay: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 48))
+                .foregroundColor(.green)
+            
+            Text("Registration Complete!")
+                .font(.headline)
+                .foregroundColor(.primary)
+            
+            Text(registrationMetrics)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            
+            Button("Dismiss") {
+                withAnimation {
+                    showRegistrationResult = false
+                }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(24)
+        .background(.ultraThinMaterial)
+        .cornerRadius(16)
+        .shadow(radius: 20)
+    }
+    
+    // MARK: - Registration Handler
+    
+    private func startRegistration() {
+        guard !isRegistering else { return }
+        
+        isRegistering = true
+        registrationProgress = "Preparing models..."
+        
+        Task {
+            await performRegistration()
+        }
+    }
+    
+    private func performRegistration() async {
+        // This will be called from the CombinedModelViewer
+        // The actual registration logic needs access to the scene nodes
+        print("[3DViewer] Registration started")
     }
     
     // MARK: - Camera Control Handlers
@@ -738,6 +836,9 @@ struct CombinedModelViewer: UIViewRepresentable {
     @Binding var cameraAction: CameraControlButtons.CameraAction?
     @Binding var showGrid: Bool
     @Binding var showAxes: Bool
+    @Binding var isRegistering: Bool
+    @Binding var registrationProgress: String
+    let onRegistrationComplete: (ModelRegistrationService.RegistrationResult) -> Void
     
     func makeUIView(context: Context) -> SCNView {
         let sceneView = SCNView()
@@ -793,6 +894,14 @@ struct CombinedModelViewer: UIViewRepresentable {
             print("[CombinedViewer] Processing camera action: \(action)")
             context.coordinator.lastCameraAction = action
             handleCameraAction(action, context: context)
+        }
+        
+        // Handle registration trigger
+        if isRegistering && !context.coordinator.isRegistering {
+            context.coordinator.isRegistering = true
+            Task {
+                await performRegistration(context: context)
+            }
         }
     }
     
@@ -874,6 +983,9 @@ struct CombinedModelViewer: UIViewRepresentable {
         var sceneView: SCNView?
         var modelBounds: (min: SCNVector3, max: SCNVector3)?
         var lastCameraAction: CameraControlButtons.CameraAction?
+        var primaryModelNode: SCNNode?
+        var scanModelNode: SCNNode?
+        var isRegistering: Bool = false
     }
     
     // MARK: - Scene Setup Helpers
@@ -981,18 +1093,20 @@ struct CombinedModelViewer: UIViewRepresentable {
         if let usdcUrl = space.modelUsdcUrl {
             let fileExt = usdcUrl.hasSuffix(".usdz") ? "usdz" : "usdc"
             print("[CombinedViewer] Loading primary model: \(fileExt.uppercased())")
-            await loadModel(url: usdcUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: nil)
+            let node = await loadModel(url: usdcUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: nil, nodeName: "primaryModel")
+            coordinator.primaryModelNode = node
         } else if let glbUrl = space.modelGlbUrl {
             print("[CombinedViewer] Loading primary model: GLB")
-            await loadModel(url: glbUrl, fileExtension: "glb", into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: nil)
+            let node = await loadModel(url: glbUrl, fileExtension: "glb", into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: nil, nodeName: "primaryModel")
+            coordinator.primaryModelNode = node
         }
         
         // Load scan model (OBJ)
         if let scanUrl = space.scanUrl {
             let fileExt = scanUrl.hasSuffix(".obj") ? "obj" : (scanUrl.hasSuffix(".glb") ? "glb" : "obj")
             print("[CombinedViewer] Loading scan model: \(fileExt.uppercased())")
-            // Offset scan slightly so it doesn't overlap exactly with primary model
-            await loadModel(url: scanUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: UIColor.cyan.withAlphaComponent(0.5))
+            let node = await loadModel(url: scanUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: UIColor.cyan.withAlphaComponent(0.5), nodeName: "scanModel")
+            coordinator.scanModelNode = node
         }
         
         // Calculate bounds and fit camera to view all objects
@@ -1063,10 +1177,10 @@ struct CombinedModelViewer: UIViewRepresentable {
         print("[CombinedViewer] Fitted camera - Center: \(center), Distance: \(distance)")
     }
     
-    private func loadModel(url: String, fileExtension: String, into scene: SCNScene, offset: SCNVector3, color: UIColor?) async {
+    private func loadModel(url: String, fileExtension: String, into scene: SCNScene, offset: SCNVector3, color: UIColor?, nodeName: String) async -> SCNNode? {
         guard let modelURL = URL(string: url) else {
             print("[CombinedViewer] Invalid URL: \(url)")
-            return
+            return nil
         }
         
         do {
@@ -1116,6 +1230,7 @@ struct CombinedModelViewer: UIViewRepresentable {
             
             // Apply offset
             containerNode.position = offset
+            containerNode.name = nodeName
             
             await MainActor.run {
                 scene.rootNode.addChildNode(containerNode)
@@ -1123,9 +1238,103 @@ struct CombinedModelViewer: UIViewRepresentable {
             }
             
             try? FileManager.default.removeItem(at: tempURL)
+            return containerNode
             
         } catch {
             print("[CombinedViewer] Failed to load \(fileExtension.uppercased()): \(error)")
+            return nil
+        }
+    }
+    
+    // MARK: - Registration
+    
+    private func performRegistration(context: Context) async {
+        guard let primaryNode = context.coordinator.primaryModelNode,
+              let scanNode = context.coordinator.scanModelNode else {
+            print("[CombinedViewer] Models not loaded yet for registration")
+            await MainActor.run {
+                context.coordinator.isRegistering = false
+                isRegistering = false
+            }
+            return
+        }
+        
+        print("[CombinedViewer] Starting registration...")
+        
+        // Extract point clouds
+        await updateProgress("Extracting primary model points...", context: context)
+        let primaryPoints = ModelRegistrationService.extractPointCloud(from: primaryNode, sampleCount: 5000)
+        
+        await updateProgress("Extracting scan points...", context: context)
+        let scanPoints = ModelRegistrationService.extractPointCloud(from: scanNode, sampleCount: 10000)
+        
+        // Perform registration
+        if let result = await ModelRegistrationService.registerModels(
+            modelPoints: primaryPoints,
+            scanPoints: scanPoints,
+            maxIterations: 30,
+            convergenceThreshold: 0.001,
+            progressHandler: { progress in
+                Task { @MainActor in
+                    self.registrationProgress = progress
+                }
+            }
+        ) {
+            print("[CombinedViewer] Registration complete!")
+            print("[CombinedViewer] RMSE: \(result.rmse)m, Inliers: \(result.inlierFraction * 100)%")
+            print("[CombinedViewer] Transform matrix: \(result.transformMatrix)")
+            
+            // Apply transform to primary model with animation
+            await MainActor.run {
+                // Log original position
+                let originalPos = primaryNode.position
+                let originalTransform = primaryNode.simdTransform
+                print("[CombinedViewer] Original position: (\(originalPos.x), \(originalPos.y), \(originalPos.z))")
+                print("[CombinedViewer] Original transform: \(originalTransform)")
+                
+                // The result.transformMatrix is a world-space transform computed from world-space points
+                // We need to convert this to the node's local space
+                // If the node has a parent, we need: localTransform = parentTransform^-1 * worldTransform
+                // But since both models are children of scene.rootNode with no parent transform, we can directly use it
+                
+                // Use SCNTransaction for smooth animation
+                SCNTransaction.begin()
+                SCNTransaction.animationDuration = 1.0
+                SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                
+                // Compose the registration transform with the current transform
+                // New world transform = T_result (world) * originalTransform (world)
+                let composedTransform = result.transformMatrix * originalTransform
+                primaryNode.simdTransform = composedTransform
+                
+                // Log the new position for debugging
+                let newPos = primaryNode.position
+                let translation = SIMD3<Float>(newPos.x - originalPos.x, newPos.y - originalPos.y, newPos.z - originalPos.z)
+                print("[CombinedViewer] New position: (\(newPos.x), \(newPos.y), \(newPos.z))")
+                print("[CombinedViewer] Translation applied: (\(translation.x), \(translation.y), \(translation.z))")
+                print("[CombinedViewer] Distance moved: \(length(translation))")
+                
+                // Verify the transform was applied
+                let finalTransform = primaryNode.simdTransform
+                print("[CombinedViewer] Final composed transform: \(finalTransform)")
+                
+                SCNTransaction.commit()
+                
+                context.coordinator.isRegistering = false
+                onRegistrationComplete(result)
+            }
+        } else {
+            print("[CombinedViewer] Registration failed")
+            await MainActor.run {
+                context.coordinator.isRegistering = false
+                isRegistering = false
+            }
+        }
+    }
+    
+    private func updateProgress(_ message: String, context: Context) async {
+        await MainActor.run {
+            registrationProgress = message
         }
     }
 }
