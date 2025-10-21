@@ -17,6 +17,10 @@ struct SpaceARView: View {
     @StateObject private var spaceService = SpaceService.shared
     @State private var arView: ARView?
     
+    // Mode switching
+    @State private var currentMode: SpaceMode = .scan
+    @State private var show3DViewer = false
+    
     // Scanning state
     @State private var isScanning = false
     @State private var hasScanData = false
@@ -24,6 +28,13 @@ struct SpaceARView: View {
     @State private var exportProgress: Double = 0.0
     @State private var exportStatus: String = ""
     @State private var showSuccessMessage = false
+    
+    // MARK: - Computed Properties
+    
+    /// Check if the space has any 3D model available for viewing
+    private var hasAvailable3DModel: Bool {
+        space.modelGlbUrl != nil || space.modelUsdcUrl != nil || space.scanUrl != nil
+    }
     
     var body: some View {
         ZStack {
@@ -33,9 +44,24 @@ struct SpaceARView: View {
                 .onDisappear { captureSession.stop() }
                 .task { await loadPrimaryModelIfAvailable() }
             
-            // Top bar with Done button
+            // Top bar with Done button and Mode Switcher
             VStack {
                 HStack {
+                    // iOS Standard Segmented Control
+                    Picker("View Mode", selection: $currentMode) {
+                        Label("3D View", systemImage: "cube")
+                            .tag(SpaceMode.view3D)
+                        Label("Scan", systemImage: "scanner")
+                            .tag(SpaceMode.scan)
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!hasAvailable3DModel && currentMode == .scan)
+                    .onChange(of: currentMode) { newMode in
+                        if newMode == .view3D {
+                            show3DViewer = true
+                        }
+                    }
+                    
                     Spacer()
                     
                     Button("Done") {
@@ -63,6 +89,15 @@ struct SpaceARView: View {
             // Success message
             if showSuccessMessage {
                 successMessageOverlay
+            }
+        }
+        .sheet(isPresented: $show3DViewer) {
+            Space3DViewer(space: space)
+        }
+        .onChange(of: show3DViewer) { newValue in
+            if !newValue {
+                // When 3D viewer is dismissed, switch back to scan mode
+                currentMode = .scan
             }
         }
     }
