@@ -38,9 +38,14 @@ struct Space: Codable, Identifiable, Hashable {
         return modelUsdcUrl ?? modelGlbUrl
     }
     
-    /// Check if the space has any 3D model
+    /// Check if the space has any 3D model (GLB, USDC, or scan)
     var hasModel: Bool {
-        return modelGlbUrl != nil || modelUsdcUrl != nil
+        return modelGlbUrl != nil || modelUsdcUrl != nil || scanUrl != nil
+    }
+    
+    /// Check if the space has any 3D model files for viewing
+    var has3DContent: Bool {
+        return modelGlbUrl != nil || modelUsdcUrl != nil || scanUrl != nil
     }
 }
 

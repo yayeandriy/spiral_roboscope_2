@@ -10,7 +10,8 @@ import SwiftUI
 struct SpacesView: View {
     @StateObject private var spaceService = SpaceService.shared
     @State private var showingCreateSheet = false
-    @State private var selectedSpace: Space?
+    @State private var selectedSpaceFor3D: Space?
+    @State private var selectedSpaceForAR: Space?
     
     var body: some View {
         NavigationView {
@@ -60,7 +61,10 @@ struct SpacesView: View {
             .task {
                 await loadInitialData()
             }
-            .fullScreenCover(item: $selectedSpace) { space in
+            .fullScreenCover(item: $selectedSpaceFor3D) { space in
+                Space3DViewer(space: space)
+            }
+            .fullScreenCover(item: $selectedSpaceForAR) { space in
                 SpaceARView(space: space)
             }
         }
@@ -72,14 +76,37 @@ struct SpacesView: View {
         ScrollView {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)], spacing: 16) {
                 ForEach(spaceService.spaces) { space in
-                    SpaceTileView(space: space) {
-                        Task { await deleteSpace(space) }
+                    SpaceTileView(
+                        space: space,
+                        onDelete: {
+                            Task { await deleteSpace(space) }
+                        },
+                        onView3D: {
+                            selectedSpaceFor3D = space
+                        },
+                        onScan: {
+                            selectedSpaceForAR = space
+                        }
+                    )
+                    .onTapGesture { 
+                        handleSpaceTap(space)
                     }
-                    .onTapGesture { selectedSpace = space }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+        }
+    }
+    
+    // MARK: - Space Tap Handler
+    
+    private func handleSpaceTap(_ space: Space) {
+        // If space has any 3D model (GLB, USDC, or scan), open 3D viewer
+        if space.has3DContent {
+            selectedSpaceFor3D = space
+        } else {
+            // Otherwise open AR view for scanning
+            selectedSpaceForAR = space
         }
     }
     
@@ -139,8 +166,14 @@ struct SpacesView: View {
 struct SpaceTileView: View {
     let space: Space
     var onDelete: (() -> Void)? = nil
+    var onView3D: (() -> Void)? = nil
+    var onScan: (() -> Void)? = nil
 
     @Environment(\.colorScheme) private var colorScheme
+    
+    private var has3DModels: Bool {
+        space.has3DContent
+    }
 
     var body: some View {
         ZStack {
@@ -203,6 +236,18 @@ struct SpaceTileView: View {
         }
         .aspectRatio(1, contentMode: .fit) // Square card
         .contextMenu {
+            if has3DModels, let onView3D {
+                Button { onView3D() } label: {
+                    Label("View 3D Models", systemImage: "cube")
+                }
+            }
+            
+            if let onScan {
+                Button { onScan() } label: {
+                    Label("Scan Space", systemImage: "camera.metering.center.weighted")
+                }
+            }
+            
             if let onDelete {
                 Button(role: .destructive) { onDelete() } label: {
                     Label("Delete", systemImage: "trash")
