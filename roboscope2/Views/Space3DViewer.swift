@@ -21,6 +21,10 @@ struct Space3DViewer: View {
     @State private var currentMode: SpaceMode = .view3D
     @State private var showARView = false
     
+    // Model display options
+    @State private var showScanModel = true
+    @State private var showPrimaryModel = true
+    
     enum ModelType: String, CaseIterable {
         case glb = "GLB"
         case usdc = "USDC"
@@ -129,25 +133,8 @@ struct Space3DViewer: View {
                         .padding(.horizontal)
                 }
             } else {
-                // Show the appropriate viewer based on selected model
-                // Use SceneKit for all formats for better compatibility
-                if selectedModel == .scan, let scanUrl = space.scanUrl {
-                    SceneKitModelViewer(url: scanUrl, fileExtension: "obj")
-                } else if selectedModel == .glb {
-                    // GLB is not natively supported on iOS, show message
-                    if let usdcUrl = space.modelUsdcUrl {
-                        // Fall back to USDC if available - determine extension from URL
-                        let fileExt = usdcUrl.hasSuffix(".usdz") ? "usdz" : "usdc"
-                        SceneKitModelViewer(url: usdcUrl, fileExtension: fileExt)
-                    } else if let glbUrl = space.modelGlbUrl {
-                        // Try loading GLB anyway (will likely fail)
-                        SceneKitModelViewer(url: glbUrl, fileExtension: "glb")
-                    }
-                } else if selectedModel == .usdc, let usdcUrl = space.modelUsdcUrl {
-                    // Determine the actual file extension from the URL
-                    let fileExt = usdcUrl.hasSuffix(".usdz") ? "usdz" : "usdc"
-                    SceneKitModelViewer(url: usdcUrl, fileExtension: fileExt)
-                }
+                // Show combined viewer with both primary model and scan
+                CombinedModelViewer(space: space)
             }
         }
     }
@@ -705,6 +692,138 @@ struct SceneKitModelViewer: UIViewRepresentable {
             
         } catch {
             print("[3DViewer] Failed to load model: \(error)")
+        }
+    }
+}
+
+// MARK: - Combined Model Viewer (Primary Model + Scan)
+
+struct CombinedModelViewer: UIViewRepresentable {
+    let space: Space
+    
+    func makeUIView(context: Context) -> SCNView {
+        let sceneView = SCNView()
+        sceneView.backgroundColor = .black
+        sceneView.allowsCameraControl = true
+        sceneView.autoenablesDefaultLighting = true
+        sceneView.antialiasingMode = .multisampling4X
+        
+        let newScene = SCNScene()
+        sceneView.scene = newScene
+        
+        // Setup camera
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.position = SCNVector3(x: 0, y: 0, z: 3)
+        newScene.rootNode.addChildNode(cameraNode)
+        
+        // Add lighting
+        let lightNode = SCNNode()
+        lightNode.light = SCNLight()
+        lightNode.light?.type = .omni
+        lightNode.position = SCNVector3(x: 0, y: 10, z: 10)
+        newScene.rootNode.addChildNode(lightNode)
+        
+        let ambientLightNode = SCNNode()
+        ambientLightNode.light = SCNLight()
+        ambientLightNode.light?.type = .ambient
+        ambientLightNode.light?.color = UIColor.white.withAlphaComponent(0.3)
+        newScene.rootNode.addChildNode(ambientLightNode)
+        
+        Task {
+            await loadModels(into: newScene, sceneView: sceneView)
+        }
+        
+        return sceneView
+    }
+    
+    func updateUIView(_ uiView: SCNView, context: Context) {}
+    
+    private func loadModels(into scene: SCNScene, sceneView: SCNView) async {
+        print("[CombinedViewer] Loading models for space: \(space.name)")
+        
+        // Load primary model (USDC/GLB)
+        if let usdcUrl = space.modelUsdcUrl {
+            let fileExt = usdcUrl.hasSuffix(".usdz") ? "usdz" : "usdc"
+            print("[CombinedViewer] Loading primary model: \(fileExt.uppercased())")
+            await loadModel(url: usdcUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: nil)
+        } else if let glbUrl = space.modelGlbUrl {
+            print("[CombinedViewer] Loading primary model: GLB")
+            await loadModel(url: glbUrl, fileExtension: "glb", into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: nil)
+        }
+        
+        // Load scan model (OBJ)
+        if let scanUrl = space.scanUrl {
+            let fileExt = scanUrl.hasSuffix(".obj") ? "obj" : (scanUrl.hasSuffix(".glb") ? "glb" : "obj")
+            print("[CombinedViewer] Loading scan model: \(fileExt.uppercased())")
+            // Offset scan slightly so it doesn't overlap exactly with primary model
+            await loadModel(url: scanUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: UIColor.cyan.withAlphaComponent(0.5))
+        }
+    }
+    
+    private func loadModel(url: String, fileExtension: String, into scene: SCNScene, offset: SCNVector3, color: UIColor?) async {
+        guard let modelURL = URL(string: url) else {
+            print("[CombinedViewer] Invalid URL: \(url)")
+            return
+        }
+        
+        do {
+            print("[CombinedViewer] Downloading \(fileExtension.uppercased()) from: \(modelURL)")
+            
+            let (data, _) = try await URLSession.shared.data(from: modelURL)
+            print("[CombinedViewer] Downloaded \(data.count) bytes")
+            
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(fileExtension)
+            try data.write(to: tempURL)
+            
+            let containerNode = SCNNode()
+            let asset = MDLAsset(url: tempURL)
+            
+            if asset.count > 0 {
+                print("[CombinedViewer] MDLAsset found \(asset.count) objects")
+                for index in 0..<asset.count {
+                    let object = asset.object(at: index)
+                    
+                    if let mesh = object as? MDLMesh {
+                        let childNode = SCNNode(mdlObject: mesh)
+                        containerNode.addChildNode(childNode)
+                    } else if let mdlObject = object as? MDLObject {
+                        let childNode = SCNNode(mdlObject: mdlObject)
+                        containerNode.addChildNode(childNode)
+                    }
+                }
+                
+                if containerNode.childNodes.isEmpty && (fileExtension.lowercased() == "usdc" || fileExtension.lowercased() == "usdz") {
+                    if let loadedScene = try? SCNScene(url: tempURL, options: nil) {
+                        for child in loadedScene.rootNode.childNodes {
+                            containerNode.addChildNode(child.clone())
+                        }
+                    }
+                }
+            }
+            
+            // Apply color if specified (for scan visualization)
+            if let color = color {
+                containerNode.enumerateChildNodes { node, _ in
+                    node.geometry?.firstMaterial?.diffuse.contents = color
+                    node.geometry?.firstMaterial?.transparency = color.cgColor.alpha
+                }
+            }
+            
+            // Apply offset
+            containerNode.position = offset
+            
+            await MainActor.run {
+                scene.rootNode.addChildNode(containerNode)
+                print("[CombinedViewer] Added \(fileExtension.uppercased()) model with \(containerNode.childNodes.count) nodes")
+            }
+            
+            try? FileManager.default.removeItem(at: tempURL)
+            
+        } catch {
+            print("[CombinedViewer] Failed to load \(fileExtension.uppercased()): \(error)")
         }
     }
 }
