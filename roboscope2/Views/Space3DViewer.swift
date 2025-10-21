@@ -24,6 +24,9 @@ struct Space3DViewer: View {
     // Model display options
     @State private var showScanModel = true
     @State private var showPrimaryModel = true
+    @State private var showGrid = true
+    @State private var showAxes = true
+    @State private var cameraAction: CameraControlButtons.CameraAction?
     
     enum ModelType: String, CaseIterable {
         case glb = "GLB"
@@ -134,7 +137,39 @@ struct Space3DViewer: View {
                 }
             } else {
                 // Show combined viewer with both primary model and scan
-                CombinedModelViewer(space: space)
+                CombinedModelViewer(
+                    space: space,
+                    cameraAction: $cameraAction,
+                    showGrid: $showGrid,
+                    showAxes: $showAxes
+                )
+            }
+        }
+    }
+    
+    // MARK: - Camera Control Handlers
+    
+    private func handleCameraAction(_ action: CameraControlButtons.CameraAction) {
+        print("[3DViewer] Camera action triggered: \(action)")
+        switch action {
+        case .toggleGrid:
+            showGrid.toggle()
+            // Clear action immediately for toggle actions
+            DispatchQueue.main.async {
+                self.cameraAction = nil
+            }
+        case .toggleAxes:
+            showAxes.toggle()
+            // Clear action immediately for toggle actions
+            DispatchQueue.main.async {
+                self.cameraAction = nil
+            }
+        default:
+            // For camera view changes, set the action to trigger update
+            cameraAction = action
+            // Clear after a delay to allow the view to update
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.cameraAction = nil
             }
         }
     }
@@ -700,46 +735,246 @@ struct SceneKitModelViewer: UIViewRepresentable {
 
 struct CombinedModelViewer: UIViewRepresentable {
     let space: Space
+    @Binding var cameraAction: CameraControlButtons.CameraAction?
+    @Binding var showGrid: Bool
+    @Binding var showAxes: Bool
     
     func makeUIView(context: Context) -> SCNView {
         let sceneView = SCNView()
         sceneView.backgroundColor = .black
         sceneView.allowsCameraControl = true
-        sceneView.autoenablesDefaultLighting = true
+        sceneView.autoenablesDefaultLighting = false // We'll handle lighting manually
         sceneView.antialiasingMode = .multisampling4X
         
         let newScene = SCNScene()
         sceneView.scene = newScene
         
-        // Setup camera
+        // Setup camera with better defaults
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
-        cameraNode.position = SCNVector3(x: 0, y: 0, z: 3)
+        cameraNode.camera?.zFar = 1000
+        cameraNode.camera?.zNear = 0.1
+        cameraNode.camera?.fieldOfView = 60
+        cameraNode.position = SCNVector3(x: 3, y: 3, z: 3)
+        cameraNode.look(at: SCNVector3(x: 0, y: 0, z: 0))
+        cameraNode.name = "mainCamera"
         newScene.rootNode.addChildNode(cameraNode)
+        sceneView.pointOfView = cameraNode
         
-        // Add lighting
-        let lightNode = SCNNode()
-        lightNode.light = SCNLight()
-        lightNode.light?.type = .omni
-        lightNode.position = SCNVector3(x: 0, y: 10, z: 10)
-        newScene.rootNode.addChildNode(lightNode)
+        // Add floor grid
+        addFloorGrid(to: newScene)
         
-        let ambientLightNode = SCNNode()
-        ambientLightNode.light = SCNLight()
-        ambientLightNode.light?.type = .ambient
-        ambientLightNode.light?.color = UIColor.white.withAlphaComponent(0.3)
-        newScene.rootNode.addChildNode(ambientLightNode)
+        // Add coordinate axes
+        addCoordinateAxes(to: newScene)
+        
+        // Add comprehensive lighting
+        addLighting(to: newScene)
+        
+        // Store scene in coordinator for camera controls
+        context.coordinator.scene = newScene
+        context.coordinator.sceneView = sceneView
         
         Task {
-            await loadModels(into: newScene, sceneView: sceneView)
+            await loadModels(into: newScene, sceneView: sceneView, coordinator: context.coordinator)
         }
         
         return sceneView
     }
     
-    func updateUIView(_ uiView: SCNView, context: Context) {}
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        // Handle visibility toggles
+        if let scene = context.coordinator.scene {
+            scene.rootNode.childNode(withName: "floorGrid", recursively: false)?.isHidden = !showGrid
+            scene.rootNode.childNode(withName: "coordinateAxes", recursively: false)?.isHidden = !showAxes
+        }
+        
+        // Handle camera actions - only process if it's different from last action
+        if let action = cameraAction, action != context.coordinator.lastCameraAction {
+            print("[CombinedViewer] Processing camera action: \(action)")
+            context.coordinator.lastCameraAction = action
+            handleCameraAction(action, context: context)
+        }
+    }
     
-    private func loadModels(into scene: SCNScene, sceneView: SCNView) async {
+    private func handleCameraAction(_ action: CameraControlButtons.CameraAction, context: Context) {
+        guard let scene = context.coordinator.scene,
+              let camera = scene.rootNode.childNode(withName: "mainCamera", recursively: false),
+              let bounds = context.coordinator.modelBounds else { return }
+        
+        let center = SCNVector3(
+            x: (bounds.min.x + bounds.max.x) / 2,
+            y: (bounds.min.y + bounds.max.y) / 2,
+            z: (bounds.min.z + bounds.max.z) / 2
+        )
+        
+        let size = SCNVector3(
+            x: bounds.max.x - bounds.min.x,
+            y: bounds.max.y - bounds.min.y,
+            z: bounds.max.z - bounds.min.z
+        )
+        
+        let maxDimension = max(size.x, max(size.y, size.z))
+        let distance = Float(maxDimension * 2.5)
+        
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.5
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        
+        switch action {
+        case .fitAll, .resetView:
+            camera.position = SCNVector3(
+                x: center.x + distance * 0.7,
+                y: center.y + distance * 0.7,
+                z: center.z + distance * 0.7
+            )
+            camera.look(at: center)
+            
+        case .topView:
+            camera.position = SCNVector3(
+                x: center.x,
+                y: center.y + distance,
+                z: center.z
+            )
+            camera.look(at: center)
+            
+        case .frontView:
+            camera.position = SCNVector3(
+                x: center.x,
+                y: center.y,
+                z: center.z + distance
+            )
+            camera.look(at: center)
+            
+        case .sideView:
+            camera.position = SCNVector3(
+                x: center.x + distance,
+                y: center.y,
+                z: center.z
+            )
+            camera.look(at: center)
+            
+        case .toggleGrid:
+            // Handled in updateUIView
+            break
+            
+        case .toggleAxes:
+            // Handled in updateUIView
+            break
+        }
+        
+        SCNTransaction.commit()
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+    
+    class Coordinator {
+        var scene: SCNScene?
+        var sceneView: SCNView?
+        var modelBounds: (min: SCNVector3, max: SCNVector3)?
+        var lastCameraAction: CameraControlButtons.CameraAction?
+    }
+    
+    // MARK: - Scene Setup Helpers
+    
+    private func addFloorGrid(to scene: SCNScene) {
+        let gridSize: CGFloat = 20
+        let divisions: Int = 20
+        let step = gridSize / CGFloat(divisions)
+        
+        let gridNode = SCNNode()
+        gridNode.name = "floorGrid"
+        
+        // Create grid lines
+        for i in 0...divisions {
+            let offset = -gridSize/2 + CGFloat(i) * step
+            
+            // Lines parallel to X axis
+            let lineX = SCNGeometry.line(
+                from: SCNVector3(x: Float(-gridSize/2), y: 0, z: Float(offset)),
+                to: SCNVector3(x: Float(gridSize/2), y: 0, z: Float(offset))
+            )
+            lineX.firstMaterial?.diffuse.contents = UIColor.white.withAlphaComponent(i == divisions/2 ? 0.4 : 0.15)
+            let lineXNode = SCNNode(geometry: lineX)
+            gridNode.addChildNode(lineXNode)
+            
+            // Lines parallel to Z axis
+            let lineZ = SCNGeometry.line(
+                from: SCNVector3(x: Float(offset), y: 0, z: Float(-gridSize/2)),
+                to: SCNVector3(x: Float(offset), y: 0, z: Float(gridSize/2))
+            )
+            lineZ.firstMaterial?.diffuse.contents = UIColor.white.withAlphaComponent(i == divisions/2 ? 0.4 : 0.15)
+            let lineZNode = SCNNode(geometry: lineZ)
+            gridNode.addChildNode(lineZNode)
+        }
+        
+        scene.rootNode.addChildNode(gridNode)
+    }
+    
+    private func addCoordinateAxes(to scene: SCNScene) {
+        let axisLength: CGFloat = 2.0
+        let axisThickness: CGFloat = 0.02
+        
+        // X axis (Red)
+        let xAxis = SCNCylinder(radius: axisThickness, height: axisLength)
+        xAxis.firstMaterial?.diffuse.contents = UIColor.red
+        let xAxisNode = SCNNode(geometry: xAxis)
+        xAxisNode.eulerAngles = SCNVector3(x: 0, y: 0, z: Float.pi / 2)
+        xAxisNode.position = SCNVector3(x: Float(axisLength/2), y: 0, z: 0)
+        
+        // Y axis (Green)
+        let yAxis = SCNCylinder(radius: axisThickness, height: axisLength)
+        yAxis.firstMaterial?.diffuse.contents = UIColor.green
+        let yAxisNode = SCNNode(geometry: yAxis)
+        yAxisNode.position = SCNVector3(x: 0, y: Float(axisLength/2), z: 0)
+        
+        // Z axis (Blue)
+        let zAxis = SCNCylinder(radius: axisThickness, height: axisLength)
+        zAxis.firstMaterial?.diffuse.contents = UIColor.blue
+        let zAxisNode = SCNNode(geometry: zAxis)
+        zAxisNode.eulerAngles = SCNVector3(x: Float.pi / 2, y: 0, z: 0)
+        zAxisNode.position = SCNVector3(x: 0, y: 0, z: Float(axisLength/2))
+        
+        let axesNode = SCNNode()
+        axesNode.name = "coordinateAxes"
+        axesNode.addChildNode(xAxisNode)
+        axesNode.addChildNode(yAxisNode)
+        axesNode.addChildNode(zAxisNode)
+        
+        scene.rootNode.addChildNode(axesNode)
+    }
+    
+    private func addLighting(to scene: SCNScene) {
+        // Key light (main directional light)
+        let keyLight = SCNNode()
+        keyLight.light = SCNLight()
+        keyLight.light?.type = .directional
+        keyLight.light?.intensity = 1000
+        keyLight.light?.castsShadow = true
+        keyLight.light?.shadowMode = .deferred
+        keyLight.position = SCNVector3(x: 5, y: 10, z: 5)
+        keyLight.look(at: SCNVector3(x: 0, y: 0, z: 0))
+        scene.rootNode.addChildNode(keyLight)
+        
+        // Fill light (softer, opposite side)
+        let fillLight = SCNNode()
+        fillLight.light = SCNLight()
+        fillLight.light?.type = .omni
+        fillLight.light?.intensity = 500
+        fillLight.position = SCNVector3(x: -5, y: 5, z: -5)
+        scene.rootNode.addChildNode(fillLight)
+        
+        // Ambient light (overall illumination)
+        let ambientLight = SCNNode()
+        ambientLight.light = SCNLight()
+        ambientLight.light?.type = .ambient
+        ambientLight.light?.intensity = 300
+        ambientLight.light?.color = UIColor.white
+        scene.rootNode.addChildNode(ambientLight)
+    }
+    
+    private func loadModels(into scene: SCNScene, sceneView: SCNView, coordinator: Coordinator) async {
         print("[CombinedViewer] Loading models for space: \(space.name)")
         
         // Load primary model (USDC/GLB)
@@ -759,6 +994,73 @@ struct CombinedModelViewer: UIViewRepresentable {
             // Offset scan slightly so it doesn't overlap exactly with primary model
             await loadModel(url: scanUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: UIColor.cyan.withAlphaComponent(0.5))
         }
+        
+        // Calculate bounds and fit camera to view all objects
+        await MainActor.run {
+            if let bounds = calculateSceneBounds(scene: scene) {
+                coordinator.modelBounds = bounds
+                fitCameraToShowAll(scene: scene, sceneView: sceneView, bounds: bounds)
+            }
+        }
+    }
+    
+    private func calculateSceneBounds(scene: SCNScene) -> (min: SCNVector3, max: SCNVector3)? {
+        var minPoint = SCNVector3(x: Float.infinity, y: Float.infinity, z: Float.infinity)
+        var maxPoint = SCNVector3(x: -Float.infinity, y: -Float.infinity, z: -Float.infinity)
+        var hasGeometry = false
+        
+        scene.rootNode.enumerateChildNodes { node, _ in
+            // Skip grid and axes
+            if node.name == "floorGrid" || node.name == "coordinateAxes" {
+                return
+            }
+            
+            if node.geometry != nil {
+                hasGeometry = true
+                let (nodeMin, nodeMax) = node.boundingBox
+                let worldMin = node.convertPosition(nodeMin, to: scene.rootNode)
+                let worldMax = node.convertPosition(nodeMax, to: scene.rootNode)
+                
+                minPoint.x = min(minPoint.x, worldMin.x, worldMax.x)
+                minPoint.y = min(minPoint.y, worldMin.y, worldMax.y)
+                minPoint.z = min(minPoint.z, worldMin.z, worldMax.z)
+                
+                maxPoint.x = max(maxPoint.x, worldMin.x, worldMax.x)
+                maxPoint.y = max(maxPoint.y, worldMin.y, worldMax.y)
+                maxPoint.z = max(maxPoint.z, worldMin.z, worldMax.z)
+            }
+        }
+        
+        return hasGeometry ? (minPoint, maxPoint) : nil
+    }
+    
+    private func fitCameraToShowAll(scene: SCNScene, sceneView: SCNView, bounds: (min: SCNVector3, max: SCNVector3)) {
+        guard let camera = scene.rootNode.childNode(withName: "mainCamera", recursively: false) else { return }
+        
+        let center = SCNVector3(
+            x: (bounds.min.x + bounds.max.x) / 2,
+            y: (bounds.min.y + bounds.max.y) / 2,
+            z: (bounds.min.z + bounds.max.z) / 2
+        )
+        
+        let size = SCNVector3(
+            x: bounds.max.x - bounds.min.x,
+            y: bounds.max.y - bounds.min.y,
+            z: bounds.max.z - bounds.min.z
+        )
+        
+        let maxDimension = max(size.x, max(size.y, size.z))
+        let distance = Float(maxDimension * 2.5) // 2.5x to give some margin
+        
+        // Position camera at 45-degree angle
+        camera.position = SCNVector3(
+            x: center.x + distance * 0.7,
+            y: center.y + distance * 0.7,
+            z: center.z + distance * 0.7
+        )
+        camera.look(at: center)
+        
+        print("[CombinedViewer] Fitted camera - Center: \(center), Distance: \(distance)")
     }
     
     private func loadModel(url: String, fileExtension: String, into scene: SCNScene, offset: SCNVector3, color: UIColor?) async {
@@ -824,6 +1126,97 @@ struct CombinedModelViewer: UIViewRepresentable {
             
         } catch {
             print("[CombinedViewer] Failed to load \(fileExtension.uppercased()): \(error)")
+        }
+    }
+}
+
+// MARK: - SCNGeometry Extension for Lines
+
+extension SCNGeometry {
+    static func line(from start: SCNVector3, to end: SCNVector3) -> SCNGeometry {
+        let vertices: [SCNVector3] = [start, end]
+        let indices: [Int32] = [0, 1]
+        
+        let vertexSource = SCNGeometrySource(vertices: vertices)
+        let indexData = Data(bytes: indices, count: indices.count * MemoryLayout<Int32>.size)
+        let element = SCNGeometryElement(
+            data: indexData,
+            primitiveType: .line,
+            primitiveCount: 1,
+            bytesPerIndex: MemoryLayout<Int32>.size
+        )
+        
+        return SCNGeometry(sources: [vertexSource], elements: [element])
+    }
+}
+
+// MARK: - Camera Control Buttons
+
+struct CameraControlButtons: View {
+    let onAction: (CameraAction) -> Void
+    
+    enum CameraAction: Equatable {
+        case fitAll
+        case topView
+        case frontView
+        case sideView
+        case resetView
+        case toggleGrid
+        case toggleAxes
+    }
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // View presets
+            HStack(spacing: 8) {
+                controlButton(icon: "cube.fill", title: "Fit All") {
+                    onAction(.fitAll)
+                }
+                
+                controlButton(icon: "arrow.up.circle", title: "Top") {
+                    onAction(.topView)
+                }
+                
+                controlButton(icon: "arrow.right.circle", title: "Side") {
+                    onAction(.sideView)
+                }
+                
+                controlButton(icon: "circle.circle", title: "Front") {
+                    onAction(.frontView)
+                }
+            }
+            
+            // Display toggles
+            HStack(spacing: 8) {
+                controlButton(icon: "grid", title: "Grid") {
+                    onAction(.toggleGrid)
+                }
+                
+                controlButton(icon: "point.3.connected.trianglepath.dotted", title: "Axes") {
+                    onAction(.toggleAxes)
+                }
+                
+                controlButton(icon: "arrow.counterclockwise", title: "Reset") {
+                    onAction(.resetView)
+                }
+            }
+        }
+        .padding(12)
+    }
+    
+    private func controlButton(icon: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                Text(title)
+                    .font(.caption2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.15))
+            .cornerRadius(8)
+            .foregroundColor(.white)
         }
     }
 }
