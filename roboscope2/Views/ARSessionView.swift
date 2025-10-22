@@ -215,10 +215,41 @@ struct ARSessionView: View {
                 .allowsHitTesting(false)
                 .zIndex(1)
 
-            // Top controls styled like Scan
+            // Top controls styled like Scan + left 'more' menu in liquid glass
             VStack {
                 HStack(spacing: 12) {
+                    // Top-left context menu (ellipsis)
+                    Menu {
+                        Button {
+                            Task { await useSavedScan() }
+                        } label: {
+                            Label("Use saved scan", systemImage: "cube.transparent")
+                        }
+                        // Future: add more actions here
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 36)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(.ultraThinMaterial)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(
+                                                LinearGradient(
+                                                    colors: [.white.opacity(0.35), .white.opacity(0.1)],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                            )
+                    }
+
                     Spacer()
+
                     Button("Done") { dismiss() }
                         .buttonStyle(.plain)
                         .padding(.horizontal, 16)
@@ -289,19 +320,6 @@ struct ARSessionView: View {
                     .lgCircle(tint: .white)
                     
                     Spacer()
-                    
-                    // Use saved scan button (right)
-                    Button {
-                        Task {
-                            await useSavedScan()
-                        }
-                    } label: {
-                        Image(systemName: "cube.transparent")
-                            .font(.system(size: 24))
-                            .frame(width: 60, height: 60)
-                    }
-                    .buttonStyle(.plain)
-                    .lgCircle(tint: .green)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 50)
