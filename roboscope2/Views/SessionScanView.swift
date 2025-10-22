@@ -257,8 +257,23 @@ struct SessionScanView: View {
     }
     
     private func performSpaceRegistration() async {
+        let startTime = Date()
+        
+        // Pause AR session updates during registration for better performance
+        await MainActor.run {
+            captureSession.session.pause()
+        }
+        
+        defer {
+            // Resume AR session after registration completes
+            Task { @MainActor in
+                captureSession.session.run(captureSession.session.configuration!)
+            }
+        }
+        
         do {
             // Step 1: Fetch the Space data
+            let stepStart = Date()
             registrationProgress = "Loading space information..."
             let space = try await spaceService.getSpace(id: session.spaceId)
             
@@ -274,8 +289,10 @@ struct SessionScanView: View {
             
             print("[SessionScan] Found space: \(space.name)")
             print("[SessionScan] USDC URL: \(usdcUrlString)")
+            print("[SessionScan] ⏱️ Step 1 (Fetch space): \(Date().timeIntervalSince(stepStart))s")
             
             // Step 2: Download and load the USDC model
+            let downloadStart = Date()
             await MainActor.run {
                 registrationProgress = "Downloading space model..."
             }
@@ -288,8 +305,10 @@ struct SessionScanView: View {
             try modelData.write(to: modelPath)
             
             print("[SessionScan] Downloaded USDC model to: \(modelPath)")
+            print("[SessionScan] ⏱️ Step 2 (Download model): \(Date().timeIntervalSince(downloadStart))s")
             
             // Step 3: Export the scan mesh to temp file
+            let exportStart = Date()
             await MainActor.run {
                 registrationProgress = "Exporting scan data..."
             }
@@ -305,21 +324,30 @@ struct SessionScanView: View {
             }
             
             print("[SessionScan] Exported scan to: \(scanPath)")
+            print("[SessionScan] ⏱️ Step 3 (Export scan): \(Date().timeIntervalSince(exportStart))s")
             
             // Step 4: Load both models into SceneKit
+            let loadStart = Date()
             await MainActor.run {
                 registrationProgress = "Loading models..."
             }
             
-            // Load USDC model with proper options for geometry extraction
-            let modelScene = try SCNScene(url: modelPath, options: [
-                SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
-                SCNSceneSource.LoadingOption.flattenScene: true
-            ])
-            
-            let scanScene = try SCNScene(url: scanPath, options: [
-                SCNSceneSource.LoadingOption.flattenScene: true
-            ])
+            // Load models on background thread to avoid blocking
+            let (modelScene, scanScene) = await Task.detached(priority: .userInitiated) {
+                // Load USDC model with proper options for geometry extraction
+                let modelScene = try SCNScene(url: modelPath, options: [
+                    SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
+                    SCNSceneSource.LoadingOption.flattenScene: true,
+                    SCNSceneSource.LoadingOption.checkConsistency: false  // Skip validation for speed
+                ])
+                
+                let scanScene = try SCNScene(url: scanPath, options: [
+                    SCNSceneSource.LoadingOption.flattenScene: true,
+                    SCNSceneSource.LoadingOption.checkConsistency: false  // Skip validation for speed
+                ])
+                
+                return (modelScene, scanScene)
+            }.value
             
             // Flatten the scene hierarchy to ensure we get all geometry
             let flattenedModelNode = SCNNode()
@@ -330,23 +358,27 @@ struct SessionScanView: View {
             
             print("[SessionScan] Model node children: \(flattenedModelNode.childNodes.count)")
             print("[SessionScan] Scan node children: \(flattenedScanNode.childNodes.count)")
+            print("[SessionScan] ⏱️ Step 4 (Load models): \(Date().timeIntervalSince(loadStart))s")
             
             // Step 5: Extract point clouds
+            let extractStart = Date()
             await MainActor.run {
                 registrationProgress = "Extracting point clouds..."
             }
             
+            // Optimized point sampling - use fewer points for speed (matching Space 3D Viewer)
             let modelPoints = ModelRegistrationService.extractPointCloud(
                 from: flattenedModelNode,
-                sampleCount: 10000
+                sampleCount: 5000  // Reduced from 10000 for faster processing
             )
             let scanPoints = ModelRegistrationService.extractPointCloud(
                 from: flattenedScanNode,
-                sampleCount: 10000
+                sampleCount: 10000  // Keep higher for scan accuracy
             )
             
             print("[SessionScan] Model points: \(modelPoints.count)")
             print("[SessionScan] Scan points: \(scanPoints.count)")
+            print("[SessionScan] ⏱️ Step 5 (Extract points): \(Date().timeIntervalSince(extractStart))s")
             
             // Validate we have enough points
             guard !modelPoints.isEmpty else {
@@ -377,15 +409,17 @@ struct SessionScanView: View {
             }
             
             // Step 6: Perform ICP registration
+            let registrationStart = Date()
             await MainActor.run {
                 registrationProgress = "Running registration algorithm..."
             }
             
+            // Optimized parameters matching Space 3D Viewer for better performance
             guard let result = await ModelRegistrationService.registerModels(
                 modelPoints: modelPoints,
                 scanPoints: scanPoints,
-                maxIterations: 50,
-                convergenceThreshold: 0.0001,
+                maxIterations: 30,          // Reduced from 50 for faster convergence
+                convergenceThreshold: 0.001, // Relaxed from 0.0001 for faster exit
                 progressHandler: { progress in
                     Task { @MainActor in
                         registrationProgress = progress
@@ -403,6 +437,8 @@ struct SessionScanView: View {
             print("[SessionScan] RMSE: \(result.rmse)")
             print("[SessionScan] Inliers: \(result.inlierFraction)")
             print("[SessionScan] Transform matrix: \(result.transformMatrix)")
+            print("[SessionScan] ⏱️ Step 6 (ICP registration): \(Date().timeIntervalSince(registrationStart))s")
+            print("[SessionScan] ⏱️ TOTAL TIME: \(Date().timeIntervalSince(startTime))s")
             
             // Step 7: Apply transformation to AR session
             await MainActor.run {
