@@ -21,6 +21,7 @@ struct ARSessionView: View {
     @State private var arView: ARView?
     @State private var isSessionActive = false
     @State private var errorMessage: String?
+    @State private var showScanView = false
 
     // Match scanning interactions
     @State private var isHoldingScreen = false
@@ -219,8 +220,21 @@ struct ARSessionView: View {
                     .transition(.opacity.combined(with: .scale))
                 }
                 
-                HStack(spacing: 0) {
+                HStack(spacing: 20) {
+                    // Scan button (left)
+                    Button {
+                        showScanView = true
+                    } label: {
+                        Image(systemName: "scanner")
+                            .font(.system(size: 24))
+                            .frame(width: 60, height: 60)
+                    }
+                    .buttonStyle(.plain)
+                    .lgCircle(tint: .blue)
+                    
                     Spacer()
+                    
+                    // Plus button (center)
                     Button { createAndPersistMarker() } label: {
                         Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
                             .font(.system(size: 36))
@@ -228,7 +242,12 @@ struct ARSessionView: View {
                     }
                     .buttonStyle(.plain)
                     .lgCircle(tint: .white)
+                    
                     Spacer()
+                    
+                    // Placeholder for symmetry (right)
+                    Color.clear
+                        .frame(width: 60, height: 60)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 50)
@@ -239,6 +258,9 @@ struct ARSessionView: View {
             Button("OK") { errorMessage = nil }
         } message: {
             if let errorMessage = errorMessage { Text(errorMessage) }
+        }
+        .sheet(isPresented: $showScanView) {
+            SessionScanView(session: session, captureSession: captureSession)
         }
         .navigationBarBackButtonHidden()
     }
