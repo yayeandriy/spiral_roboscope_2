@@ -22,7 +22,7 @@ struct ARSessionView: View {
     @State private var isSessionActive = false
     @State private var errorMessage: String?
     @State private var showScanView = false
-    @State private var registrationTransform: simd_float4x4?
+    @State private var frameOriginTransform: simd_float4x4 = matrix_identity_float4x4  // Default to AR origin
     @State private var frameOriginAnchor: AnchorEntity?
 
     // Match scanning interactions
@@ -45,6 +45,10 @@ struct ARSessionView: View {
             .edgesIgnoringSafeArea(.all)
             .onAppear {
                 startARSession()
+                // Place initial frame origin at AR session origin
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    placeFrameOriginGizmo(at: frameOriginTransform)
+                }
                 // Start tracking markers continuously
                 let tracking = Timer(timeInterval: 0.1, repeats: true) { _ in
                     // print("[Timer] Marker tracking tick")
@@ -56,7 +60,27 @@ struct ARSessionView: View {
                 Task {
                     do {
                         let persisted = try await markerApi.getMarkersForSession(session.id)
-                        markerService.loadPersistedMarkers(persisted)
+                        // Transform markers from FrameOrigin coordinates to AR world coordinates
+                        let transformedMarkers = persisted.map { marker -> Marker in
+                            // Create new marker with transformed points
+                            let worldPoints = transformPointsFromFrameOrigin(marker.points)
+                            return Marker(
+                                id: marker.id,
+                                workSessionId: marker.workSessionId,
+                                label: marker.label,
+                                p1: [Double(worldPoints[0].x), Double(worldPoints[0].y), Double(worldPoints[0].z)],
+                                p2: [Double(worldPoints[1].x), Double(worldPoints[1].y), Double(worldPoints[1].z)],
+                                p3: [Double(worldPoints[2].x), Double(worldPoints[2].y), Double(worldPoints[2].z)],
+                                p4: [Double(worldPoints[3].x), Double(worldPoints[3].y), Double(worldPoints[3].z)],
+                                color: marker.color,
+                                version: marker.version,
+                                meta: marker.meta,
+                                createdAt: marker.createdAt,
+                                updatedAt: marker.updatedAt
+                            )
+                        }
+                        markerService.loadPersistedMarkers(transformedMarkers)
+                        print("[ARSession] Loaded \(persisted.count) markers and transformed to world coordinates")
                     } catch {
                         print("Failed to load markers: \(error)")
                     }
@@ -118,15 +142,19 @@ struct ARSessionView: View {
                     if !isTwoFingers {
                         isHoldingScreen = false
                         if let (backendId, version, updatedNodes) = markerService.endMoveSelectedEdge() {
+                            // Transform to FrameOrigin coordinates before persisting
+                            let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
+                            
                             // Persist updated marker to backend
                             Task {
                                 do {
                                     _ = try await markerApi.updateMarkerPosition(
                                         id: backendId,
                                         workSessionId: session.id,
-                                        points: updatedNodes,
+                                        points: frameOriginPoints,
                                         version: version
                                     )
+                                    print("[ARSession] Updated marker position in FrameOrigin coordinates")
                                 } catch {
                                     // Silently handle error
                                 }
@@ -149,15 +177,19 @@ struct ARSessionView: View {
                         isTwoFingers = false
                         isHoldingScreen = false
                         if let (backendId, version, updatedNodes) = markerService.endTransform() {
+                            // Transform to FrameOrigin coordinates before persisting
+                            let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
+                            
                             // Persist updated marker to backend
                             Task {
                                 do {
                                     _ = try await markerApi.updateMarkerPosition(
                                         id: backendId,
                                         workSessionId: session.id,
-                                        points: updatedNodes,
+                                        points: frameOriginPoints,
                                         version: version
                                     )
+                                    print("[ARSession] Updated marker transform in FrameOrigin coordinates")
                                 } catch {
                                     // Silently handle error
                                 }
@@ -266,8 +298,10 @@ struct ARSessionView: View {
                 session: session,
                 captureSession: captureSession,
                 onRegistrationComplete: { transform in
-                    registrationTransform = transform
+                    frameOriginTransform = transform
                     placeFrameOriginGizmo(at: transform)
+                    // Update all existing markers to new coordinate system
+                    updateMarkersForNewFrameOrigin()
                 }
             )
         }
@@ -318,13 +352,17 @@ struct ARSessionView: View {
             CGPoint(x: centerX - half, y: targetY + half)
         ]
         if let spatial = markerService.placeMarkerReturningSpatial(targetCorners: corners) {
-            // Save to backend
+            // Transform marker points to FrameOrigin coordinate system
+            let frameOriginPoints = transformPointsToFrameOrigin(spatial.nodes)
+            
+            // Save to backend with FrameOrigin coordinates
             Task {
                 do {
                     let created = try await markerApi.createMarker(
-                        CreateMarker(workSessionId: session.id, points: spatial.nodes)
+                        CreateMarker(workSessionId: session.id, points: frameOriginPoints)
                     )
                     markerService.linkSpatialMarker(localId: spatial.id, backendId: created.id)
+                    print("[ARSession] Created marker in FrameOrigin coordinates")
                 } catch {
                     print("Failed to persist marker: \(error)")
                 }
@@ -475,6 +513,74 @@ struct ARSessionView: View {
         
         print("[ARSession] Placed frame origin gizmo at transform: \(transform)")
         print("[ARSession] Gizmo position in world: \(anchor.position(relativeTo: nil))")
+    }
+    
+    // MARK: - Coordinate System Transformation
+    
+    /// Transform points from AR world coordinates to FrameOrigin coordinates
+    private func transformPointsToFrameOrigin(_ points: [SIMD3<Float>]) -> [SIMD3<Float>] {
+        // Get inverse of frame origin transform to convert world coords to frame coords
+        let inverseTransform = frameOriginTransform.inverse
+        
+        return points.map { point in
+            // Convert point to SIMD4
+            let worldPoint = SIMD4<Float>(point.x, point.y, point.z, 1.0)
+            
+            // Transform to FrameOrigin space
+            let framePoint = inverseTransform * worldPoint
+            
+            return SIMD3<Float>(framePoint.x, framePoint.y, framePoint.z)
+        }
+    }
+    
+    /// Transform points from FrameOrigin coordinates to AR world coordinates
+    private func transformPointsFromFrameOrigin(_ points: [SIMD3<Float>]) -> [SIMD3<Float>] {
+        return points.map { point in
+            // Convert point to SIMD4
+            let framePoint = SIMD4<Float>(point.x, point.y, point.z, 1.0)
+            
+            // Transform to world space
+            let worldPoint = frameOriginTransform * framePoint
+            
+            return SIMD3<Float>(worldPoint.x, worldPoint.y, worldPoint.z)
+        }
+    }
+    
+    /// Update all markers' visual positions when FrameOrigin changes
+    private func updateMarkersForNewFrameOrigin() {
+        // Reload markers from backend and transform them to the new world coordinates
+        Task {
+            do {
+                let persisted = try await markerApi.getMarkersForSession(session.id)
+                
+                // Transform markers from FrameOrigin coordinates to new AR world coordinates
+                let transformedMarkers = persisted.map { marker -> Marker in
+                    let worldPoints = transformPointsFromFrameOrigin(marker.points)
+                    return Marker(
+                        id: marker.id,
+                        workSessionId: marker.workSessionId,
+                        label: marker.label,
+                        p1: [Double(worldPoints[0].x), Double(worldPoints[0].y), Double(worldPoints[0].z)],
+                        p2: [Double(worldPoints[1].x), Double(worldPoints[1].y), Double(worldPoints[1].z)],
+                        p3: [Double(worldPoints[2].x), Double(worldPoints[2].y), Double(worldPoints[2].z)],
+                        p4: [Double(worldPoints[3].x), Double(worldPoints[3].y), Double(worldPoints[3].z)],
+                        color: marker.color,
+                        version: marker.version,
+                        meta: marker.meta,
+                        createdAt: marker.createdAt,
+                        updatedAt: marker.updatedAt
+                    )
+                }
+                
+                // Reload markers with new positions
+                await MainActor.run {
+                    markerService.loadPersistedMarkers(transformedMarkers)
+                    print("[ARSession] Updated \(persisted.count) markers for new FrameOrigin")
+                }
+            } catch {
+                print("Failed to update markers: \(error)")
+            }
+        }
     }
 }
 
