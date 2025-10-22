@@ -89,6 +89,8 @@ class AppSettings: ObservableObject {
     // MARK: - Presets
     
     enum RegistrationPreset: String, CaseIterable {
+        case instant = "Instant"
+        case ultraFast = "Ultra Fast"
         case fast = "Fast"
         case balanced = "Balanced"
         case accurate = "Accurate"
@@ -128,10 +130,30 @@ class AppSettings: ObservableObject {
     
     // MARK: - Preset Management
     
-    func applyPreset(_ preset: RegistrationPreset) {
-        currentPreset = preset
+    func applyPreset(_ preset: RegistrationPreset, updateCurrentPreset: Bool = true) {
+        if updateCurrentPreset {
+            currentPreset = preset
+        }
         
         switch preset {
+        case .instant:
+            modelPointsSampleCount = 1000
+            scanPointsSampleCount = 3000
+            maxICPIterations = 10
+            icpConvergenceThreshold = 0.005
+            pauseARDuringRegistration = true
+            useBackgroundLoading = true
+            skipModelConsistencyChecks = true
+            
+        case .ultraFast:
+            modelPointsSampleCount = 2000
+            scanPointsSampleCount = 5000
+            maxICPIterations = 15
+            icpConvergenceThreshold = 0.003
+            pauseARDuringRegistration = true
+            useBackgroundLoading = true
+            skipModelConsistencyChecks = true
+            
         case .fast:
             modelPointsSampleCount = 3000
             scanPointsSampleCount = 8000

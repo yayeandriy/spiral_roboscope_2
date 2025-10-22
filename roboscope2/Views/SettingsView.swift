@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
     @State private var showResetConfirmation = false
+    @State private var isApplyingPreset = false
     
     var body: some View {
         NavigationView {
@@ -22,8 +23,14 @@ struct SettingsView: View {
                         }
                     }
                     .onChange(of: settings.currentPreset) { newPreset in
+                        // Apply preset settings when user selects it (except Custom)
                         if newPreset != .custom {
-                            settings.applyPreset(newPreset)
+                            isApplyingPreset = true
+                            settings.applyPreset(newPreset, updateCurrentPreset: false)
+                            // Delay to allow settings to propagate before re-enabling markAsCustom
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                isApplyingPreset = false
+                            }
                         }
                     }
                     
@@ -240,6 +247,10 @@ struct SettingsView: View {
     
     private var presetDescription: String {
         switch settings.currentPreset {
+        case .instant:
+            return "🚀 Blazing fast (~5-8s). Minimal points for instant rough alignment."
+        case .ultraFast:
+            return "⚡⚡ Ultra speed (~7-12s). Very quick with acceptable quality."
         case .fast:
             return "⚡ Optimized for speed (~10-15s). Good for quick alignment checks."
         case .balanced:
@@ -258,7 +269,11 @@ struct SettingsView: View {
         
         let total = baseTime + pointsTime + iterationsTime
         
-        if total < 15 {
+        if total < 10 {
+            return "~5-8s"
+        } else if total < 13 {
+            return "~8-12s"
+        } else if total < 16 {
             return "~10-15s"
         } else if total < 25 {
             return "~15-25s"
@@ -293,7 +308,8 @@ struct SettingsView: View {
     // MARK: - Actions
     
     private func markAsCustom() {
-        if settings.currentPreset != .custom {
+        // Don't mark as custom if we're currently applying a preset
+        if !isApplyingPreset && settings.currentPreset != .custom {
             settings.currentPreset = .custom
         }
     }

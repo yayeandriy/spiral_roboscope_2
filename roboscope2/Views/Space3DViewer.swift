@@ -174,13 +174,56 @@ struct Space3DViewer: View {
     private var registrationControls: some View {
         VStack(spacing: 16) {
             if isRegistering {
-                VStack(spacing: 8) {
+                VStack(spacing: 12) {
                     ProgressView()
                         .progressViewStyle(.circular)
                         .tint(.white)
+                    
                     Text(registrationProgress)
                         .font(.caption)
                         .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                    
+                    Divider()
+                        .background(Color.white.opacity(0.3))
+                        .padding(.horizontal, 8)
+                    
+                    // Settings info
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Preset:")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.7))
+                            Spacer()
+                            Text(settings.currentPreset.rawValue)
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                        }
+                        
+                        HStack {
+                            Text("Model/Scan Points:")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.7))
+                            Spacer()
+                            Text("\(settings.modelPointsSampleCount) / \(settings.scanPointsSampleCount)")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                        }
+                        
+                        HStack {
+                            Text("Max Iterations:")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.7))
+                            Spacer()
+                            Text("\(settings.maxICPIterations)")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                        }
+                    }
+                    .padding(.horizontal, 4)
                 }
                 .padding(16)
                 .background(.ultraThinMaterial)
@@ -1259,6 +1302,18 @@ struct CombinedModelViewer: UIViewRepresentable {
             }
             return
         }
+        
+        // Log registration settings
+        let settings = AppSettings.shared
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[Space3DViewer] REGISTRATION SETTINGS")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("Preset: \(settings.currentPreset.rawValue)")
+        print("Model Points: \(settings.modelPointsSampleCount)")
+        print("Scan Points: \(settings.scanPointsSampleCount)")
+        print("Max Iterations: \(settings.maxICPIterations)")
+        print("Convergence Threshold: \(settings.icpConvergenceThreshold)")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
         print("[CombinedViewer] Starting registration...")
         

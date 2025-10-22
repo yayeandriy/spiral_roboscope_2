@@ -52,9 +52,11 @@ Centralized configuration system for scan registration with preset profiles and 
 
 | Preset | Model Points | Scan Points | Iterations | Threshold | Time | RMSE |
 |--------|--------------|-------------|------------|-----------|------|------|
-| **Fast** | 3,000 | 7,000 | 20 | 0.002 | ~10-15s | < 0.15m |
+| **Instant** | 1,000 | 3,000 | 10 | 0.005 | ~5-8s | < 0.20m |
+| **Ultra Fast** | 2,000 | 5,000 | 15 | 0.003 | ~7-12s | < 0.17m |
+| **Fast** | 3,000 | 8,000 | 20 | 0.002 | ~10-15s | < 0.15m |
 | **Balanced** | 5,000 | 10,000 | 30 | 0.001 | ~15-25s | < 0.10m |
-| **Accurate** | 10,000 | 20,000 | 50 | 0.0001 | ~30-40s | < 0.05m |
+| **Accurate** | 8,000 | 15,000 | 50 | 0.0001 | ~30-40s | < 0.05m |
 | **Custom** | User-defined | User-defined | User-defined | User-defined | Varies | Varies |
 
 ### Point Cloud Sampling
@@ -247,10 +249,15 @@ Settings persist across app launches and are shared across all registration oper
 
 ## Recommendations
 
+### For Initial Rough Alignment
+- Use **Instant** preset
+- Blazing fast for getting approximate position
+- Great for rapid iteration during setup
+
 ### For Quick Testing
-- Use **Fast** preset
+- Use **Ultra Fast** or **Fast** preset
 - Good enough for rough alignment checks
-- Fastest iteration during development
+- Quick iteration during development
 
 ### For Production Use
 - Use **Balanced** preset (default)

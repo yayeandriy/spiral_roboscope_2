@@ -189,6 +189,47 @@ struct SessionScanView: View {
                 .font(.subheadline)
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
+            
+            Divider()
+                .background(Color.white.opacity(0.3))
+                .padding(.horizontal, 8)
+            
+            // Settings info
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Preset:")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+                    Text(settings.currentPreset.rawValue)
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                }
+                
+                HStack {
+                    Text("Model/Scan Points:")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+                    Text("\(settings.modelPointsSampleCount) / \(settings.scanPointsSampleCount)")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                }
+                
+                HStack {
+                    Text("Max Iterations:")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+                    Text("\(settings.maxICPIterations)")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                }
+            }
+            .padding(.horizontal, 4)
         }
         .padding(24)
         .background(.ultraThinMaterial)
@@ -259,6 +300,20 @@ struct SessionScanView: View {
     
     private func performSpaceRegistration() async {
         let startTime = Date()
+        
+        // Log registration settings
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[SessionScan] REGISTRATION SETTINGS")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("Preset: \(settings.currentPreset.rawValue)")
+        print("Model Points: \(settings.modelPointsSampleCount)")
+        print("Scan Points: \(settings.scanPointsSampleCount)")
+        print("Max Iterations: \(settings.maxICPIterations)")
+        print("Convergence Threshold: \(settings.icpConvergenceThreshold)")
+        print("AR Pause: \(settings.pauseARDuringRegistration ? "ON" : "OFF")")
+        print("Background Loading: \(settings.useBackgroundLoading ? "ON" : "OFF")")
+        print("Skip Checks: \(settings.skipModelConsistencyChecks ? "ON" : "OFF")")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
         // Optionally pause AR session updates during registration for better performance
         if settings.pauseARDuringRegistration {

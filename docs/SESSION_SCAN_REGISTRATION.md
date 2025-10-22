@@ -582,7 +582,9 @@ All registration parameters are now configurable through the centralized setting
 
 | Preset | Time | Accuracy | Use Case |
 |--------|------|----------|----------|
-| **Fast** | ~10-15s | Medium | Quick alignment checks |
+| **Instant** | ~5-8s | Low-Medium | Blazing fast rough alignment |
+| **Ultra Fast** | ~7-12s | Medium | Very quick with acceptable quality |
+| **Fast** | ~10-15s | Medium-High | Quick alignment checks |
 | **Balanced** | ~15-25s | High | Recommended for most users |
 | **Accurate** | ~30-40s | Very High | Critical measurements |
 | **Custom** | Varies | Varies | Manual parameter tuning |
