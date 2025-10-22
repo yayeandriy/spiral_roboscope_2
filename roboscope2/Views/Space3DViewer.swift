@@ -130,41 +130,58 @@ struct Space3DViewer: View {
     
     private var modelViewer: some View {
         ZStack {
+            // Always keep the 3D viewer mounted to avoid re-creating the SceneKit view
+            CombinedModelViewer(
+                space: space,
+                cameraAction: $cameraAction,
+                showGrid: $showGrid,
+                showAxes: $showAxes,
+                isLoading: $isLoading,
+                isRegistering: $isRegistering,
+                registrationProgress: $registrationProgress,
+                onRegistrationComplete: { metrics in
+                    isRegistering = false
+                    registrationMetrics = "RMSE: \(String(format: "%.3f", metrics.rmse))m\nInliers: \(String(format: "%.1f", metrics.inlierFraction * 100))%\nIterations: \(metrics.iterations)"
+                    showRegistrationResult = true
+                }
+            )
+            .id(space.id)
+
+            // Loading overlay (blocks interaction)
             if isLoading {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white)
-            } else if let error = errorMessage {
+                Color.black.opacity(0.45).ignoresSafeArea()
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .scaleEffect(1.5)
+                    Text("Loading 3D Models...")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Please wait while we load the space and scan models")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+            }
+
+            // Error overlay
+            if let error = errorMessage {
+                Color.black.opacity(0.45).ignoresSafeArea()
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 48))
                         .foregroundColor(.orange)
-                    
                     Text("Failed to load model")
                         .font(.headline)
                         .foregroundColor(.white)
-                    
                     Text(error)
                         .font(.caption)
                         .foregroundColor(.gray)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
-            } else {
-                // Show combined viewer with both primary model and scan
-                CombinedModelViewer(
-                    space: space,
-                    cameraAction: $cameraAction,
-                    showGrid: $showGrid,
-                    showAxes: $showAxes,
-                    isRegistering: $isRegistering,
-                    registrationProgress: $registrationProgress,
-                    onRegistrationComplete: { metrics in
-                        isRegistering = false
-                        registrationMetrics = "RMSE: \(String(format: "%.3f", metrics.rmse))m\nInliers: \(String(format: "%.1f", metrics.inlierFraction * 100))%\nIterations: \(metrics.iterations)"
-                        showRegistrationResult = true
-                    }
-                )
             }
         }
     }
@@ -880,6 +897,7 @@ struct CombinedModelViewer: UIViewRepresentable {
     @Binding var cameraAction: CameraControlButtons.CameraAction?
     @Binding var showGrid: Bool
     @Binding var showAxes: Bool
+    @Binding var isLoading: Bool
     @Binding var isRegistering: Bool
     @Binding var registrationProgress: String
     let onRegistrationComplete: (ModelRegistrationService.RegistrationResult) -> Void
@@ -919,8 +937,12 @@ struct CombinedModelViewer: UIViewRepresentable {
         context.coordinator.scene = newScene
         context.coordinator.sceneView = sceneView
         
-        Task {
-            await loadModels(into: newScene, sceneView: sceneView, coordinator: context.coordinator)
+        // Only load models once - prevent infinite loop from isLoading binding changes
+        if !context.coordinator.hasLoadedModels {
+            context.coordinator.hasLoadedModels = true
+            Task {
+                await loadModels(into: newScene, sceneView: sceneView, coordinator: context.coordinator)
+            }
         }
         
         return sceneView
@@ -1030,6 +1052,7 @@ struct CombinedModelViewer: UIViewRepresentable {
         var primaryModelNode: SCNNode?
         var scanModelNode: SCNNode?
         var isRegistering: Bool = false
+        var hasLoadedModels: Bool = false
     }
     
     // MARK: - Scene Setup Helpers
@@ -1133,6 +1156,11 @@ struct CombinedModelViewer: UIViewRepresentable {
     private func loadModels(into scene: SCNScene, sceneView: SCNView, coordinator: Coordinator) async {
         print("[CombinedViewer] Loading models for space: \(space.name)")
         
+        // Set loading state
+        await MainActor.run {
+            isLoading = true
+        }
+        
         // Load primary model (USDC/GLB)
         if let usdcUrl = space.modelUsdcUrl {
             let fileExt = usdcUrl.hasSuffix(".usdz") ? "usdz" : "usdc"
@@ -1159,6 +1187,9 @@ struct CombinedModelViewer: UIViewRepresentable {
                 coordinator.modelBounds = bounds
                 fitCameraToShowAll(scene: scene, sceneView: sceneView, bounds: bounds)
             }
+            
+            // Clear loading state
+            isLoading = false
         }
     }
     

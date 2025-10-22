@@ -9,6 +9,7 @@ import SwiftUI
 import RealityKit
 import ARKit
 import UIKit
+import SceneKit
 
 struct ARSessionView: View {
     let session: WorkSession
@@ -17,11 +18,15 @@ struct ARSessionView: View {
     @StateObject private var markerService = SpatialMarkerService()
     @StateObject private var workSessionService = WorkSessionService.shared
     @StateObject private var markerApi = MarkerService.shared
+    @StateObject private var spaceService = SpaceService.shared
+    @StateObject private var settings = AppSettings.shared
 
     @State private var arView: ARView?
     @State private var isSessionActive = false
     @State private var errorMessage: String?
     @State private var showScanView = false
+    @State private var isRegistering = false
+    @State private var registrationProgress: String = ""
     @State private var frameOriginTransform: simd_float4x4 = matrix_identity_float4x4  // Default to AR origin
     @State private var frameOriginAnchor: AnchorEntity?
 
@@ -225,6 +230,12 @@ struct ARSessionView: View {
                 Spacer()
             }
             .zIndex(2)
+            
+            // Registration progress overlay
+            if isRegistering {
+                registrationProgressOverlay
+                    .zIndex(3)
+            }
 
             // Bottom control: center plus button
             VStack {
@@ -279,9 +290,18 @@ struct ARSessionView: View {
                     
                     Spacer()
                     
-                    // Placeholder for symmetry (right)
-                    Color.clear
-                        .frame(width: 60, height: 60)
+                    // Use saved scan button (right)
+                    Button {
+                        Task {
+                            await useSavedScan()
+                        }
+                    } label: {
+                        Image(systemName: "cube.transparent")
+                            .font(.system(size: 24))
+                            .frame(width: 60, height: 60)
+                    }
+                    .buttonStyle(.plain)
+                    .lgCircle(tint: .green)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 50)
@@ -306,6 +326,66 @@ struct ARSessionView: View {
             )
         }
         .navigationBarBackButtonHidden()
+    }
+    
+    // MARK: - Registration Progress Overlay
+    
+    private var registrationProgressOverlay: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+            
+            Text(registrationProgress)
+                .font(.subheadline)
+                .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+            
+            Divider()
+                .background(Color.white.opacity(0.3))
+                .padding(.horizontal, 8)
+            
+            // Settings info
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Preset:")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+                    Text(settings.currentPreset.rawValue)
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                }
+                
+                HStack {
+                    Text("Model/Scan Points:")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+                    Text("\(settings.modelPointsSampleCount) / \(settings.scanPointsSampleCount)")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                }
+                
+                HStack {
+                    Text("Max Iterations:")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+                    Text("\(settings.maxICPIterations)")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+        .padding(24)
+        .background(.ultraThinMaterial)
+        .cornerRadius(16)
+        .shadow(radius: 20)
     }
     
     // MARK: - Actions
@@ -428,6 +508,262 @@ struct ARSessionView: View {
             dismiss()
         } catch {
             errorMessage = "Failed to complete session: \(error.localizedDescription)"
+        }
+    }
+    
+    // MARK: - Saved Scan Registration
+    
+    private func useSavedScan() async {
+        let startTime = Date()
+        isRegistering = true
+        
+        // Log registration settings
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[ARSession] SAVED SCAN REGISTRATION SETTINGS")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("Preset: \(settings.currentPreset.rawValue)")
+        print("Model Points: \(settings.modelPointsSampleCount)")
+        print("Scan Points: \(settings.scanPointsSampleCount)")
+        print("Max Iterations: \(settings.maxICPIterations)")
+        print("Convergence Threshold: \(settings.icpConvergenceThreshold)")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        
+        // Optionally pause AR session during registration
+        if settings.pauseARDuringRegistration {
+            await MainActor.run {
+                captureSession.session.pause()
+            }
+        }
+        
+        defer {
+            // Resume AR session if it was paused
+            if settings.pauseARDuringRegistration {
+                Task { @MainActor in
+                    captureSession.session.run(captureSession.session.configuration!)
+                    isRegistering = false
+                }
+            } else {
+                Task { @MainActor in
+                    isRegistering = false
+                }
+            }
+        }
+        
+        do {
+            // Step 1: Fetch the Space data
+            let stepStart = Date()
+            await MainActor.run {
+                registrationProgress = "Loading space information..."
+            }
+            
+            let space = try await spaceService.getSpace(id: session.spaceId)
+            
+            guard let usdcUrlString = space.modelUsdcUrl,
+                  let usdcUrl = URL(string: usdcUrlString) else {
+                await MainActor.run {
+                    registrationProgress = "Error: Space has no USDC model"
+                    errorMessage = "Space has no USDC model"
+                }
+                print("[ARSession] Error: Space has no USDC model")
+                return
+            }
+            
+            guard let scanUrlString = space.scanUrl,
+                  let scanUrl = URL(string: scanUrlString) else {
+                await MainActor.run {
+                    registrationProgress = "Error: Space has no saved scan"
+                    errorMessage = "Space has no saved scan"
+                }
+                print("[ARSession] Error: Space has no saved scan")
+                return
+            }
+            
+            if settings.showPerformanceLogs {
+                print("[ARSession] Found space: \(space.name)")
+                print("[ARSession] USDC URL: \(usdcUrlString)")
+                print("[ARSession] Scan URL: \(scanUrlString)")
+                print("[ARSession] ⏱️ Step 1 (Fetch space): \(Date().timeIntervalSince(stepStart))s")
+            }
+            
+            // Step 2: Download USDC model
+            let downloadStart = Date()
+            await MainActor.run {
+                registrationProgress = "Downloading space model..."
+            }
+            
+            let (modelData, _) = try await URLSession.shared.data(from: usdcUrl)
+            let tempDir = FileManager.default.temporaryDirectory
+            let modelPath = tempDir.appendingPathComponent("space_model.usdc")
+            try modelData.write(to: modelPath)
+            
+            if settings.showPerformanceLogs {
+                print("[ARSession] Downloaded USDC model to: \(modelPath)")
+                print("[ARSession] ⏱️ Step 2 (Download model): \(Date().timeIntervalSince(downloadStart))s")
+            }
+            
+            // Step 3: Download saved scan
+            let scanDownloadStart = Date()
+            await MainActor.run {
+                registrationProgress = "Downloading saved scan..."
+            }
+            
+            let (scanData, _) = try await URLSession.shared.data(from: scanUrl)
+            let scanPath = tempDir.appendingPathComponent("saved_scan.obj")
+            try scanData.write(to: scanPath)
+            
+            if settings.showPerformanceLogs {
+                print("[ARSession] Downloaded saved scan to: \(scanPath)")
+                print("[ARSession] ⏱️ Step 3 (Download scan): \(Date().timeIntervalSince(scanDownloadStart))s")
+            }
+            
+            // Step 4: Load both models into SceneKit
+            let loadStart = Date()
+            await MainActor.run {
+                registrationProgress = "Loading models..."
+            }
+            
+            let loadOptions: [SCNSceneSource.LoadingOption: Any] = [
+                SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
+                SCNSceneSource.LoadingOption.flattenScene: true,
+                SCNSceneSource.LoadingOption.checkConsistency: !settings.skipModelConsistencyChecks
+            ]
+            
+            let scanLoadOptions: [SCNSceneSource.LoadingOption: Any] = [
+                SCNSceneSource.LoadingOption.flattenScene: true,
+                SCNSceneSource.LoadingOption.checkConsistency: !settings.skipModelConsistencyChecks
+            ]
+            
+            let (modelScene, scanScene): (SCNScene, SCNScene)
+            if settings.useBackgroundLoading {
+                (modelScene, scanScene) = await Task.detached(priority: .userInitiated) {
+                    let modelScene = try SCNScene(url: modelPath, options: loadOptions)
+                    let scanScene = try SCNScene(url: scanPath, options: scanLoadOptions)
+                    return (modelScene, scanScene)
+                }.value
+            } else {
+                modelScene = try SCNScene(url: modelPath, options: loadOptions)
+                scanScene = try SCNScene(url: scanPath, options: scanLoadOptions)
+            }
+            
+            let flattenedModelNode = SCNNode()
+            flattenModelHierarchy(modelScene.rootNode, into: flattenedModelNode)
+            
+            let flattenedScanNode = SCNNode()
+            flattenModelHierarchy(scanScene.rootNode, into: flattenedScanNode)
+            
+            if settings.showPerformanceLogs {
+                print("[ARSession] Model node children: \(flattenedModelNode.childNodes.count)")
+                print("[ARSession] Scan node children: \(flattenedScanNode.childNodes.count)")
+                print("[ARSession] ⏱️ Step 4 (Load models): \(Date().timeIntervalSince(loadStart))s")
+            }
+            
+            // Step 5: Extract point clouds
+            let extractStart = Date()
+            await MainActor.run {
+                registrationProgress = "Extracting point clouds..."
+            }
+            
+            let modelPoints = ModelRegistrationService.extractPointCloud(
+                from: flattenedModelNode,
+                sampleCount: settings.modelPointsSampleCount
+            )
+            let scanPoints = ModelRegistrationService.extractPointCloud(
+                from: flattenedScanNode,
+                sampleCount: settings.scanPointsSampleCount
+            )
+            
+            if settings.showPerformanceLogs {
+                print("[ARSession] Model points: \(modelPoints.count) (target: \(settings.modelPointsSampleCount))")
+                print("[ARSession] Scan points: \(scanPoints.count) (target: \(settings.scanPointsSampleCount))")
+                print("[ARSession] ⏱️ Step 5 (Extract points): \(Date().timeIntervalSince(extractStart))s")
+            }
+            
+            guard !modelPoints.isEmpty && !scanPoints.isEmpty else {
+                await MainActor.run {
+                    registrationProgress = "Error: Could not extract points"
+                    errorMessage = "Could not extract points from models"
+                }
+                return
+            }
+            
+            guard modelPoints.count > 100 && scanPoints.count > 100 else {
+                await MainActor.run {
+                    registrationProgress = "Error: Not enough points"
+                    errorMessage = "Not enough points for registration"
+                }
+                return
+            }
+            
+            // Step 6: Perform ICP registration
+            let registrationStart = Date()
+            await MainActor.run {
+                registrationProgress = "Running registration algorithm..."
+            }
+            
+            guard let result = await ModelRegistrationService.registerModels(
+                modelPoints: modelPoints,
+                scanPoints: scanPoints,
+                maxIterations: settings.maxICPIterations,
+                convergenceThreshold: Float(settings.icpConvergenceThreshold),
+                progressHandler: { progress in
+                    Task { @MainActor in
+                        registrationProgress = progress
+                    }
+                }
+            ) else {
+                await MainActor.run {
+                    registrationProgress = "Error: Registration failed"
+                    errorMessage = "Registration failed"
+                }
+                return
+            }
+            
+            if settings.showPerformanceLogs {
+                print("[ARSession] Registration complete!")
+                print("[ARSession] RMSE: \(result.rmse)")
+                print("[ARSession] Inliers: \(result.inlierFraction)")
+                print("[ARSession] Transform matrix: \(result.transformMatrix)")
+                print("[ARSession] ⏱️ Step 6 (ICP registration): \(Date().timeIntervalSince(registrationStart))s")
+                print("[ARSession] ⏱️ TOTAL TIME: \(Date().timeIntervalSince(startTime))s")
+            }
+            
+            // Step 7: Apply transformation
+            await MainActor.run {
+                frameOriginTransform = result.transformMatrix
+                placeFrameOriginGizmo(at: result.transformMatrix)
+                updateMarkersForNewFrameOrigin()
+                
+                registrationProgress = "Registration complete!"
+                
+                // Show brief success message
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    isRegistering = false
+                }
+            }
+            
+        } catch {
+            await MainActor.run {
+                registrationProgress = "Error: \(error.localizedDescription)"
+                errorMessage = "Registration failed: \(error.localizedDescription)"
+            }
+            print("[ARSession] Registration error: \(error)")
+            
+            // Auto-dismiss error after delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                isRegistering = false
+            }
+        }
+    }
+    
+    // Helper function to flatten scene hierarchy
+    private func flattenModelHierarchy(_ node: SCNNode, into container: SCNNode) {
+        if let geometry = node.geometry {
+            let clone = SCNNode(geometry: geometry)
+            clone.transform = node.worldTransform
+            container.addChildNode(clone)
+        }
+        for child in node.childNodes {
+            flattenModelHierarchy(child, into: container)
         }
     }
     
