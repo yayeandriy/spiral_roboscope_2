@@ -13,6 +13,7 @@ import SceneKit
 struct SessionScanView: View {
     let session: WorkSession
     let captureSession: CaptureSession  // Shared AR session from parent view
+    var onRegistrationComplete: ((simd_float4x4) -> Void)?  // Callback to pass transform back
     
     @Environment(\.dismiss) private var dismiss
     @StateObject private var spaceService = SpaceService.shared
@@ -214,6 +215,10 @@ struct SessionScanView: View {
             Button("Dismiss") {
                 withAnimation {
                     showRegistrationResult = false
+                    // Pass the transform back to parent view
+                    if let transform = transformMatrix {
+                        onRegistrationComplete?(transform)
+                    }
                     // Close the scan view and return to AR session with transform applied
                     dismiss()
                 }
@@ -411,6 +416,9 @@ struct SessionScanView: View {
                 isRegistering = false
                 showRegistrationResult = true
                 
+                // Store transform for callback
+                transformMatrix = result.transformMatrix
+                
                 // Apply transform to AR world coordinate system
                 applyTransformToARSession(result.transformMatrix)
             }
@@ -483,6 +491,9 @@ struct SessionScanView: View {
             createdAt: Date(),
             updatedAt: Date()
         ),
-        captureSession: CaptureSession()
+        captureSession: CaptureSession(),
+        onRegistrationComplete: { transform in
+            print("Registration complete with transform: \(transform)")
+        }
     )
 }

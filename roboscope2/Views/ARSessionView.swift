@@ -22,6 +22,8 @@ struct ARSessionView: View {
     @State private var isSessionActive = false
     @State private var errorMessage: String?
     @State private var showScanView = false
+    @State private var registrationTransform: simd_float4x4?
+    @State private var frameOriginAnchor: AnchorEntity?
 
     // Match scanning interactions
     @State private var isHoldingScreen = false
@@ -260,7 +262,14 @@ struct ARSessionView: View {
             if let errorMessage = errorMessage { Text(errorMessage) }
         }
         .sheet(isPresented: $showScanView) {
-            SessionScanView(session: session, captureSession: captureSession)
+            SessionScanView(
+                session: session,
+                captureSession: captureSession,
+                onRegistrationComplete: { transform in
+                    registrationTransform = transform
+                    placeFrameOriginGizmo(at: transform)
+                }
+            )
         }
         .navigationBarBackButtonHidden()
     }
@@ -382,6 +391,90 @@ struct ARSessionView: View {
         } catch {
             errorMessage = "Failed to complete session: \(error.localizedDescription)"
         }
+    }
+    
+    // MARK: - Frame Origin Gizmo
+    
+    private func placeFrameOriginGizmo(at transform: simd_float4x4) {
+        guard let arView = arView else { return }
+        
+        // Remove existing frame origin if any
+        if let existingAnchor = frameOriginAnchor {
+            arView.scene.removeAnchor(existingAnchor)
+        }
+        
+        // Create anchor at the transformed origin
+        let anchor = AnchorEntity(world: transform)
+        
+        // Create coordinate axes (RealityKit version)
+        let axisLength: Float = 0.5  // 50cm axes
+        let axisRadius: Float = 0.01  // 1cm thick
+        
+        // X-axis (Red)
+        let xAxis = ModelEntity(
+            mesh: .generateCylinder(height: axisLength, radius: axisRadius),
+            materials: [SimpleMaterial(color: .red, isMetallic: false)]
+        )
+        xAxis.position = SIMD3<Float>(axisLength/2, 0, 0)
+        xAxis.orientation = simd_quatf(angle: .pi/2, axis: SIMD3<Float>(0, 0, 1))
+        
+        // Y-axis (Green)
+        let yAxis = ModelEntity(
+            mesh: .generateCylinder(height: axisLength, radius: axisRadius),
+            materials: [SimpleMaterial(color: .green, isMetallic: false)]
+        )
+        yAxis.position = SIMD3<Float>(0, axisLength/2, 0)
+        
+        // Z-axis (Blue)
+        let zAxis = ModelEntity(
+            mesh: .generateCylinder(height: axisLength, radius: axisRadius),
+            materials: [SimpleMaterial(color: .blue, isMetallic: false)]
+        )
+        zAxis.position = SIMD3<Float>(0, 0, axisLength/2)
+        zAxis.orientation = simd_quatf(angle: .pi/2, axis: SIMD3<Float>(1, 0, 0))
+        
+        // Add axis labels with spheres at the tips
+        let sphereRadius: Float = 0.03
+        
+        let xTip = ModelEntity(
+            mesh: .generateSphere(radius: sphereRadius),
+            materials: [SimpleMaterial(color: .red, isMetallic: false)]
+        )
+        xTip.position = SIMD3<Float>(axisLength, 0, 0)
+        
+        let yTip = ModelEntity(
+            mesh: .generateSphere(radius: sphereRadius),
+            materials: [SimpleMaterial(color: .green, isMetallic: false)]
+        )
+        yTip.position = SIMD3<Float>(0, axisLength, 0)
+        
+        let zTip = ModelEntity(
+            mesh: .generateSphere(radius: sphereRadius),
+            materials: [SimpleMaterial(color: .blue, isMetallic: false)]
+        )
+        zTip.position = SIMD3<Float>(0, 0, axisLength)
+        
+        // Center sphere (white/yellow to mark origin)
+        let centerSphere = ModelEntity(
+            mesh: .generateSphere(radius: sphereRadius * 1.5),
+            materials: [SimpleMaterial(color: .yellow, isMetallic: false)]
+        )
+        
+        // Add all components to anchor
+        anchor.addChild(xAxis)
+        anchor.addChild(yAxis)
+        anchor.addChild(zAxis)
+        anchor.addChild(xTip)
+        anchor.addChild(yTip)
+        anchor.addChild(zTip)
+        anchor.addChild(centerSphere)
+        
+        // Add to scene
+        arView.scene.addAnchor(anchor)
+        frameOriginAnchor = anchor
+        
+        print("[ARSession] Placed frame origin gizmo at transform: \(transform)")
+        print("[ARSession] Gizmo position in world: \(anchor.position(relativeTo: nil))")
     }
 }
 
