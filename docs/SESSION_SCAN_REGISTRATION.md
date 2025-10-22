@@ -556,6 +556,13 @@ print("Gizmo anchor: \(frameOriginAnchor?.position(relativeTo: nil))")
 
 ## Version History
 
+- **v1.1** (Nov 2025): Settings System
+  - Centralized AppSettings with presets (Fast/Balanced/Accurate)
+  - Configurable point cloud sampling, ICP iterations, convergence threshold
+  - Performance toggles (AR pause, background loading, consistency checks)
+  - Settings UI with real-time estimates
+  - Applied to both Session and Space registration
+
 - **v1.0** (Oct 2025): Initial implementation
   - Session scanning
   - Model registration
@@ -563,9 +570,127 @@ print("Gizmo anchor: \(frameOriginAnchor?.position(relativeTo: nil))")
   - Performance optimizations
   - Marker coordinate transformations
 
+## Settings & Configuration
+
+### AppSettings
+
+**Location**: `roboscope2/Models/AppSettings.swift`
+
+All registration parameters are now configurable through the centralized settings system:
+
+#### Registration Presets
+
+| Preset | Time | Accuracy | Use Case |
+|--------|------|----------|----------|
+| **Fast** | ~10-15s | Medium | Quick alignment checks |
+| **Balanced** | ~15-25s | High | Recommended for most users |
+| **Accurate** | ~30-40s | Very High | Critical measurements |
+| **Custom** | Varies | Varies | Manual parameter tuning |
+
+#### Point Cloud Sampling
+
+- **Model Points**: 1,000 - 20,000 (default: 5,000)
+  - Sample count from Space USDC model
+  - Higher = more accuracy, slower processing
+  
+- **Scan Points**: 1,000 - 30,000 (default: 10,000)
+  - Sample count from AR mesh scan
+  - Keep higher than model for better coverage
+
+#### ICP Algorithm Parameters
+
+- **Max Iterations**: 10 - 100 (default: 30)
+  - Maximum number of ICP iterations
+  - Higher = better convergence, longer time
+  
+- **Convergence Threshold**: 0.0001 - 0.005 (default: 0.001)
+  - Exit early when change is below threshold
+  - Lower = more precise, longer time
+
+#### Performance Optimizations
+
+- **Pause AR During Registration**: ON (recommended)
+  - Frees 30-40% CPU/GPU resources
+  - Faster registration times
+  
+- **Background Model Loading**: ON (recommended)
+  - Keeps UI responsive during load
+  - No performance impact
+  
+- **Skip Consistency Checks**: ON (recommended)
+  - Faster USDC/OBJ loading
+  - Less validation
+
+- **Show Performance Logs**: OFF
+  - Displays detailed timing information
+  - Useful for debugging and optimization
+
+### Accessing Settings
+
+**Settings UI**: MainTabView → Settings tab
+
+**Programmatic Access**:
+```swift
+let settings = AppSettings.shared
+
+// Read values
+let modelPoints = settings.modelPointsSampleCount
+let iterations = settings.maxICPIterations
+
+// Apply preset
+settings.applyPreset(.fast)
+
+// Custom configuration
+settings.modelPointsSampleCount = 7000
+settings.maxICPIterations = 40
+```
+
+### Settings Integration
+
+Both Session and Space registration use the same settings:
+
+**SessionScanView.swift**:
+```swift
+@StateObject private var settings = AppSettings.shared
+
+let modelPoints = ModelRegistrationService.extractPointCloud(
+    from: model,
+    sampleCount: settings.modelPointsSampleCount
+)
+
+let result = await ModelRegistrationService.registerModels(
+    modelPoints: modelPoints,
+    scanPoints: scanPoints,
+    maxIterations: settings.maxICPIterations,
+    convergenceThreshold: settings.icpConvergenceThreshold
+)
+```
+
+**Space3DViewer.swift**: Same integration pattern
+
+### Performance Estimates
+
+The Settings UI provides real-time estimates based on current configuration:
+
+- **Estimated Time**: Calculated from point counts and iterations
+- **Expected RMSE**: Based on convergence threshold
+- **Expected Accuracy**: Based on total point counts
+
+Example:
+```
+Balanced Preset:
+- 5,000 model points + 10,000 scan points
+- 30 iterations, 0.001 threshold
+- AR pause enabled
+- Estimated time: ~15-25s
+- Expected RMSE: < 0.10m (Good)
+- Expected accuracy: High
+```
+
 ## Related Documentation
 
 - [ARKit Integration](./ARKIT_APPLICATION_GUIDE.md)
 - [Model Registration](./MODEL_REGISTRATION.md)
 - [Spatial Intelligence](./SPATIAL_INTELLIGENCE_INTEGRATION.md)
 - [API Documentation](./api/IOS_ARKIT_INTEGRATION.md)
+

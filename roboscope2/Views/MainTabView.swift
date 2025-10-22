@@ -28,7 +28,7 @@ struct MainTabView: View {
                 .tag(1)
 
             // Settings Tab
-            SettingsPlaceholderView()
+            SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
@@ -56,27 +56,6 @@ struct SpacesPlaceholderView: View {
                     .foregroundColor(.secondary)
             }
             .navigationTitle("Spaces")
-        }
-    }
-}
-
-struct SettingsPlaceholderView: View {
-    var body: some View {
-        NavigationView {
-            VStack(spacing: 20) {
-                Image(systemName: "gear")
-                    .font(.system(size: 64))
-                    .foregroundColor(.gray)
-                
-                Text("Settings")
-                    .font(.title)
-                    .fontWeight(.semibold)
-                
-                Text("Configure your preferences")
-                    .font(.body)
-                    .foregroundColor(.secondary)
-            }
-            .navigationTitle("Settings")
         }
     }
 }

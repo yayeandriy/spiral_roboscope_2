@@ -13,6 +13,7 @@ import SceneKit
 struct Space3DViewer: View {
     let space: Space
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var settings = AppSettings.shared
     @State private var selectedModel: ModelType = .glb
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -1261,19 +1262,19 @@ struct CombinedModelViewer: UIViewRepresentable {
         
         print("[CombinedViewer] Starting registration...")
         
-        // Extract point clouds
+        // Extract point clouds using settings
         await updateProgress("Extracting primary model points...", context: context)
-        let primaryPoints = ModelRegistrationService.extractPointCloud(from: primaryNode, sampleCount: 5000)
+        let primaryPoints = ModelRegistrationService.extractPointCloud(from: primaryNode, sampleCount: AppSettings.shared.modelPointsSampleCount)
         
         await updateProgress("Extracting scan points...", context: context)
-        let scanPoints = ModelRegistrationService.extractPointCloud(from: scanNode, sampleCount: 10000)
+        let scanPoints = ModelRegistrationService.extractPointCloud(from: scanNode, sampleCount: AppSettings.shared.scanPointsSampleCount)
         
-        // Perform registration
+        // Perform registration using settings
         if let result = await ModelRegistrationService.registerModels(
             modelPoints: primaryPoints,
             scanPoints: scanPoints,
-            maxIterations: 30,
-            convergenceThreshold: 0.001,
+            maxIterations: AppSettings.shared.maxICPIterations,
+            convergenceThreshold: Float(AppSettings.shared.icpConvergenceThreshold),
             progressHandler: { progress in
                 Task { @MainActor in
                     self.registrationProgress = progress
