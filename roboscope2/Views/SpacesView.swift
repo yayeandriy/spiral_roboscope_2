@@ -101,7 +101,7 @@ struct SpacesView: View {
     // MARK: - Space Tap Handler
     
     private func handleSpaceTap(_ space: Space) {
-        // If space has any 3D model (GLB, USDC, or scan), open 3D viewer
+        // If space has any 3D model (Frame/Reference/Scan), open 3D viewer
         if space.has3DContent {
             selectedSpaceFor3D = space
         } else {
@@ -209,14 +209,14 @@ struct SpaceTileView: View {
                 // Bottom labels
                 HStack(spacing: 12) {
                     if space.modelGlbUrl != nil {
-                        Text("GLB")
+                        Text("FRA")
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundColor(.green)
                     }
 
                     if space.modelUsdcUrl != nil {
-                        Text("USDC")
+                        Text("REF")
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundColor(.blue)

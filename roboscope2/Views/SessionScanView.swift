@@ -163,16 +163,29 @@ struct SessionScanView: View {
                 .padding(.vertical, 14)
                 .lgCapsule(tint: .red)
             } else if hasScanData {
-                // Find Space button
-                Button(action: findSpace) {
-                    Label("Find Space", systemImage: "magnifyingglass")
-                        .font(.headline)
+                HStack(spacing: 12) {
+                    // Save Scan to Space button
+                    Button(action: saveScanToSpace) {
+                        Label("Save Scan", systemImage: "square.and.arrow.up")
+                            .font(.headline)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .lgCapsule(tint: .green)
+                    .disabled(isExporting || isRegistering)
+
+                    // Find Space button
+                    Button(action: findSpace) {
+                        Label("Find Space", systemImage: "magnifyingglass")
+                            .font(.headline)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .lgCapsule(tint: .blue)
+                    .disabled(isExporting || isRegistering)
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 14)
-                .lgCapsule(tint: .blue)
-                .disabled(isExporting || isRegistering)
             }
         }
         .padding(.horizontal, 16)
@@ -377,6 +390,43 @@ struct SessionScanView: View {
         hasScanData = true
         print("[SessionScan] Stopped scanning")
     }
+
+    /// Save the current scanned mesh to Spiral Storage and set it as the Space's scan model URL
+    private func saveScanToSpace() {
+        guard !isExporting && !isRegistering else { return }
+        isExporting = true
+        exportProgress = 0.0
+        exportStatus = "Preparing export..."
+        showSuccessMessage = false
+
+        captureSession.exportAndUploadMeshData(
+            sessionId: session.id,
+            spaceId: session.spaceId,
+            progress: { progress, status in
+                DispatchQueue.main.async {
+                    self.exportProgress = progress
+                    self.exportStatus = status
+                }
+            },
+            completion: { [spaceService] localURL, cloudURL in
+                Task { @MainActor in
+                    self.isExporting = false
+                    if let cloudURL {
+                        do {
+                            let update = UpdateSpace(scanUrl: cloudURL)
+                            _ = try await spaceService.updateSpace(id: self.session.spaceId, update: update)
+                            self.showSuccessMessage = true
+                        } catch {
+                            self.exportStatus = "Failed to save scan URL"
+                            print("[SessionScan] Failed to update space with scan URL: \(error)")
+                        }
+                    } else {
+                        self.exportStatus = "Upload failed"
+                    }
+                }
+            }
+        )
+    }
     
     private func findSpace() {
         isRegistering = true
@@ -429,10 +479,10 @@ struct SessionScanView: View {
             guard let usdcUrlString = space.modelUsdcUrl,
                   let usdcUrl = URL(string: usdcUrlString) else {
                 await MainActor.run {
-                    registrationProgress = "Error: Space has no USDC model"
+                    registrationProgress = "Error: Space has no Reference model"
                     isRegistering = false
                 }
-                print("[SessionScan] Error: Space has no USDC model")
+                print("[SessionScan] Error: Space has no Reference model (USDC)")
                 return
             }
             
@@ -444,9 +494,7 @@ struct SessionScanView: View {
             
             // Step 2: Download and load the USDC model
             let downloadStart = Date()
-            await MainActor.run {
-                registrationProgress = "Downloading space model..."
-            }
+            await MainActor.run { registrationProgress = "Downloading reference model..." }
             
             let (modelData, _) = try await URLSession.shared.data(from: usdcUrl)
             
@@ -456,7 +504,7 @@ struct SessionScanView: View {
             try modelData.write(to: modelPath)
             
             if settings.showPerformanceLogs {
-                print("[SessionScan] Downloaded USDC model to: \(modelPath)")
+                print("[SessionScan] Downloaded Reference model to: \(modelPath)")
                 print("[SessionScan] ⏱️ Step 2 (Download model): \(Date().timeIntervalSince(downloadStart))s")
             }
             

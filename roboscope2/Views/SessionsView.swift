@@ -25,8 +25,22 @@ struct SessionsView: View {
             .navigationTitle("Work Sessions")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingCreateSheet = true }) {
-                        Image(systemName: "plus")
+                    HStack(spacing: 12) {
+                        // Sessions count pill
+                        Text("\(allSessions.count)")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.primary.opacity(0.12))
+                            )
+                            .foregroundColor(.primary)
+
+                        Button(action: { showingCreateSheet = true }) {
+                            Image(systemName: "plus")
+                        }
                     }
                 }
                 

@@ -20,9 +20,9 @@ struct roboscope2App: App {
         APIConfiguration.shared.enableLogging = false
         #endif
         
-        // Start background sync
-        SyncManager.shared.registerBackgroundTasks()
-        SyncManager.shared.startAutoSync()
+    // Background sync registration retained, but automatic polling disabled.
+    // Users can trigger sync manually from UI if needed.
+    SyncManager.shared.registerBackgroundTasks()
     }
     
     var body: some Scene {
