@@ -82,6 +82,17 @@ SessionScanView(
 - Blue button with magnifying glass icon
 - Initiates model registration process
 
+**Session Context Menu** (Ellipsis Menu):
+- **Location**: Top-right corner of SessionScanView, top-left corner of ARSessionView
+- **Icon**: Ellipsis circle (⋯) in SessionScanView, Ellipsis in liquid glass button in ARSessionView
+- **Options**:
+  - **Show Reference Model**: Toggle to display/hide the Space's USDC model at FrameOrigin
+    - Model is downloaded from `space.model_usdc_url`
+    - Placed at world origin (FrameOrigin) for spatial reference
+    - Useful for visual verification before running full registration
+    - Can be toggled on/off at any time during scanning or active session
+    - Available in both SessionScanView (during scan) and ARSessionView (during active work session)
+
 ### 3. Model Registration
 
 **Algorithm**: Iterative Closest Point (ICP)
@@ -168,11 +179,31 @@ Detailed timing logs for each step:
 
 ### 5. FrameOrigin Coordinate System
 
-**Purpose**: Unified coordinate system for all markers
+**Definition**: FrameOrigin is the reference coordinate system that represents the initial position and orientation of the AR camera when the session starts. It serves as the world origin (0, 0, 0) in AR space.
+
+**Purpose**: Unified coordinate system for all markers and spatial data across scanning, registration, and collaboration.
+
+**Physical Meaning**:
+- **Position**: The device's physical location when AR tracking begins
+- **Orientation**: The device's facing direction at AR session start
+- **Persistence**: Remains consistent throughout the AR session lifecycle
+- **Usage**: All spatial markers are stored relative to FrameOrigin, enabling consistent positioning across sessions after registration
 
 **States**:
 - **Before Registration**: FrameOrigin = AR Session Origin (identity matrix)
 - **After Registration**: FrameOrigin = Space Model Origin (transformation matrix)
+
+#### FrameOrigin in Practice
+
+**Placement**:
+- Reference models placed at FrameOrigin appear at world origin (0, 0, 0)
+- This represents where the device was when tracking started
+- Useful for understanding the relationship between physical space and digital coordinates
+
+**Visualization**:
+- The "Show Reference Model" feature places the Space USDC model at FrameOrigin
+- Helps users understand spatial alignment before running registration
+- Toggle via Session Context Menu in SessionScanView
 
 #### Coordinate Transformations
 

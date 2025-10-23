@@ -36,6 +36,11 @@ struct SessionScanView: View {
     @State private var registrationMetrics: String = ""
     @State private var transformMatrix: simd_float4x4?
     
+    // Reference model state
+    @State private var showReferenceModel = false
+    @State private var referenceModelAnchor: AnchorEntity?
+    @State private var isLoadingModel = false
+    
     var body: some View {
         ZStack {
             ARViewContainer(session: captureSession.session, arView: $arView)
@@ -55,6 +60,28 @@ struct SessionScanView: View {
             VStack {
                 HStack {
                     Spacer()
+                    
+                    // Session Context Menu (ellipsis menu)
+                    Menu {
+                        Toggle(isOn: $showReferenceModel) {
+                            Label("Show Reference Model", systemImage: "cube.box")
+                        }
+                        .onChange(of: showReferenceModel) { oldValue, newValue in
+                            if newValue {
+                                placeModelAtFrameOrigin()
+                            } else {
+                                removeReferenceModel()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+                    .padding(.trailing, 8)
                     
                     Button("Done") {
                         dismiss()
@@ -91,6 +118,11 @@ struct SessionScanView: View {
             // Registration result overlay
             if showRegistrationResult {
                 registrationResultOverlay
+            }
+            
+            // Model loading indicator
+            if isLoadingModel {
+                modelLoadingOverlay
             }
         }
     }
@@ -266,6 +298,24 @@ struct SessionScanView: View {
                 }
             }
             .buttonStyle(.bordered)
+        }
+        .padding(24)
+        .background(.ultraThinMaterial)
+        .cornerRadius(16)
+        .shadow(radius: 20)
+    }
+    
+    // MARK: - Model Loading Overlay
+    
+    private var modelLoadingOverlay: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+            
+            Text("Loading reference model...")
+                .font(.subheadline)
+                .foregroundColor(.white)
         }
         .padding(24)
         .background(.ultraThinMaterial)
@@ -590,6 +640,84 @@ struct SessionScanView: View {
         for child in sourceNode.childNodes {
             flattenModelHierarchy(child, into: targetNode)
         }
+    }
+    
+    // MARK: - Reference Model Management
+    
+    /// Place the reference model at FrameOrigin (the AR camera's initial position and orientation)
+    private func placeModelAtFrameOrigin() {
+        guard let arView = arView else {
+            print("[SessionScan] ARView not available")
+            return
+        }
+        
+        // Remove existing model if any
+        removeReferenceModel()
+        
+        isLoadingModel = true
+        
+        Task {
+            do {
+                // Fetch space to get model URL
+                let space = try await spaceService.getSpace(id: session.spaceId)
+                
+                guard let usdcUrlString = space.modelUsdcUrl,
+                      let usdcUrl = URL(string: usdcUrlString) else {
+                    await MainActor.run {
+                        print("[SessionScan] Space has no USDC model URL")
+                        isLoadingModel = false
+                        showReferenceModel = false
+                    }
+                    return
+                }
+                
+                print("[SessionScan] Loading reference model from: \(usdcUrlString)")
+                
+                // Download the model
+                let (modelData, _) = try await URLSession.shared.data(from: usdcUrl)
+                
+                // Save to temporary file
+                let tempDir = FileManager.default.temporaryDirectory
+                let modelPath = tempDir.appendingPathComponent("reference_model.usdc")
+                try modelData.write(to: modelPath)
+                
+                // Load the model entity
+                let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
+                
+                await MainActor.run {
+                    // Create anchor at FrameOrigin (world origin in AR coordinate space)
+                    // FrameOrigin represents the device's position and orientation when the AR session started
+                    let anchor = AnchorEntity(world: .zero)
+                    
+                    // Add the model to the anchor
+                    anchor.addChild(modelEntity)
+                    
+                    // Store reference and add to scene
+                    referenceModelAnchor = anchor
+                    arView.scene.addAnchor(anchor)
+                    
+                    isLoadingModel = false
+                    print("[SessionScan] Reference model placed at FrameOrigin")
+                }
+                
+            } catch {
+                await MainActor.run {
+                    print("[SessionScan] Failed to load reference model: \(error)")
+                    isLoadingModel = false
+                    showReferenceModel = false
+                }
+            }
+        }
+    }
+    
+    /// Remove the reference model from the scene
+    private func removeReferenceModel() {
+        guard let anchor = referenceModelAnchor else { return }
+        
+        arView?.scene.removeAnchor(anchor)
+        referenceModelAnchor = nil
+        
+        print("[SessionScan] Reference model removed")
     }
 }
 

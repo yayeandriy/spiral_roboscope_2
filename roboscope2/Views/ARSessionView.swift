@@ -29,6 +29,11 @@ struct ARSessionView: View {
     @State private var registrationProgress: String = ""
     @State private var frameOriginTransform: simd_float4x4 = matrix_identity_float4x4  // Default to AR origin
     @State private var frameOriginAnchor: AnchorEntity?
+    
+    // Reference model state
+    @State private var showReferenceModel = false
+    @State private var referenceModelAnchor: AnchorEntity?
+    @State private var isLoadingModel = false
 
     // Match scanning interactions
     @State private var isHoldingScreen = false
@@ -220,6 +225,19 @@ struct ARSessionView: View {
                 HStack(spacing: 12) {
                     // Top-left context menu (ellipsis)
                     Menu {
+                        Toggle(isOn: $showReferenceModel) {
+                            Label("Show Reference Model", systemImage: "cube.box")
+                        }
+                        .onChange(of: showReferenceModel) { oldValue, newValue in
+                            if newValue {
+                                placeModelAtFrameOrigin()
+                            } else {
+                                removeReferenceModel()
+                            }
+                        }
+                        
+                        Divider()
+                        
                         Button {
                             Task { await useSavedScan() }
                         } label: {
@@ -265,6 +283,12 @@ struct ARSessionView: View {
             // Registration progress overlay
             if isRegistering {
                 registrationProgressOverlay
+                    .zIndex(3)
+            }
+            
+            // Model loading indicator
+            if isLoadingModel {
+                modelLoadingOverlay
                     .zIndex(3)
             }
 
@@ -399,6 +423,24 @@ struct ARSessionView: View {
                 }
             }
             .padding(.horizontal, 4)
+        }
+        .padding(24)
+        .background(.ultraThinMaterial)
+        .cornerRadius(16)
+        .shadow(radius: 20)
+    }
+    
+    // MARK: - Model Loading Overlay
+    
+    private var modelLoadingOverlay: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+            
+            Text("Loading reference model...")
+                .font(.subheadline)
+                .foregroundColor(.white)
         }
         .padding(24)
         .background(.ultraThinMaterial)
@@ -935,6 +977,84 @@ struct ARSessionView: View {
                 print("Failed to update markers: \(error)")
             }
         }
+    }
+    
+    // MARK: - Reference Model Management
+    
+    /// Place the reference model at FrameOrigin (the AR camera's initial position and orientation)
+    private func placeModelAtFrameOrigin() {
+        guard let arView = arView else {
+            print("[ARSession] ARView not available")
+            return
+        }
+        
+        // Remove existing model if any
+        removeReferenceModel()
+        
+        isLoadingModel = true
+        
+        Task {
+            do {
+                // Fetch space to get model URL
+                let space = try await spaceService.getSpace(id: session.spaceId)
+                
+                guard let usdcUrlString = space.modelUsdcUrl,
+                      let usdcUrl = URL(string: usdcUrlString) else {
+                    await MainActor.run {
+                        print("[ARSession] Space has no USDC model URL")
+                        isLoadingModel = false
+                        showReferenceModel = false
+                    }
+                    return
+                }
+                
+                print("[ARSession] Loading reference model from: \(usdcUrlString)")
+                
+                // Download the model
+                let (modelData, _) = try await URLSession.shared.data(from: usdcUrl)
+                
+                // Save to temporary file
+                let tempDir = FileManager.default.temporaryDirectory
+                let modelPath = tempDir.appendingPathComponent("reference_model.usdc")
+                try modelData.write(to: modelPath)
+                
+                // Load the model entity
+                let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
+                
+                await MainActor.run {
+                    // Create anchor at FrameOrigin (world origin in AR coordinate space)
+                    // FrameOrigin represents the device's position and orientation when the AR session started
+                    let anchor = AnchorEntity(world: .zero)
+                    
+                    // Add the model to the anchor
+                    anchor.addChild(modelEntity)
+                    
+                    // Store reference and add to scene
+                    referenceModelAnchor = anchor
+                    arView.scene.addAnchor(anchor)
+                    
+                    isLoadingModel = false
+                    print("[ARSession] Reference model placed at FrameOrigin")
+                }
+                
+            } catch {
+                await MainActor.run {
+                    print("[ARSession] Failed to load reference model: \(error)")
+                    isLoadingModel = false
+                    showReferenceModel = false
+                }
+            }
+        }
+    }
+    
+    /// Remove the reference model from the scene
+    private func removeReferenceModel() {
+        guard let anchor = referenceModelAnchor else { return }
+        
+        arView?.scene.removeAnchor(anchor)
+        referenceModelAnchor = nil
+        
+        print("[ARSession] Reference model removed")
     }
 }
 

@@ -11,8 +11,14 @@ import SwiftUI
 struct roboscope2App: App {
     
     init() {
-        // Configure API environment
+        // Configure API environment based on build configuration
+        #if DEBUG
         APIConfiguration.shared.useDevelopment()
+        APIConfiguration.shared.enableLogging = true
+        #else
+        APIConfiguration.shared.useProduction()
+        APIConfiguration.shared.enableLogging = false
+        #endif
         
         // Start background sync
         SyncManager.shared.registerBackgroundTasks()
