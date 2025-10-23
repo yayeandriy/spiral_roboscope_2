@@ -724,8 +724,7 @@ struct SessionScanView: View {
                 let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
                 
                 await MainActor.run {
-                    // Create anchor at FrameOrigin using the registered transform
-                    // FrameOrigin represents the device's position and orientation when the AR session started
+                    // Anchor at the current transformMatrix (FrameOrigin in this view)
                     let anchor = AnchorEntity(world: transformMatrix ?? matrix_identity_float4x4)
                     
                     // Add the model to the anchor
@@ -806,7 +805,7 @@ struct SessionScanView: View {
                 let scanEntity = try await ModelEntity.loadModel(contentsOf: scanPath)
                 
                 await MainActor.run {
-                    // Create anchor at FrameOrigin using the registered transform
+                    // Anchor at the current transformMatrix (FrameOrigin in this view)
                     let anchor = AnchorEntity(world: transformMatrix ?? matrix_identity_float4x4)
                     
                     // Add the scan to the anchor
