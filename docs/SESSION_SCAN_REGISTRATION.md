@@ -92,6 +92,13 @@ SessionScanView(
     - Useful for visual verification before running full registration
     - Can be toggled on/off at any time during scanning or active session
     - Available in both SessionScanView (during scan) and ARSessionView (during active work session)
+  - **Show Scanned Model**: Toggle to display/hide the Space's scanned mesh at FrameOrigin
+    - Scan is downloaded from `space.scan_url`
+    - Placed at world origin (FrameOrigin) for spatial reference
+    - Represents the previously captured mesh scan of the physical space
+    - Useful for comparing current AR scan with historical data
+    - Supports various formats (OBJ, USDC, etc.) based on file extension
+    - Can be toggled on/off independently from reference model
 
 ### 3. Model Registration
 

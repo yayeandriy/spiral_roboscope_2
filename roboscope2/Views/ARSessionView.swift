@@ -34,6 +34,11 @@ struct ARSessionView: View {
     @State private var showReferenceModel = false
     @State private var referenceModelAnchor: AnchorEntity?
     @State private var isLoadingModel = false
+    
+    // Scan model state
+    @State private var showScanModel = false
+    @State private var scanModelAnchor: AnchorEntity?
+    @State private var isLoadingScan = false
 
     // Match scanning interactions
     @State private var isHoldingScreen = false
@@ -236,6 +241,17 @@ struct ARSessionView: View {
                             }
                         }
                         
+                        Toggle(isOn: $showScanModel) {
+                            Label("Show Scanned Model", systemImage: "camera.metering.matrix")
+                        }
+                        .onChange(of: showScanModel) { oldValue, newValue in
+                            if newValue {
+                                placeScanModelAtFrameOrigin()
+                            } else {
+                                removeScanModel()
+                            }
+                        }
+                        
                         Divider()
                         
                         Button {
@@ -289,6 +305,12 @@ struct ARSessionView: View {
             // Model loading indicator
             if isLoadingModel {
                 modelLoadingOverlay
+                    .zIndex(3)
+            }
+            
+            // Scan loading indicator
+            if isLoadingScan {
+                scanLoadingOverlay
                     .zIndex(3)
             }
 
@@ -439,6 +461,24 @@ struct ARSessionView: View {
                 .tint(.white)
             
             Text("Loading reference model...")
+                .font(.subheadline)
+                .foregroundColor(.white)
+        }
+        .padding(24)
+        .background(.ultraThinMaterial)
+        .cornerRadius(16)
+        .shadow(radius: 20)
+    }
+    
+    // MARK: - Scan Loading Overlay
+    
+    private var scanLoadingOverlay: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+            
+            Text("Loading scanned model...")
                 .font(.subheadline)
                 .foregroundColor(.white)
         }
@@ -1055,6 +1095,87 @@ struct ARSessionView: View {
         referenceModelAnchor = nil
         
         print("[ARSession] Reference model removed")
+    }
+    
+    // MARK: - Scan Model Management
+    
+    /// Place the scanned model at FrameOrigin (the AR camera's initial position and orientation)
+    private func placeScanModelAtFrameOrigin() {
+        guard let arView = arView else {
+            print("[ARSession] ARView not available")
+            return
+        }
+        
+        // Remove existing scan model if any
+        removeScanModel()
+        
+        isLoadingScan = true
+        
+        Task {
+            do {
+                // Fetch space to get scan URL
+                let space = try await spaceService.getSpace(id: session.spaceId)
+                
+                guard let scanUrlString = space.scanUrl,
+                      let scanUrl = URL(string: scanUrlString) else {
+                    await MainActor.run {
+                        print("[ARSession] Space has no scan URL")
+                        isLoadingScan = false
+                        showScanModel = false
+                    }
+                    return
+                }
+                
+                print("[ARSession] Loading scanned model from: \(scanUrlString)")
+                
+                // Download the scan
+                let (scanData, _) = try await URLSession.shared.data(from: scanUrl)
+                
+                // Determine file extension from URL
+                let fileExtension = scanUrl.pathExtension.lowercased()
+                let fileName = "scanned_model.\(fileExtension.isEmpty ? "obj" : fileExtension)"
+                
+                // Save to temporary file
+                let tempDir = FileManager.default.temporaryDirectory
+                let scanPath = tempDir.appendingPathComponent(fileName)
+                try scanData.write(to: scanPath)
+                
+                // Load the model entity
+                let scanEntity = try await ModelEntity.loadModel(contentsOf: scanPath)
+                
+                await MainActor.run {
+                    // Create anchor at FrameOrigin (world origin in AR coordinate space)
+                    let anchor = AnchorEntity(world: .zero)
+                    
+                    // Add the scan to the anchor
+                    anchor.addChild(scanEntity)
+                    
+                    // Store reference and add to scene
+                    scanModelAnchor = anchor
+                    arView.scene.addAnchor(anchor)
+                    
+                    isLoadingScan = false
+                    print("[ARSession] Scanned model placed at FrameOrigin")
+                }
+                
+            } catch {
+                await MainActor.run {
+                    print("[ARSession] Failed to load scanned model: \(error)")
+                    isLoadingScan = false
+                    showScanModel = false
+                }
+            }
+        }
+    }
+    
+    /// Remove the scanned model from the scene
+    private func removeScanModel() {
+        guard let anchor = scanModelAnchor else { return }
+        
+        arView?.scene.removeAnchor(anchor)
+        scanModelAnchor = nil
+        
+        print("[ARSession] Scanned model removed")
     }
 }
 
