@@ -386,6 +386,9 @@ struct ARSessionView: View {
                     placeFrameOriginGizmo(at: transform)
                     // Update all existing markers to new coordinate system
                     updateMarkersForNewFrameOrigin()
+                    // Update models if they are visible
+                    updateReferenceModelPosition()
+                    updateScanModelPosition()
                 }
             )
         }
@@ -832,6 +835,9 @@ struct ARSessionView: View {
                 frameOriginTransform = result.transformMatrix
                 placeFrameOriginGizmo(at: result.transformMatrix)
                 updateMarkersForNewFrameOrigin()
+                // Update models if they are visible
+                updateReferenceModelPosition()
+                updateScanModelPosition()
                 
                 registrationProgress = "Registration complete!"
                 
@@ -1062,9 +1068,9 @@ struct ARSessionView: View {
                 let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
                 
                 await MainActor.run {
-                    // Create anchor at FrameOrigin (world origin in AR coordinate space)
+                    // Create anchor at FrameOrigin using the registered transform
                     // FrameOrigin represents the device's position and orientation when the AR session started
-                    let anchor = AnchorEntity(world: .zero)
+                    let anchor = AnchorEntity(world: frameOriginTransform)
                     
                     // Add the model to the anchor
                     anchor.addChild(modelEntity)
@@ -1095,6 +1101,16 @@ struct ARSessionView: View {
         referenceModelAnchor = nil
         
         print("[ARSession] Reference model removed")
+    }
+    
+    /// Update the reference model's position to match the current FrameOrigin
+    private func updateReferenceModelPosition() {
+        guard let anchor = referenceModelAnchor else { return }
+        
+        // Update the anchor's transform to the new FrameOrigin
+        anchor.transform = Transform(matrix: frameOriginTransform)
+        
+        print("[ARSession] Reference model position updated to FrameOrigin")
     }
     
     // MARK: - Scan Model Management
@@ -1144,8 +1160,8 @@ struct ARSessionView: View {
                 let scanEntity = try await ModelEntity.loadModel(contentsOf: scanPath)
                 
                 await MainActor.run {
-                    // Create anchor at FrameOrigin (world origin in AR coordinate space)
-                    let anchor = AnchorEntity(world: .zero)
+                    // Create anchor at FrameOrigin using the registered transform
+                    let anchor = AnchorEntity(world: frameOriginTransform)
                     
                     // Add the scan to the anchor
                     anchor.addChild(scanEntity)
@@ -1176,6 +1192,16 @@ struct ARSessionView: View {
         scanModelAnchor = nil
         
         print("[ARSession] Scanned model removed")
+    }
+    
+    /// Update the scanned model's position to match the current FrameOrigin
+    private func updateScanModelPosition() {
+        guard let anchor = scanModelAnchor else { return }
+        
+        // Update the anchor's transform to the new FrameOrigin
+        anchor.transform = Transform(matrix: frameOriginTransform)
+        
+        print("[ARSession] Scanned model position updated to FrameOrigin")
     }
 }
 
