@@ -206,29 +206,11 @@ struct SpaceTileView: View {
 
                 Spacer()
 
-                // Bottom labels
+                // Bottom labels – always show all, gray out when missing
                 HStack(spacing: 12) {
-                    if space.modelGlbUrl != nil {
-                        Text("FRA")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.green)
-                    }
-
-                    if space.modelUsdcUrl != nil {
-                        Text("REF")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.blue)
-                    }
-                    
-                    if space.scanUrl != nil {
-                        Text("SCAN")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.orange)
-                    }
-
+                    modelBadge("FRA", present: space.modelGlbUrl != nil, color: .green)
+                    modelBadge("REF", present: space.modelUsdcUrl != nil, color: .blue)
+                    modelBadge("SCAN", present: space.scanUrl != nil, color: .orange)
                     Spacer()
                 }
             }
@@ -254,6 +236,16 @@ struct SpaceTileView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Helpers
+    @ViewBuilder
+    private func modelBadge(_ text: String, present: Bool, color: Color) -> some View {
+        Text(text)
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundColor(present ? color : .secondary)
+            .opacity(present ? 1.0 : 0.6)
     }
 
     private var cardStrokeColor: Color {
