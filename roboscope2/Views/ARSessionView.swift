@@ -1101,6 +1101,17 @@ struct ARSessionView: View {
         referenceModelAnchor = nil
         
         print("[ARSession] Reference model removed")
+        // Ensure the FrameOrigin gizmo remains present in the scene
+        ensureFrameOriginGizmoPresent()
+    }
+
+    /// Ensure the FrameOrigin gizmo is present; if it's been detached from the scene, re-add it
+    private func ensureFrameOriginGizmoPresent() {
+        guard let arView, let anchor = frameOriginAnchor else { return }
+        // Only re-add to the scene if it somehow got detached; do not change its transform
+        if anchor.parent == nil {
+            arView.scene.addAnchor(anchor)
+        }
     }
     
     /// Update the reference model's anchor to the latest FrameOrigin transform
