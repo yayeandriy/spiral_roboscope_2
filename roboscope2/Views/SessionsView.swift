@@ -17,6 +17,7 @@ struct SessionsView: View {
     @State private var sessionToDelete: WorkSession?
     // Search and filters removed for a simpler UI
     @State private var arSession: WorkSession?
+    @State private var isLaunchingAR: Bool = false
     
     var body: some View {
         NavigationView {
@@ -55,6 +56,10 @@ struct SessionsView: View {
             }
             .fullScreenCover(item: $arSession) { session in
                 ARSessionView(session: session)
+            }
+            .onChange(of: arSession) { oldValue, newValue in
+                // As soon as navigation triggers, hide the local overlay
+                if newValue != nil { isLaunchingAR = false }
             }
             .alert("Delete Session", isPresented: $showingDeleteAlert, presenting: sessionToDelete) { session in
                 Button("Delete", role: .destructive) {
@@ -132,6 +137,22 @@ struct SessionsView: View {
                 .padding()
             }
         }
+        .overlay {
+            if isLaunchingAR {
+                ZStack {
+                    Color.black.opacity(0.12).ignoresSafeArea()
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Opening session...")
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                    }
+                    .padding(14)
+                    .background(.ultraThinMaterial, in: Capsule())
+                }
+                .transition(.opacity)
+            }
+        }
     }
     
     private var emptyStateView: some View {
@@ -194,6 +215,10 @@ struct SessionsView: View {
     }
     
     private func startARSession(_ session: WorkSession) {
+        // Immediate haptic + overlay to confirm tap even if navigation takes a moment
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        isLaunchingAR = true
+        // Trigger navigation
         arSession = session
     }
     

@@ -19,9 +19,10 @@ struct SessionRowView: View {
     @StateObject private var markerService = MarkerService.shared
     @State private var sessionMarkersCount: Int? = nil
     @Environment(\.colorScheme) private var colorScheme
+    @GestureState private var isPressed: Bool = false
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: 10) {
             // Top row: status (left) + time ago (right)
             HStack(alignment: .firstTextBaseline) {
                 Text(session.status.displayName)
@@ -61,10 +62,25 @@ struct SessionRowView: View {
                 .stroke(cardStrokeColor, lineWidth: 0.5)
         )
         .shadow(color: cardShadowColor, radius: 6, x: 0, y: 2)
+        .overlay(
+            // Pressed highlight overlay
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.primary.opacity(isPressed ? 0.08 : 0.0))
+        )
+        .scaleEffect(isPressed ? 0.98 : 1.0)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isPressed)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onTapGesture {
-            onStartAR()
-        }
+        // Capture a 0-distance drag to reflect pressed state quickly, and fire the tap on end
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .updating($isPressed) { _, state, _ in
+                    if state == false { state = true }
+                }
+                .onEnded { _ in
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onStartAR()
+                }
+        )
         .task {
             // Fetch accurate per-session marker count without mutating global markers
             print("[SessionRow] Fetching markers for session \(session.id)")
