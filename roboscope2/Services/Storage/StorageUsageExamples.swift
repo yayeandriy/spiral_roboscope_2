@@ -216,7 +216,7 @@ func pathGenerationExamples() {
     // Path with session
     let path2 = SpiralStorageService.generatePath(
         for: .scan,
-        fileName: "room_scan.obj",
+        fileName: "room_scan.usdc",
         sessionId: UUID()
     )
     // Result: "scans/session-{uuid}/1729446000000_room_scan.obj"

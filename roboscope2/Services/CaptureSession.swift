@@ -113,10 +113,10 @@ final class CaptureSession: NSObject, ObservableObject {
                 .replacingOccurrences(of: "/", with: "-")
                 .replacingOccurrences(of: ":", with: "-")
                 .replacingOccurrences(of: " ", with: "_")
-            let exportURL = documentsPath.appendingPathComponent("spatial_scan_\(timestamp).obj")
+            let exportURL = documentsPath.appendingPathComponent("spatial_scan_\(timestamp).usdc")
             
-            // Export as OBJ
-            progress(0.85, "Writing OBJ file...")
+            // Export as USDC
+            progress(0.85, "Writing USDC file...")
             
             do {
                 try mdlAsset.export(to: exportURL)

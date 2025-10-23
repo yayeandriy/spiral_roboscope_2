@@ -71,7 +71,7 @@ class SpiralStorageService {
     /// Upload a file to Spiral Storage with multipart upload support and progress tracking
     /// - Parameters:
     ///   - fileURL: Local file URL to upload
-    ///   - destinationPath: Destination path in R2 storage (e.g., "models/session-123/scan.obj")
+    ///   - destinationPath: Destination path in R2 storage (e.g., "models/session-123/scan.usdc")
     ///   - progress: Optional progress callback (0.0 to 1.0)
     /// - Returns: Public URL of the uploaded file
     func uploadFile(
@@ -180,7 +180,7 @@ class SpiralStorageService {
         
         let body: [String: Any] = [
             "key": key,
-            "content_type": "model/obj",
+            "content_type": "model/vnd.usd+zip",
             "parts": numberOfParts
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)

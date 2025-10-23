@@ -795,7 +795,7 @@ struct SessionScanView: View {
                 
                 // Determine file extension from URL
                 let fileExtension = scanUrl.pathExtension.lowercased()
-                let fileName = "scanned_model.\(fileExtension.isEmpty ? "obj" : fileExtension)"
+                let fileName = "scanned_model.\(fileExtension.isEmpty ? "usdc" : fileExtension)"
                 
                 // Save to temporary file
                 let tempDir = FileManager.default.temporaryDirectory

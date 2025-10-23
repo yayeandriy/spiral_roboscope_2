@@ -1173,9 +1173,19 @@ struct CombinedModelViewer: UIViewRepresentable {
             coordinator.primaryModelNode = node
         }
         
-        // Load scan model (OBJ)
+        // Load scan model (USDC/OBJ/GLB)
         if let scanUrl = space.scanUrl {
-            let fileExt = scanUrl.hasSuffix(".obj") ? "obj" : (scanUrl.hasSuffix(".glb") ? "glb" : "obj")
+            let fileExt: String
+            if scanUrl.hasSuffix(".usdc") || scanUrl.hasSuffix(".usdz") {
+                fileExt = scanUrl.hasSuffix(".usdz") ? "usdz" : "usdc"
+            } else if scanUrl.hasSuffix(".glb") {
+                fileExt = "glb"
+            } else if scanUrl.hasSuffix(".obj") {
+                fileExt = "obj"
+            } else {
+                // Default to usdc for scan files (new format)
+                fileExt = "usdc"
+            }
             print("[CombinedViewer] Loading scan model: \(fileExt.uppercased())")
             let node = await loadModel(url: scanUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: UIColor.cyan.withAlphaComponent(0.5), nodeName: "scanModel")
             coordinator.scanModelNode = node
@@ -1285,13 +1295,19 @@ struct CombinedModelViewer: UIViewRepresentable {
                         containerNode.addChildNode(childNode)
                     }
                 }
-                
-                if containerNode.childNodes.isEmpty && (fileExtension.lowercased() == "usdc" || fileExtension.lowercased() == "usdz") {
-                    if let loadedScene = try? SCNScene(url: tempURL, options: nil) {
-                        for child in loadedScene.rootNode.childNodes {
-                            containerNode.addChildNode(child.clone())
-                        }
+            }
+            
+            // If MDLAsset didn't produce nodes, try loading as SCNScene (better for USDC/USDZ)
+            if containerNode.childNodes.isEmpty {
+                print("[CombinedViewer] MDLAsset produced no nodes, trying SCNScene...")
+                if let loadedScene = try? SCNScene(url: tempURL, options: [
+                    SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
+                    SCNSceneSource.LoadingOption.flattenScene: true
+                ]) {
+                    for child in loadedScene.rootNode.childNodes {
+                        containerNode.addChildNode(child.clone())
                     }
+                    print("[CombinedViewer] SCNScene loaded \(containerNode.childNodes.count) nodes")
                 }
             }
             
@@ -1528,7 +1544,7 @@ struct CameraControlButtons: View {
         modelGlbUrl: "https://example.com/model.glb",
         modelUsdcUrl: "https://example.com/model.usdz",
         previewUrl: nil,
-        scanUrl: "https://example.com/scan.obj",
+        scanUrl: "https://example.com/scan.usdc",
         meta: nil,
         createdAt: Date(),
         updatedAt: Date()

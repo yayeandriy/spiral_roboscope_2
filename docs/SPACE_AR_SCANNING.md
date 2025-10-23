@@ -119,7 +119,7 @@ User taps "Save to Space"
 Show export progress overlay
     ↓
 captureSession.exportAndUploadMeshData()
-    ├─ 0-80%: Export mesh to local OBJ file
+    ├─ 0-80%: Export mesh to local USDC file
     └─ 80-100%: Upload to Spiral Storage
         ↓
     Receive cloud URL
@@ -158,12 +158,12 @@ captureSession.exportAndUploadMeshData(
 
 **File Path:**
 ```
-scans/space-{uuid}/{timestamp}_{filename}.obj
+scans/space-{uuid}/{timestamp}_{filename}.usdc
 ```
 
-**Example:**
+Example:
 ```
-scans/space-123e4567-e89b-12d3-a456-426614174000/1729446000000_spatial_scan.obj
+scans/space-123e4567-e89b-12d3-a456-426614174000/1729446000000_spatial_scan.usdc
 ```
 
 ---
@@ -307,7 +307,7 @@ catch {
 - [ ] Start scan button starts mesh reconstruction
 - [ ] Stop scan button stops reconstruction
 - [ ] Start again resets state
-- [ ] Save to Space exports OBJ file
+- [ ] Save to Space exports USDC file
 - [ ] Upload progress shows 0-100%
 - [ ] Cloud URL returned from storage
 - [ ] Space updated with scan_url
@@ -326,7 +326,7 @@ catch {
 - `exportAndUploadMeshData()` - Exports and uploads scan
 
 ### SpiralStorageService
-- Multipart upload for large OBJ files
+- Multipart upload for large USDC files
 - Progress tracking (0-80% export, 80-100% upload)
 - Returns cloud URL for uploaded file
 

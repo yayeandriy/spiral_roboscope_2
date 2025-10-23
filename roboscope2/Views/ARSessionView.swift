@@ -708,7 +708,7 @@ struct ARSessionView: View {
             }
             
             let (scanData, _) = try await URLSession.shared.data(from: scanUrl)
-            let scanPath = tempDir.appendingPathComponent("saved_scan.obj")
+            let scanPath = tempDir.appendingPathComponent("saved_scan.usdc")
             try scanData.write(to: scanPath)
             
             if settings.showPerformanceLogs {
@@ -1133,7 +1133,7 @@ struct ARSessionView: View {
                 
                 // Determine file extension from URL
                 let fileExtension = scanUrl.pathExtension.lowercased()
-                let fileName = "scanned_model.\(fileExtension.isEmpty ? "obj" : fileExtension)"
+                let fileName = "scanned_model.\(fileExtension.isEmpty ? "usdc" : fileExtension)"
                 
                 // Save to temporary file
                 let tempDir = FileManager.default.temporaryDirectory

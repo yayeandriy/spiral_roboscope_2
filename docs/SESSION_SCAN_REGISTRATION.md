@@ -28,7 +28,7 @@ ARSessionView (Main AR Session)
 
 ```
 1. User initiates scan
-2. ARKit captures mesh → Export to OBJ
+2. ARKit captures mesh → Export to USDC
 3. Download Space USDC model
 4. Extract point clouds from both models
 5. Run ICP registration algorithm
@@ -97,7 +97,7 @@ SessionScanView(
     - Placed at world origin (FrameOrigin) for spatial reference
     - Represents the previously captured mesh scan of the physical space
     - Useful for comparing current AR scan with historical data
-    - Supports various formats (OBJ, USDC, etc.) based on file extension
+    - Uses USDC format for optimized loading and compatibility
     - Can be toggled on/off independently from reference model
 
 ### 3. Model Registration
@@ -116,7 +116,7 @@ SessionScanView(
    - File handling: `FileManager.default.temporaryDirectory`
 
 3. **Export Scan Mesh** (~2-3s)
-   - Convert ARKit mesh anchors to OBJ format
+   - Convert ARKit mesh anchors to USDC format
    - Export to Documents directory
    - Uses `CaptureSession.exportMeshData()`
 
@@ -658,7 +658,7 @@ All registration parameters are now configurable through the centralized setting
   - No performance impact
   
 - **Skip Consistency Checks**: ON (recommended)
-  - Faster USDC/OBJ loading
+  - Faster USDC loading
   - Less validation
 
 - **Show Performance Logs**: OFF
