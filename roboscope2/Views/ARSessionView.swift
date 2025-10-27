@@ -161,6 +161,13 @@ struct ARSessionView: View {
                             // Transform to FrameOrigin coordinates before persisting
                             let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
                             
+                            // Compute frame dimensions for custom_props
+                            let frameDimsData = markerService.getFrameDimsForPersistence(nodes: frameOriginPoints)
+                            var customProps: [String: Any]? = nil
+                            if let frameDims = frameDimsData {
+                                customProps = [Marker.frameDimsKey: frameDims]
+                            }
+                            
                             // Persist updated marker to backend
                             Task {
                                 do {
@@ -168,9 +175,10 @@ struct ARSessionView: View {
                                         id: backendId,
                                         workSessionId: session.id,
                                         points: frameOriginPoints,
-                                        version: version
+                                        version: version,
+                                        customProps: customProps
                                     )
-                                    print("[ARSession] Updated marker position in FrameOrigin coordinates")
+                                    print("[ARSession] Updated marker position in FrameOrigin coordinates with frame_dims")
                                 } catch {
                                     // Silently handle error
                                 }
@@ -196,6 +204,13 @@ struct ARSessionView: View {
                             // Transform to FrameOrigin coordinates before persisting
                             let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
                             
+                            // Compute frame dimensions for custom_props
+                            let frameDimsData = markerService.getFrameDimsForPersistence(nodes: frameOriginPoints)
+                            var customProps: [String: Any]? = nil
+                            if let frameDims = frameDimsData {
+                                customProps = [Marker.frameDimsKey: frameDims]
+                            }
+                            
                             // Persist updated marker to backend
                             Task {
                                 do {
@@ -203,9 +218,10 @@ struct ARSessionView: View {
                                         id: backendId,
                                         workSessionId: session.id,
                                         points: frameOriginPoints,
-                                        version: version
+                                        version: version,
+                                        customProps: customProps
                                     )
-                                    print("[ARSession] Updated marker transform in FrameOrigin coordinates")
+                                    print("[ARSession] Updated marker transform in FrameOrigin coordinates with frame_dims")
                                 } catch {
                                     // Silently handle error
                                 }
@@ -539,14 +555,25 @@ struct ARSessionView: View {
             // Transform marker points to FrameOrigin coordinate system
             let frameOriginPoints = transformPointsToFrameOrigin(spatial.nodes)
             
+            // Compute frame dimensions for custom_props
+            let frameDimsData = markerService.getFrameDimsForPersistence(nodes: frameOriginPoints)
+            var customProps: [String: Any]? = nil
+            if let frameDims = frameDimsData {
+                customProps = [Marker.frameDimsKey: frameDims]
+            }
+            
             // Save to backend with FrameOrigin coordinates
             Task {
                 do {
                     let created = try await markerApi.createMarker(
-                        CreateMarker(workSessionId: session.id, points: frameOriginPoints)
+                        CreateMarker(
+                            workSessionId: session.id,
+                            points: frameOriginPoints,
+                            customProps: customProps
+                        )
                     )
                     markerService.linkSpatialMarker(localId: spatial.id, backendId: created.id)
-                    print("[ARSession] Created marker in FrameOrigin coordinates")
+                    print("[ARSession] Created marker in FrameOrigin coordinates with frame_dims")
                 } catch {
                     print("Failed to persist marker: \(error)")
                 }
@@ -1406,58 +1433,84 @@ struct MarkerBadgeView: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             VStack(spacing: 12) {
-            // Dimensions row
-            HStack(spacing: 20) {
-                VStack(spacing: 4) {
-                    Text("Width")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
-                    Text(String(format: "%.2f m", info.width))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
+                // Dimensions row
+                HStack(spacing: 20) {
+                    VStack(spacing: 4) {
+                        Text("Width")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        Text(String(format: "%.2f m", info.width))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    
+                    Rectangle()
+                        .fill(Color.white.opacity(0.3))
+                        .frame(width: 1, height: 30)
+                    
+                    VStack(spacing: 4) {
+                        Text("Length")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        Text(String(format: "%.2f m", info.length))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
                 }
                 
-                Rectangle()
-                    .fill(Color.white.opacity(0.3))
-                    .frame(width: 1, height: 30)
-                
-                VStack(spacing: 4) {
-                    Text("Length")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
-                    Text(String(format: "%.2f m", info.length))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-            }
-            
                 Divider()
                     .background(Color.white.opacity(0.3))
-            
-            // Center coordinates row
-            HStack(spacing: 20) {
-                VStack(spacing: 4) {
-                    Text("X")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
-                    Text(String(format: "%.2f", info.centerX))
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white)
+                
+                // Center coordinates row
+                HStack(spacing: 20) {
+                    VStack(spacing: 4) {
+                        Text("X")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        Text(String(format: "%.2f", info.centerX))
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    
+                    Rectangle()
+                        .fill(Color.white.opacity(0.3))
+                        .frame(width: 1, height: 30)
+                    
+                    VStack(spacing: 4) {
+                        Text("Z")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        Text(String(format: "%.2f", info.centerZ))
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                    }
                 }
                 
-                Rectangle()
-                    .fill(Color.white.opacity(0.3))
-                    .frame(width: 1, height: 30)
-                
-                VStack(spacing: 4) {
-                    Text("Z")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
-                    Text(String(format: "%.2f", info.centerZ))
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white)
+                // Frame Dimensions - distances to edges
+                if let frameDims = info.frameDims {
+                    Divider()
+                        .background(Color.white.opacity(0.3))
+                    
+                    VStack(spacing: 8) {
+                        Text("Distances to Edges")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.8))
+                        
+                        // First row: Left, Right, Near, Far
+                        HStack(spacing: 16) {
+                            EdgeDistanceView(label: "L", distance: frameDims.left, color: .red)
+                            EdgeDistanceView(label: "R", distance: frameDims.right, color: .red)
+                            EdgeDistanceView(label: "N", distance: frameDims.near, color: .blue)
+                            EdgeDistanceView(label: "F", distance: frameDims.far, color: .blue)
+                        }
+                        
+                        // Second row: Top, Bottom
+                        HStack(spacing: 16) {
+                            EdgeDistanceView(label: "Top", distance: frameDims.top, color: .green)
+                            EdgeDistanceView(label: "Bot", distance: frameDims.bottom, color: .green)
+                        }
+                    }
                 }
-            }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
@@ -1493,6 +1546,26 @@ struct MarkerBadgeView: View {
                 .offset(x: 8, y: -8)
             }
         }
+    }
+}
+
+// MARK: - Edge Distance View
+
+struct EdgeDistanceView: View {
+    let label: String
+    let distance: Float
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(color.opacity(0.8))
+            Text(String(format: "%.2f", distance))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white)
+        }
+        .frame(minWidth: 40)
     }
 }
 

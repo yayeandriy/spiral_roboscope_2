@@ -183,18 +183,20 @@ final class MarkerService: ObservableObject {
         return try await createMarker(markerRequest)
     }
     
-    /// Update marker position with new ARKit points
+    /// Update marker position (4 corner points)
     /// - Parameters:
     ///   - id: Marker UUID
-    ///   - workSessionId: Work session ID (required by backend)
+    ///   - workSessionId: Work session UUID
     ///   - points: New 4 corner points
     ///   - version: Current marker version for optimistic locking
+    ///   - customProps: Optional custom properties (e.g., frame_dims)
     /// - Returns: The updated marker
     func updateMarkerPosition(
         id: UUID,
         workSessionId: UUID,
         points: [SIMD3<Float>],
-        version: Int64
+        version: Int64,
+        customProps: [String: Any]? = nil
     ) async throws -> Marker {
         guard points.count == 4 else {
             throw APIError.badRequest(message: "Marker must have exactly 4 points")
@@ -203,7 +205,8 @@ final class MarkerService: ObservableObject {
         let update = UpdateMarker(
             workSessionId: workSessionId,
             points: points,
-            version: version
+            version: version,
+            customProps: customProps
         )
         
         return try await updateMarker(id: id, update: update)
