@@ -23,12 +23,14 @@ struct Marker: Codable, Identifiable, Hashable {
     let color: String?
     let version: Int64
     let meta: [String: AnyCodable]
+    let customProps: [String: AnyCodable]  // Custom properties for domain-specific metadata
     let createdAt: Date
     let updatedAt: Date
     
     enum CodingKeys: String, CodingKey {
         case id, label, p1, p2, p3, p4, color, version, meta
         case workSessionId = "work_session_id"
+        case customProps = "custom_props"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -102,10 +104,12 @@ struct CreateMarker: Codable {
     let p4: [Double]
     let color: String?
     let meta: [String: AnyCodable]?
+    let customProps: [String: AnyCodable]?  // Custom properties (optional, defaults to {} on backend)
     
     enum CodingKeys: String, CodingKey {
         case label, p1, p2, p3, p4, color, meta
         case workSessionId = "work_session_id"
+        case customProps = "custom_props"
     }
     
     /// Initialize with SIMD3<Float> points (for ARKit integration)
@@ -114,7 +118,8 @@ struct CreateMarker: Codable {
         label: String? = nil,
         points: [SIMD3<Float>],
         color: String? = nil,
-        meta: [String: Any]? = nil
+        meta: [String: Any]? = nil,
+        customProps: [String: Any]? = nil
     ) {
         guard points.count == 4 else {
             fatalError("Marker must have exactly 4 points")
@@ -128,6 +133,7 @@ struct CreateMarker: Codable {
         self.p4 = [Double(points[3].x), Double(points[3].y), Double(points[3].z)]
         self.color = color ?? Marker.defaultColor
         self.meta = meta?.mapValues { AnyCodable($0) }
+        self.customProps = customProps?.mapValues { AnyCodable($0) }
     }
     
     /// Initialize with Double arrays (for direct API usage)
@@ -139,7 +145,8 @@ struct CreateMarker: Codable {
         p3: [Double],
         p4: [Double],
         color: String? = nil,
-        meta: [String: Any]? = nil
+        meta: [String: Any]? = nil,
+        customProps: [String: Any]? = nil
     ) {
         self.workSessionId = workSessionId
         self.label = label
@@ -149,6 +156,7 @@ struct CreateMarker: Codable {
         self.p4 = p4
         self.color = color ?? Marker.defaultColor
         self.meta = meta?.mapValues { AnyCodable($0) }
+        self.customProps = customProps?.mapValues { AnyCodable($0) }
     }
 }
 
@@ -168,10 +176,12 @@ struct UpdateMarker: Codable {
     let color: String?
     let version: Int64? // For optimistic locking
     let meta: [String: AnyCodable]?
+    let customProps: [String: AnyCodable]?  // Custom properties (optional)
     
     enum CodingKeys: String, CodingKey {
         case label, p1, p2, p3, p4, color, version, meta
         case workSessionId = "work_session_id"
+        case customProps = "custom_props"
     }
     
     /// Initialize with SIMD3<Float> points (for ARKit integration)
@@ -181,7 +191,8 @@ struct UpdateMarker: Codable {
         points: [SIMD3<Float>]? = nil,
         color: String? = nil,
         version: Int64? = nil,
-        meta: [String: Any]? = nil
+        meta: [String: Any]? = nil,
+        customProps: [String: Any]? = nil
     ) {
         self.workSessionId = workSessionId
         self.label = label
@@ -204,6 +215,7 @@ struct UpdateMarker: Codable {
         self.color = color
         self.version = version
         self.meta = meta?.mapValues { AnyCodable($0) }
+        self.customProps = customProps?.mapValues { AnyCodable($0) }
     }
 }
 
@@ -247,5 +259,173 @@ extension UIColor {
                                    lroundf(Float(g * 255)),
                                    lroundf(Float(b * 255)))
         return hexString
+    }
+}
+
+// MARK: - Custom Props Keys (Constants for type safety)
+
+/// Predefined keys for commonly used custom properties
+enum CustomPropsKeys {
+    // Inspection & Assessment
+    static let severity = "severity"
+    static let category = "category"
+    static let status = "status"
+    static let priority = "priority"
+    static let inspector = "inspector"
+    static let inspectionDate = "inspectionDate"
+    static let findings = "findings"
+    static let followUpRequired = "followUpRequired"
+    
+    // Damage Assessment
+    static let damageType = "damageType"
+    static let estimatedCost = "estimatedCost"
+    static let repairPriority = "repairPriority"
+    
+    // AR Tracking
+    static let anchorId = "anchorId"
+    static let confidence = "confidence"
+    static let worldPosition = "worldPosition"
+    
+    // Measurements
+    static let unit = "unit"
+    static let length = "length"
+    static let width = "width"
+    static let height = "height"
+    static let area = "area"
+    static let volume = "volume"
+    static let measuredBy = "measuredBy"
+    
+    // Workflow
+    static let reviewedAt = "reviewedAt"
+    static let reviewedBy = "reviewedBy"
+    static let assignedTo = "assignedTo"
+    static let dueDate = "dueDate"
+    
+    // Tagging
+    static let tags = "tags"
+}
+
+// MARK: - Marker Custom Props Extensions
+
+extension Marker {
+    // MARK: - Typed Accessors for Common Properties
+    
+    /// Severity level (e.g., "low", "medium", "high", "critical")
+    var severity: String? {
+        customProps[CustomPropsKeys.severity]?.value as? String
+    }
+    
+    /// Category (e.g., "damage", "inspection", "measurement")
+    var category: String? {
+        customProps[CustomPropsKeys.category]?.value as? String
+    }
+    
+    /// Status (e.g., "pending", "reviewed", "approved", "rejected")
+    var status: String? {
+        customProps[CustomPropsKeys.status]?.value as? String
+    }
+    
+    /// Priority as integer (1 = highest)
+    var priority: Int? {
+        customProps[CustomPropsKeys.priority]?.value as? Int
+    }
+    
+    /// Inspector name
+    var inspector: String? {
+        customProps[CustomPropsKeys.inspector]?.value as? String
+    }
+    
+    /// Tags array
+    var tags: [String]? {
+        customProps[CustomPropsKeys.tags]?.value as? [String]
+    }
+    
+    /// Check if marker has been reviewed
+    var isReviewed: Bool {
+        status == "reviewed"
+    }
+    
+    /// Check if marker requires follow-up
+    var requiresFollowUp: Bool {
+        customProps[CustomPropsKeys.followUpRequired]?.value as? Bool ?? false
+    }
+    
+    // MARK: - Measurement Accessors
+    
+    /// Length measurement
+    var length: Double? {
+        customProps[CustomPropsKeys.length]?.value as? Double
+    }
+    
+    /// Width measurement
+    var width: Double? {
+        customProps[CustomPropsKeys.width]?.value as? Double
+    }
+    
+    /// Height measurement
+    var height: Double? {
+        customProps[CustomPropsKeys.height]?.value as? Double
+    }
+    
+    /// Area measurement
+    var area: Double? {
+        customProps[CustomPropsKeys.area]?.value as? Double
+    }
+    
+    /// Measurement unit (e.g., "meters", "feet", "inches")
+    var measurementUnit: String? {
+        customProps[CustomPropsKeys.unit]?.value as? String
+    }
+    
+    // MARK: - Filtering Helpers
+    
+    /// Check if marker has high priority (priority <= 2)
+    var isHighPriority: Bool {
+        guard let priority = priority else { return false }
+        return priority <= 2
+    }
+    
+    /// Check if marker has specific tag
+    func hasTag(_ tag: String) -> Bool {
+        tags?.contains(tag) ?? false
+    }
+    
+    /// Check if marker matches severity level
+    func hasSeverity(_ level: String) -> Bool {
+        severity?.lowercased() == level.lowercased()
+    }
+}
+
+// MARK: - Array Extensions for Filtering
+
+extension Array where Element == Marker {
+    /// Get markers with high priority
+    func highPriority() -> [Marker] {
+        filter { $0.isHighPriority }
+    }
+    
+    /// Get unreviewed markers
+    func unreviewed() -> [Marker] {
+        filter { !$0.isReviewed }
+    }
+    
+    /// Get markers with specific severity
+    func withSeverity(_ level: String) -> [Marker] {
+        filter { $0.hasSeverity(level) }
+    }
+    
+    /// Get markers with specific tag
+    func withTag(_ tag: String) -> [Marker] {
+        filter { $0.hasTag(tag) }
+    }
+    
+    /// Get markers requiring follow-up
+    func requiresFollowUp() -> [Marker] {
+        filter { $0.requiresFollowUp }
+    }
+    
+    /// Get markers by category
+    func inCategory(_ category: String) -> [Marker] {
+        filter { $0.category?.lowercased() == category.lowercased() }
     }
 }

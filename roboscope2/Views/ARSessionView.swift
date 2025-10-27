@@ -90,6 +90,7 @@ struct ARSessionView: View {
                                 color: marker.color,
                                 version: marker.version,
                                 meta: marker.meta,
+                                customProps: marker.customProps,
                                 createdAt: marker.createdAt,
                                 updatedAt: marker.updatedAt
                             )
@@ -1009,6 +1010,7 @@ struct ARSessionView: View {
                         color: marker.color,
                         version: marker.version,
                         meta: marker.meta,
+                        customProps: marker.customProps,
                         createdAt: marker.createdAt,
                         updatedAt: marker.updatedAt
                     )
