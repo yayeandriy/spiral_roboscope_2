@@ -34,6 +34,7 @@ struct ARSessionView: View {
     @State private var showReferenceModel = false
     @State private var referenceModelAnchor: AnchorEntity?
     @State private var isLoadingModel = false
+    @State private var referenceModelNode: SCNNode?  // Store for mesh calculations
     
     // Scan model state
     @State private var showScanModel = false
@@ -71,6 +72,12 @@ struct ARSessionView: View {
                 }
                 RunLoop.main.add(tracking, forMode: .common)
                 markerTrackingTimer = tracking
+                
+                // Load reference model to extract room planes
+                Task {
+                    await loadRoomPlanesFromSpace()
+                }
+                
                 // Load persisted markers for this session
                 Task {
                     do {
@@ -161,11 +168,20 @@ struct ARSessionView: View {
                             // Transform to FrameOrigin coordinates before persisting
                             let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
                             
-                            // Compute frame dimensions for custom_props
-                            let frameDimsData = markerService.getFrameDimsForPersistence(nodes: frameOriginPoints)
-                            var customProps: [String: Any]? = nil
-                            if let frameDims = frameDimsData {
-                                customProps = [Marker.frameDimsKey: frameDims]
+                            // Compute frame dimensions for custom_props (both methods)
+                            var customProps: [String: Any] = [:]
+                            
+                            // Method 1: Plane-based (simple, fast)
+                            if let frameDims = markerService.getFrameDimsForPersistence(nodes: frameOriginPoints) {
+                                customProps[Marker.frameDimsKey] = frameDims
+                            }
+                            
+                            // Method 2: Mesh-based (complex, accurate for curved surfaces)
+                            if let meshNode = referenceModelNode {
+                                let meshService = MeshFrameDimsService()
+                                if let meshFrameDims = meshService.getFrameDimsForPersistence(nodes: frameOriginPoints, meshNode: meshNode) {
+                                    customProps[Marker.meshFrameDimsKey] = meshFrameDims
+                                }
                             }
                             
                             // Persist updated marker to backend
@@ -176,9 +192,9 @@ struct ARSessionView: View {
                                         workSessionId: session.id,
                                         points: frameOriginPoints,
                                         version: version,
-                                        customProps: customProps
+                                        customProps: customProps.isEmpty ? nil : customProps
                                     )
-                                    print("[ARSession] Updated marker position in FrameOrigin coordinates with frame_dims")
+                                    print("[ARSession] Updated marker position in FrameOrigin coordinates with frame_dims (2 methods)")
                                 } catch {
                                     // Silently handle error
                                 }
@@ -204,11 +220,20 @@ struct ARSessionView: View {
                             // Transform to FrameOrigin coordinates before persisting
                             let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
                             
-                            // Compute frame dimensions for custom_props
-                            let frameDimsData = markerService.getFrameDimsForPersistence(nodes: frameOriginPoints)
-                            var customProps: [String: Any]? = nil
-                            if let frameDims = frameDimsData {
-                                customProps = [Marker.frameDimsKey: frameDims]
+                            // Compute frame dimensions for custom_props (both methods)
+                            var customProps: [String: Any] = [:]
+                            
+                            // Method 1: Plane-based (simple, fast)
+                            if let frameDims = markerService.getFrameDimsForPersistence(nodes: frameOriginPoints) {
+                                customProps[Marker.frameDimsKey] = frameDims
+                            }
+                            
+                            // Method 2: Mesh-based (complex, accurate for curved surfaces)
+                            if let meshNode = referenceModelNode {
+                                let meshService = MeshFrameDimsService()
+                                if let meshFrameDims = meshService.getFrameDimsForPersistence(nodes: frameOriginPoints, meshNode: meshNode) {
+                                    customProps[Marker.meshFrameDimsKey] = meshFrameDims
+                                }
                             }
                             
                             // Persist updated marker to backend
@@ -219,9 +244,9 @@ struct ARSessionView: View {
                                         workSessionId: session.id,
                                         points: frameOriginPoints,
                                         version: version,
-                                        customProps: customProps
+                                        customProps: customProps.isEmpty ? nil : customProps
                                     )
-                                    print("[ARSession] Updated marker transform in FrameOrigin coordinates with frame_dims")
+                                    print("[ARSession] Updated marker transform in FrameOrigin coordinates with frame_dims (2 methods)")
                                 } catch {
                                     // Silently handle error
                                 }
@@ -272,6 +297,12 @@ struct ARSessionView: View {
                         Divider()
                         
                         Button {
+                            dropFrameOriginOnFloor()
+                        } label: {
+                            Label("Drop FrameOrigin", systemImage: "arrow.down.to.line")
+                        }
+                        
+                        Button {
                             Task { await useSavedScan() }
                         } label: {
                             Label("Use saved scan", systemImage: "cube.transparent")
@@ -299,6 +330,35 @@ struct ARSessionView: View {
                             )
                     }
 
+                    Spacer()
+                    
+                    // Marker count in center
+                    HStack(spacing: 6) {
+                        Image(systemName: "mappin.circle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                        Text("\(markerService.markers.count)")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        LinearGradient(
+                                            colors: [.white.opacity(0.35), .white.opacity(0.1)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 1
+                                    )
+                            )
+                    )
+                    
                     Spacer()
 
                     Button("Done") { dismiss() }
@@ -383,6 +443,17 @@ struct ARSessionView: View {
                     .lgCircle(tint: .white)
                     
                     Spacer()
+                    
+                    // Clear all markers button (right)
+                    Button {
+                        clearAllMarkersPersisted()
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 20))
+                            .frame(width: 50, height: 50)
+                    }
+                    .buttonStyle(.plain)
+                    .lgCircle(tint: .red)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 50)
@@ -555,11 +626,21 @@ struct ARSessionView: View {
             // Transform marker points to FrameOrigin coordinate system
             let frameOriginPoints = transformPointsToFrameOrigin(spatial.nodes)
             
-            // Compute frame dimensions for custom_props
-            let frameDimsData = markerService.getFrameDimsForPersistence(nodes: frameOriginPoints)
-            var customProps: [String: Any]? = nil
-            if let frameDims = frameDimsData {
-                customProps = [Marker.frameDimsKey: frameDims]
+            // Compute frame dimensions for custom_props (both methods)
+            var customProps: [String: Any] = [:]
+            
+            // Method 1: Plane-based (simple, fast)
+            if let frameDims = markerService.getFrameDimsForPersistence(nodes: frameOriginPoints) {
+                customProps[Marker.frameDimsKey] = frameDims
+            }
+            
+            // Method 2: Mesh-based (complex, accurate for curved surfaces)
+            if let meshNode = referenceModelNode {
+                let meshService = MeshFrameDimsService()
+                if let meshFrameDims = meshService.getFrameDimsForPersistence(nodes: frameOriginPoints, meshNode: meshNode) {
+                    customProps[Marker.meshFrameDimsKey] = meshFrameDims
+                    print("[ARSession] ✅ Computed mesh-based frame dims")
+                }
             }
             
             // Save to backend with FrameOrigin coordinates
@@ -569,11 +650,11 @@ struct ARSessionView: View {
                         CreateMarker(
                             workSessionId: session.id,
                             points: frameOriginPoints,
-                            customProps: customProps
+                            customProps: customProps.isEmpty ? nil : customProps
                         )
                     )
                     markerService.linkSpatialMarker(localId: spatial.id, backendId: created.id)
-                    print("[ARSession] Created marker in FrameOrigin coordinates with frame_dims")
+                    print("[ARSession] Created marker in FrameOrigin coordinates with frame_dims (2 methods)")
                 } catch {
                     print("Failed to persist marker: \(error)")
                 }
@@ -985,6 +1066,66 @@ struct ARSessionView: View {
         print("[ARSession] Gizmo position in world: \(anchor.position(relativeTo: nil))")
     }
     
+    /// Drop FrameOrigin on the floor at screen center using raycast
+    private func dropFrameOriginOnFloor() {
+        guard let arView = arView else {
+            print("[ARSession] ⚠️ Cannot drop FrameOrigin: arView is nil")
+            return
+        }
+        
+        // Raycast from screen center downward to find floor
+        let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+        
+        // Try raycasting to existing horizontal planes (floor detection)
+        if let query = arView.makeRaycastQuery(
+            from: screenCenter,
+            allowing: .existingPlaneGeometry,
+            alignment: .horizontal
+        ) {
+            let results = arView.session.raycast(query)
+            
+            if let firstResult = results.first {
+                // Found a horizontal plane (floor)
+                let hitTransform = firstResult.worldTransform
+                
+                // Update the frame origin transform
+                frameOriginTransform = hitTransform
+                
+                // Update the visual gizmo
+                placeFrameOriginGizmo(at: hitTransform)
+                
+                // Update all existing markers to new coordinate system
+                updateMarkersForNewFrameOrigin()
+                
+                print("[ARSession] ✅ Dropped FrameOrigin on floor at: \(hitTransform.columns.3)")
+                return
+            }
+        }
+        
+        // Fallback: raycast to estimated plane if no detected planes yet
+        if let query = arView.makeRaycastQuery(
+            from: screenCenter,
+            allowing: .estimatedPlane,
+            alignment: .horizontal
+        ) {
+            let results = arView.session.raycast(query)
+            
+            if let firstResult = results.first {
+                let hitTransform = firstResult.worldTransform
+                
+                frameOriginTransform = hitTransform
+                placeFrameOriginGizmo(at: hitTransform)
+                updateMarkersForNewFrameOrigin()
+                
+                print("[ARSession] ✅ Dropped FrameOrigin on estimated floor at: \(hitTransform.columns.3)")
+                return
+            }
+        }
+        
+        // No floor found
+        print("[ARSession] ⚠️ Could not find floor. Move device to scan horizontal surfaces.")
+    }
+    
     // MARK: - Coordinate System Transformation
     
     /// Transform points from AR world coordinates to FrameOrigin coordinates
@@ -1104,6 +1245,16 @@ struct ARSessionView: View {
                     // Add the model to the anchor
                     anchor.addChild(modelEntity)
                     
+                    // Extract model bounding box and set room planes
+                    let bounds = modelEntity.visualBounds(relativeTo: anchor)
+                    let minPoint = SIMD3<Float>(bounds.min.x, bounds.min.y, bounds.min.z)
+                    let maxPoint = SIMD3<Float>(bounds.max.x, bounds.max.y, bounds.max.z)
+                    let modelAABB = AABB(min: minPoint, max: maxPoint)
+                    
+                    // Set room planes based on model bounds
+                    markerService.roomPlanes = FrameDimsService.createRoomPlanes(boundingBox: modelAABB)
+                    print("[ARSession] Set room planes from model bounds: min=\(minPoint), max=\(maxPoint)")
+                    
                     // Store reference and add to scene
                     referenceModelAnchor = anchor
                     arView.scene.addAnchor(anchor)
@@ -1132,6 +1283,63 @@ struct ARSessionView: View {
         print("[ARSession] Reference model removed")
         // Ensure the FrameOrigin gizmo remains present in the scene
         ensureFrameOriginGizmoPresent()
+    }
+    
+    /// Load reference model to extract room planes (without displaying)
+    private func loadRoomPlanesFromSpace() async {
+        do {
+            // Fetch space to get model URL
+            let space = try await spaceService.getSpace(id: session.spaceId)
+            
+            guard let usdcUrlString = space.modelUsdcUrl,
+                  let usdcUrl = URL(string: usdcUrlString) else {
+                print("[ARSession] Space has no USDC model URL, using default room planes")
+                return
+            }
+            
+            print("[ARSession] Loading reference model to extract room planes from: \(usdcUrlString)")
+            
+            // Download the model
+            let (modelData, _) = try await URLSession.shared.data(from: usdcUrl)
+            
+            // Save to temporary file
+            let tempDir = FileManager.default.temporaryDirectory
+            let modelPath = tempDir.appendingPathComponent("reference_model_bounds.usdc")
+            try modelData.write(to: modelPath)
+            
+            // Load the model entity (just to get bounds, not display)
+            let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
+            
+            await MainActor.run {
+                // Create temporary anchor to get bounds in FrameOrigin space
+                let anchor = AnchorEntity(world: frameOriginTransform)
+                anchor.addChild(modelEntity)
+                
+                // Extract model bounding box
+                let bounds = modelEntity.visualBounds(relativeTo: anchor)
+                let minPoint = SIMD3<Float>(bounds.min.x, bounds.min.y, bounds.min.z)
+                let maxPoint = SIMD3<Float>(bounds.max.x, bounds.max.y, bounds.max.z)
+                let modelAABB = AABB(min: minPoint, max: maxPoint)
+                
+                // Set room planes based on model bounds
+                markerService.roomPlanes = FrameDimsService.createRoomPlanes(boundingBox: modelAABB)
+                print("[ARSession] ✅ Set room planes from model bounds: min=\(minPoint), max=\(maxPoint)")
+                
+                // Convert ModelEntity to SCNNode for mesh calculations
+                // Load the USDC as SCNScene for mesh-based calculations
+                let scnScene = try? SCNScene(url: modelPath, options: nil)
+                referenceModelNode = scnScene?.rootNode
+                if referenceModelNode != nil {
+                    print("[ARSession] ✅ Loaded SCNNode for mesh-based calculations")
+                }
+                
+                // Clean up temporary anchor
+                anchor.removeFromParent()
+            }
+            
+        } catch {
+            print("[ARSession] Failed to load room planes from model: \(error), using default")
+        }
     }
 
     /// Ensure the FrameOrigin gizmo is present; if it's been detached from the scene, re-add it

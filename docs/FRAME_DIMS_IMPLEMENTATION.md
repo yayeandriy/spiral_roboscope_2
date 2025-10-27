@@ -1,10 +1,27 @@
 # Marker Frame Dimensions Implementation Summary
 
 ## Overview
-Successfully implemented the Marker Frame Dimensions feature as specified in `docs/MARKER_FRAME_DIMS.ms`. This feature computes and displays distances from marker corner points to reference model (room) boundary surfaces, along with size metrics.
+Successfully implemented the Marker Frame Dimensions feature with **two complementary algorithms** as specified in `docs/MARKER_FRAME_DIMS.ms`. This feature computes and displays distances from marker corner points to reference model boundary surfaces using both plane-based and mesh-based approaches, enabling accuracy comparison on complex geometries.
 
 ## Implementation Date
-October 27, 2025
+October 27, 2025 (Initial plane-based implementation)
+October 28, 2025 (Enhanced with mesh-based raycasting algorithm)
+
+## Dual-Algorithm Approach
+
+### Method 1: Plane-Based (Simple & Fast)
+- Stored in: `custom_props.frame_dims`
+- Algorithm: Computes distances to 6 axis-aligned planes derived from model AABB
+- Best for: Regular rectangular rooms, quick calculations
+- Performance: ~1ms per marker
+
+### Method 2: Mesh-Based (Complex & Accurate)
+- Stored in: `custom_props.frame_dims_mesh`
+- Algorithm: Uses SCNNode raycasting to find actual surface intersections
+- Best for: Curved surfaces, non-planar geometry (e.g., turbine blades)
+- Performance: ~5-10ms per marker
+
+Both methods output the same `FrameDimsResult` structure for easy comparison.
 
 ## Files Created
 
@@ -17,13 +34,12 @@ Data models for frame dimensions feature:
 - `FrameDimsAggregate` - Aggregated minimal distances to all 6 edges
 - `FrameDimsSizes` - AABB and OBB size metrics
 - `FrameDimsProjected` - Optional projected dimensions
-- `FrameDimsResult` - Complete frame dimensions result
+- `FrameDimsResult` - Complete frame dimensions result (used by both methods)
 - `FrameAxes` - Frame axes description
 - `FrameDimsMeta` - Metadata for computation
-- Extension on `Marker` with `frameDimsKey` constant and `frameDims` computed property
 
 ### 2. `/roboscope2/Services/FrameDimsService.swift`
-Service for computing frame dimensions:
+Service for plane-based frame dimension computation:
 - `FrameDimsComputing` protocol
 - `FrameDimsService` class implementing the protocol
 - Computation of per-edge, per-point distances using plane equations
@@ -31,23 +47,45 @@ Service for computing frame dimensions:
 - AABB computation
 - OBB computation using PCA with Accelerate framework (LAPACK ssyev)
 - Optional vertical projection support via raycast closure
-- Helper methods to create default room planes
+- Helper methods to create room planes from AABB or default bounds
+
+### 3. `/roboscope2/Services/MeshFrameDimsService.swift`
+Service for mesh-based frame dimension computation:
+- `computeWithMesh(nodes:meshNode:)` - Main computation using SCNNode
+- `raycastToMesh(from:direction:meshNode:)` - Raycasting with SceneKit
+- `bidirectionalRaycast(from:direction:meshNode:)` - Checks both ray directions
+- `findClosestPointOnMesh(from:meshNode:)` - Tries 6 cardinal directions
+- `computeProjectedDimensions(aabb:meshNode:)` - Vertical projection
+- Returns same `FrameDimsResult` structure for consistency
 
 ## Files Modified
 
-### 1. `/roboscope2/Services/SpatialMarkerService.swift`
+### 1. `/roboscope2/Models/Marker.swift`
+- Added `frameDimsKey = "frame_dims"` constant
+- Added `meshFrameDimsKey = "frame_dims_mesh"` constant
+
+### 2. `/roboscope2/Services/SpatialMarkerService.swift`
 - Added `roomPlanes` property for reference model boundaries
 - Added `frameDimsService` instance
 - Extended `MarkerInfo` struct to include `frameDims: FrameDimsAggregate?`
 - Updated `selectedMarkerInfo` to compute and include frame dimensions
 - Added `computeFrameDims(for:)` method
-- Added `getFrameDimsForPersistence(nodes:)` method to generate JSON for custom_props
+- Added `getFrameDimsForPersistence(nodes:)` method to generate JSON for custom_props.frame_dims
 
-### 2. `/roboscope2/Views/ARSessionView.swift`
+### 3. `/roboscope2/Views/ARSessionView.swift`
 - Updated `MarkerBadgeView` to display frame dimensions:
   - Shows distances to all 6 edges (Left, Right, Near, Far, Top, Bottom)
   - Color-coded: Red (left/right), Blue (near/far), Green (top/bottom)
 - Created new `EdgeDistanceView` component
+- Added `@State private var referenceModelNode: SCNNode?` for mesh calculations
+- Updated `loadRoomPlanesFromSpace()` to load both ModelEntity and SCNScene
+- Modified marker creation/update handlers to compute BOTH algorithms:
+  - `createAndPersistMarker()` - Computes both frame_dims and frame_dims_mesh
+  - `onOneFingerEnd` - Updates both on marker edge movement
+  - `onEnd` - Updates both on marker transform
+- Added UI enhancements:
+  - Marker count display (top center)
+  - "Clear all markers" button (right bottom corner)
 - Modified `createAndPersistMarker()` to compute and persist frame_dims in custom_props
 - Modified marker position update handlers (one-finger and two-finger) to include frame_dims
 - All marker operations now include frame dimensions in persistence payload

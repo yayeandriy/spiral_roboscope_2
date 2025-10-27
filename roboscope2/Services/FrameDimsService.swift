@@ -237,21 +237,25 @@ class FrameDimsService: FrameDimsComputing {
             "right":  Plane(n: SIMD3<Float>(-1, 0, 0), d:  boundingBox.max.x),
             "near":   Plane(n: SIMD3<Float>( 0, 0, 1), d: -boundingBox.min.z),
             "far":    Plane(n: SIMD3<Float>( 0, 0,-1), d:  boundingBox.max.z),
-            "top":    Plane(n: SIMD3<Float>( 0, 1, 0), d: -boundingBox.min.y),
-            "bottom": Plane(n: SIMD3<Float>( 0,-1, 0), d:  boundingBox.max.y)
+            "top":    Plane(n: SIMD3<Float>( 0,-1, 0), d:  boundingBox.max.y),
+            "bottom": Plane(n: SIMD3<Float>( 0, 1, 0), d: -boundingBox.min.y)
         ]
     }
     
-    /// Create default room planes for a typical room (3m x 4m x 2.5m)
+    /// Create default room planes for a large workspace (10m x 5m x 10m)
+    /// This is a fallback when actual room boundaries are not available
     static func createDefaultRoomPlanes() -> [String: Plane] {
-        // Room centered at origin, 3m wide (x), 2.5m tall (y), 4m deep (z)
+        // Large workspace centered at origin: 10m wide (x), 5m tall (y), 10m deep (z)
+        // Left wall at x=-5.0, Right at x=+5.0
+        // Near wall at z=-5.0, Far at z=+5.0
+        // Bottom (floor) at y=-2.5, Top (ceiling) at y=+2.5
         return [
-            "left":   Plane(n: SIMD3<Float>( 1, 0, 0), d:  1.5),  // Wall at x = -1.5
-            "right":  Plane(n: SIMD3<Float>(-1, 0, 0), d:  1.5),  // Wall at x = +1.5
-            "near":   Plane(n: SIMD3<Float>( 0, 0, 1), d:  2.0),  // Wall at z = -2.0
-            "far":    Plane(n: SIMD3<Float>( 0, 0,-1), d:  2.0),  // Wall at z = +2.0
-            "top":    Plane(n: SIMD3<Float>( 0, 1, 0), d:  1.25), // Ceiling at y = -1.25
-            "bottom": Plane(n: SIMD3<Float>( 0,-1, 0), d:  1.25)  // Floor at y = +1.25
+            "left":   Plane(n: SIMD3<Float>( 1, 0, 0), d:  5.0),  // Wall at x = -5.0, normal points right
+            "right":  Plane(n: SIMD3<Float>(-1, 0, 0), d:  5.0),  // Wall at x = +5.0, normal points left
+            "near":   Plane(n: SIMD3<Float>( 0, 0, 1), d:  5.0),  // Wall at z = -5.0, normal points away
+            "far":    Plane(n: SIMD3<Float>( 0, 0,-1), d:  5.0),  // Wall at z = +5.0, normal points toward
+            "top":    Plane(n: SIMD3<Float>( 0,-1, 0), d:  2.5),  // Ceiling at y = +2.5, normal points down
+            "bottom": Plane(n: SIMD3<Float>( 0, 1, 0), d:  2.5)   // Floor at y = -2.5, normal points up
         ]
     }
 }

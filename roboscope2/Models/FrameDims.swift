@@ -316,11 +316,8 @@ struct FrameDimsResult: Codable, Hashable {
     }
 }
 
-// MARK: - Custom Props Key
+// MARK: - Marker Extension for Frame Dims Access
 extension Marker {
-    /// Key for accessing frame_dims in custom_props
-    static let frameDimsKey = "frame_dims"
-    
     /// Get frame dims from custom props
     var frameDims: FrameDimsResult? {
         guard let frameDimsData = customProps[Self.frameDimsKey],

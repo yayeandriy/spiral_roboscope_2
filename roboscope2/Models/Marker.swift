@@ -90,6 +90,14 @@ struct Marker: Codable, Identifiable, Hashable {
     var displayColor: String {
         return color ?? Self.defaultColor
     }
+    
+    // MARK: - Custom Props Keys
+    
+    /// Key for plane-based frame dimensions in customProps
+    static let frameDimsKey = "frame_dims"
+    
+    /// Key for mesh-based frame dimensions in customProps
+    static let meshFrameDimsKey = "frame_dims_mesh"
 }
 
 // MARK: - Marker DTOs
