@@ -414,6 +414,7 @@
 				INFOPLIST_FILE = roboscope2/AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Roboscope 2";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				EXCLUDED_SOURCE_FILE_NAMES = AppInfo.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -447,6 +448,7 @@
 				INFOPLIST_FILE = roboscope2/AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Roboscope 2";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				EXCLUDED_SOURCE_FILE_NAMES = AppInfo.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

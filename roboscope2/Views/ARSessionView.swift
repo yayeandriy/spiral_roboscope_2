@@ -63,7 +63,7 @@ struct ARSessionView: View {
     
     /// Computed marker info including mesh-based frame dimensions
     var markerInfoWithMesh: SpatialMarkerService.MarkerInfo? {
-        guard var info = markerService.selectedMarkerInfo else { return nil }
+        guard let info = markerService.selectedMarkerInfo else { return nil }
         
         // If we already have cached mesh dims for the selected marker, attach them
         if let selectedID = markerService.selectedMarkerID,
@@ -109,7 +109,7 @@ struct ARSessionView: View {
                 resultDict = meshService.getFrameDimsForPersistence(nodes: frameOriginNodes, modelEntity: modelEntity)
             }
             var aggregate: FrameDimsAggregate? = nil
-            if let meshDict = resultDict as? [String: Any],
+            if let meshDict = resultDict,
                let aggregateDict = meshDict["aggregate"] as? [String: Double] {
                 aggregate = FrameDimsAggregate(
                     left: Float(aggregateDict["left"] ?? 999.0),
@@ -124,6 +124,8 @@ struct ARSessionView: View {
                 self.meshComputeInProgress.remove(selectedID)
                 if let aggregate {
                     self.meshDimsCache[selectedID] = aggregate
+                    // Debug log to validate non-zero mesh-based distances at runtime
+                    print("[MeshDims] aggregate L=\(aggregate.left), R=\(aggregate.right), N=\(aggregate.near), F=\(aggregate.far), T=\(aggregate.top), B=\(aggregate.bottom)")
                 }
             }
         }
@@ -1427,10 +1429,11 @@ struct ARSessionView: View {
                     print("[ARSession] ℹ️ ModelEntity already has collision shapes")
                 }
                 
-                // Now make the model invisible with ZERO rendering cost but keep collisions active.
+                // Make the model invisible WITHOUT occluding other content (e.g., markers): use a fully transparent SimpleMaterial.
                 if modelEntity.model != nil {
-                    modelEntity.model = nil
-                    print("[ARSession] ✅ Removed ModelComponent; entity is invisible but collisions remain active")
+                    let transparent = SimpleMaterial(color: .clear, roughness: 1, isMetallic: false)
+                    modelEntity.model?.materials = [transparent]
+                    print("[ARSession] ✅ Applied transparent SimpleMaterial; entity is invisible and does not occlude, collisions/bounds remain valid")
                 }
 
                 // Ensure collision filter allows queries from any mask

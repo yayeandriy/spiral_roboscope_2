@@ -174,8 +174,8 @@ final class SpatialMarkerService: ObservableObject {
             cameraTransform.columns.3.z
         )
         
-        // Calculate the reference distance from camera to center
-        let referenceDistance = simd_distance(cameraPosition, centerPosition)
+    // Calculate the reference distance from camera to center (unused, kept for potential UX)
+    _ = simd_distance(cameraPosition, centerPosition)
         
         // Now raycast from each corner and use actual hit positions
         var hitPoints: [SIMD3<Float>] = []
@@ -211,8 +211,8 @@ final class SpatialMarkerService: ObservableObject {
     /// Place a marker and return the created SpatialMarker (for persistence)
     @discardableResult
     func placeMarkerReturningSpatial(targetCorners: [CGPoint]) -> SpatialMarker? {
-        guard let arView = arView,
-              let frame = arView.session.currentFrame else { return nil }
+      guard let arView = arView,
+          let _ = arView.session.currentFrame else { return nil }
         // Reuse the standard placement logic
         // First, raycast center to ensure session has a reference (not strictly needed here)
         let screenCenter = CGPoint(
@@ -606,7 +606,7 @@ final class SpatialMarkerService: ObservableObject {
         // Update node colors
         for nodeIndex in 0..<4 {
             if let nodeEntity = anchorEntity.children.first(where: { $0.name == "node_\(nodeIndex)" }) as? ModelEntity {
-                var nodeMaterial = UnlitMaterial(color: nodeColor)
+                let nodeMaterial = UnlitMaterial(color: nodeColor)
                 nodeEntity.model?.materials = [nodeMaterial]
             }
         }
@@ -627,7 +627,7 @@ final class SpatialMarkerService: ObservableObject {
                     edgeColor = UIColor(red: 0.5, green: 0.8, blue: 1.0, alpha: 1.0)
                 }
                 
-                var edgeMaterial = UnlitMaterial(color: edgeColor)
+                let edgeMaterial = UnlitMaterial(color: edgeColor)
                 edgeEntity.model?.materials = [edgeMaterial]
             }
         }
