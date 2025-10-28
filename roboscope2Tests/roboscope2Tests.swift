@@ -2,16 +2,15 @@
 //  roboscope2Tests.swift
 //  roboscope2Tests
 //
-//  Created by Andrii Ieroshevych on 14.10.2025.
+//  Converted to XCTest to avoid mixing Swift Testing and XCTest in one bundle,
+//  which can cause runtime instability under certain Xcode/iOS combinations.
 //
 
-import Testing
+import XCTest
 @testable import roboscope2
 
-struct roboscope2Tests {
-
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+final class roboscope2Tests: XCTestCase {
+    func test_empty() throws {
+        // Intentionally empty. Serves as a smoke test to ensure the test bundle loads cleanly.
     }
-
 }

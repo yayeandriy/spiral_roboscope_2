@@ -27,14 +27,20 @@ struct ARSessionView: View {
     @State private var showScanView = false
     @State private var isRegistering = false
     @State private var registrationProgress: String = ""
-    @State private var frameOriginTransform: simd_float4x4 = matrix_identity_float4x4  // Default to AR origin
+    @State private var frameOriginTransform: simd_float4x4 = matrix_identity_float4x4 {
+        didSet {
+            // Automatically update all anchors that should follow FrameOrigin
+            updateReferenceModelPosition()
+            updateScanModelPosition()
+        }
+    }
     @State private var frameOriginAnchor: AnchorEntity?
     
     // Reference model state
     @State private var showReferenceModel = false
     @State private var referenceModelAnchor: AnchorEntity?
     @State private var isLoadingModel = false
-    @State private var referenceModelNode: SCNNode?  // Store for mesh calculations
+    @State private var referenceModelEntity: ModelEntity?  // For RealityKit raycasting
     
     // Scan model state
     @State private var showScanModel = false
@@ -50,6 +56,78 @@ struct ARSessionView: View {
     @State private var currentDrag: CGSize = .zero
     @State private var currentScale: CGFloat = 1.0
     // one-finger edge move is now handled by the overlay's one-finger pan
+
+    // Mesh dims caching to avoid recomputation on every SwiftUI refresh
+    @State private var meshDimsCache: [UUID: FrameDimsAggregate] = [:]
+    @State private var meshComputeInProgress: Set<UUID> = []
+    
+    /// Computed marker info including mesh-based frame dimensions
+    var markerInfoWithMesh: SpatialMarkerService.MarkerInfo? {
+        guard var info = markerService.selectedMarkerInfo else { return nil }
+        
+        // If we already have cached mesh dims for the selected marker, attach them
+        if let selectedID = markerService.selectedMarkerID,
+           let cached = meshDimsCache[selectedID] {
+            return SpatialMarkerService.MarkerInfo(
+                width: info.width,
+                length: info.length,
+                centerX: info.centerX,
+                centerZ: info.centerZ,
+                frameDims: info.frameDims,
+                meshFrameDims: cached
+            )
+        }
+        
+        // Return original info with nil mesh dims while computing
+        return SpatialMarkerService.MarkerInfo(
+            width: info.width,
+            length: info.length,
+            centerX: info.centerX,
+            centerZ: info.centerZ,
+            frameDims: info.frameDims,
+            meshFrameDims: nil
+        )
+    }
+
+    /// Compute mesh-based frame dims once per selection and cache the result
+    private func ensureMeshDimsForSelectedMarker() {
+        guard let selectedID = markerService.selectedMarkerID,
+              let modelEntity = referenceModelEntity,
+              !meshComputeInProgress.contains(selectedID),
+              meshDimsCache[selectedID] == nil,
+              let marker = markerService.markers.first(where: { $0.id == selectedID })
+        else { return }
+        
+        meshComputeInProgress.insert(selectedID)
+        let frameOriginNodes = transformPointsToFrameOrigin(marker.nodes)
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let meshService = MeshFrameDimsService()
+            // Ensure raycasts occur on main thread while keeping the orchestration off-main
+            var resultDict: [String: Any]? = nil
+            DispatchQueue.main.sync {
+                resultDict = meshService.getFrameDimsForPersistence(nodes: frameOriginNodes, modelEntity: modelEntity)
+            }
+            var aggregate: FrameDimsAggregate? = nil
+            if let meshDict = resultDict as? [String: Any],
+               let aggregateDict = meshDict["aggregate"] as? [String: Double] {
+                aggregate = FrameDimsAggregate(
+                    left: Float(aggregateDict["left"] ?? 999.0),
+                    right: Float(aggregateDict["right"] ?? 999.0),
+                    near: Float(aggregateDict["near"] ?? 999.0),
+                    far: Float(aggregateDict["far"] ?? 999.0),
+                    top: Float(aggregateDict["top"] ?? 999.0),
+                    bottom: Float(aggregateDict["bottom"] ?? 999.0)
+                )
+            }
+            DispatchQueue.main.async {
+                self.meshComputeInProgress.remove(selectedID)
+                if let aggregate {
+                    self.meshDimsCache[selectedID] = aggregate
+                }
+            }
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -108,6 +186,10 @@ struct ARSessionView: View {
                         print("Failed to load markers: \(error)")
                     }
                 }
+            }
+            .onChange(of: markerService.selectedMarkerID) { _ in
+                // When selection changes, clear stale cache for previous and compute for new
+                ensureMeshDimsForSelectedMarker()
             }
             .onDisappear {
                 markerTrackingTimer?.invalidate()
@@ -177,9 +259,9 @@ struct ARSessionView: View {
                             }
                             
                             // Method 2: Mesh-based (complex, accurate for curved surfaces)
-                            if let meshNode = referenceModelNode {
+                            if let modelEntity = referenceModelEntity {
                                 let meshService = MeshFrameDimsService()
-                                if let meshFrameDims = meshService.getFrameDimsForPersistence(nodes: frameOriginPoints, meshNode: meshNode) {
+                                if let meshFrameDims = meshService.getFrameDimsForPersistence(nodes: frameOriginPoints, modelEntity: modelEntity) {
                                     customProps[Marker.meshFrameDimsKey] = meshFrameDims
                                 }
                             }
@@ -229,9 +311,9 @@ struct ARSessionView: View {
                             }
                             
                             // Method 2: Mesh-based (complex, accurate for curved surfaces)
-                            if let meshNode = referenceModelNode {
+                            if let modelEntity = referenceModelEntity {
                                 let meshService = MeshFrameDimsService()
-                                if let meshFrameDims = meshService.getFrameDimsForPersistence(nodes: frameOriginPoints, meshNode: meshNode) {
+                                if let meshFrameDims = meshService.getFrameDimsForPersistence(nodes: frameOriginPoints, modelEntity: modelEntity) {
                                     customProps[Marker.meshFrameDimsKey] = meshFrameDims
                                 }
                             }
@@ -396,7 +478,7 @@ struct ARSessionView: View {
                 Spacer()
                 
                 // Marker info badge (shown when a marker is selected)
-                if let info = markerService.selectedMarkerInfo {
+                if let info = markerInfoWithMesh {
                     MarkerBadgeView(
                         info: info,
                         onDelete: {
@@ -474,9 +556,8 @@ struct ARSessionView: View {
                     placeFrameOriginGizmo(at: transform)
                     // Update all existing markers to new coordinate system
                     updateMarkersForNewFrameOrigin()
-                    // Keep models aligned with the new FrameOrigin
-                    updateReferenceModelPosition()
-                    updateScanModelPosition()
+                    // NOTE: Reference model and scan model positions are automatically
+                    // updated via frameOriginTransform didSet observer
                 }
             )
         }
@@ -635,9 +716,9 @@ struct ARSessionView: View {
             }
             
             // Method 2: Mesh-based (complex, accurate for curved surfaces)
-            if let meshNode = referenceModelNode {
+            if let modelEntity = referenceModelEntity {
                 let meshService = MeshFrameDimsService()
-                if let meshFrameDims = meshService.getFrameDimsForPersistence(nodes: frameOriginPoints, meshNode: meshNode) {
+                if let meshFrameDims = meshService.getFrameDimsForPersistence(nodes: frameOriginPoints, modelEntity: modelEntity) {
                     customProps[Marker.meshFrameDimsKey] = meshFrameDims
                     print("[ARSession] ✅ Computed mesh-based frame dims")
                 }
@@ -944,9 +1025,8 @@ struct ARSessionView: View {
                 frameOriginTransform = result.transformMatrix
                 placeFrameOriginGizmo(at: result.transformMatrix)
                 updateMarkersForNewFrameOrigin()
-                // Keep models aligned with the new FrameOrigin
-                updateReferenceModelPosition()
-                updateScanModelPosition()
+                // NOTE: Reference model and scan model positions are automatically
+                // updated via frameOriginTransform didSet observer
                 
                 registrationProgress = "Registration complete!"
                 
@@ -1097,6 +1177,8 @@ struct ARSessionView: View {
                 // Update all existing markers to new coordinate system
                 updateMarkersForNewFrameOrigin()
                 
+                // NOTE: Reference model anchor is automatically updated via frameOriginTransform didSet
+                
                 print("[ARSession] ✅ Dropped FrameOrigin on floor at: \(hitTransform.columns.3)")
                 return
             }
@@ -1116,6 +1198,8 @@ struct ARSessionView: View {
                 frameOriginTransform = hitTransform
                 placeFrameOriginGizmo(at: hitTransform)
                 updateMarkersForNewFrameOrigin()
+                
+                // NOTE: Reference model anchor is automatically updated via frameOriginTransform didSet
                 
                 print("[ARSession] ✅ Dropped FrameOrigin on estimated floor at: \(hitTransform.columns.3)")
                 return
@@ -1307,15 +1391,24 @@ struct ARSessionView: View {
             let modelPath = tempDir.appendingPathComponent("reference_model_bounds.usdc")
             try modelData.write(to: modelPath)
             
-            // Load the model entity (just to get bounds, not display)
+            // Load the model entity (for both bounds and mesh calculations)
             let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
             
             await MainActor.run {
-                // Create temporary anchor to get bounds in FrameOrigin space
+                // Create anchor at FrameOrigin and add to scene
                 let anchor = AnchorEntity(world: frameOriginTransform)
                 anchor.addChild(modelEntity)
                 
-                // Extract model bounding box
+                // CRITICAL: Add anchor to AR scene so ModelEntity.scene is not nil
+                guard let arView = arView else {
+                    print("[ARSession] ❌ No ARView available to add anchor")
+                    return
+                }
+                arView.scene.addAnchor(anchor)
+                print("[ARSession] ✅ Added reference model anchor to AR scene")
+
+                // Extract model bounding box BEFORE altering rendering/components
+                // visualBounds requires a ModelComponent; get it first.
                 let bounds = modelEntity.visualBounds(relativeTo: anchor)
                 let minPoint = SIMD3<Float>(bounds.min.x, bounds.min.y, bounds.min.z)
                 let maxPoint = SIMD3<Float>(bounds.max.x, bounds.max.y, bounds.max.z)
@@ -1325,16 +1418,50 @@ struct ARSessionView: View {
                 markerService.roomPlanes = FrameDimsService.createRoomPlanes(boundingBox: modelAABB)
                 print("[ARSession] ✅ Set room planes from model bounds: min=\(minPoint), max=\(maxPoint)")
                 
-                // Convert ModelEntity to SCNNode for mesh calculations
-                // Load the USDC as SCNScene for mesh-based calculations
-                let scnScene = try? SCNScene(url: modelPath, options: nil)
-                referenceModelNode = scnScene?.rootNode
-                if referenceModelNode != nil {
-                    print("[ARSession] ✅ Loaded SCNNode for mesh-based calculations")
+                // Generate collision shapes for RealityKit raycasting
+                // USDC models may not have collision shapes by default
+                if modelEntity.collision == nil {
+                    modelEntity.generateCollisionShapes(recursive: true)
+                    print("[ARSession] ✅ Generated collision shapes for ModelEntity")
+                } else {
+                    print("[ARSession] ℹ️ ModelEntity already has collision shapes")
                 }
                 
-                // Clean up temporary anchor
-                anchor.removeFromParent()
+                // Now make the model invisible with ZERO rendering cost but keep collisions active.
+                if modelEntity.model != nil {
+                    modelEntity.model = nil
+                    print("[ARSession] ✅ Removed ModelComponent; entity is invisible but collisions remain active")
+                }
+
+                // Ensure collision filter allows queries from any mask
+                if var collision = modelEntity.collision {
+                    collision.filter = CollisionFilter(group: .default, mask: .all)
+                    modelEntity.collision = collision
+                    print("[ARSession] ✅ Set collision filter to group .default, mask .all")
+                }
+                
+                // Debug: Check collision shape details
+                if let collision = modelEntity.collision {
+                    print("[ARSession] 🔍 Collision shape type: \(type(of: collision.shapes))")
+                    print("[ARSession] 🔍 Collision shapes count: \(collision.shapes.count)")
+                    if let firstShape = collision.shapes.first {
+                        print("[ARSession] 🔍 First shape type: \(type(of: firstShape))")
+                    }
+                }
+                
+                // Debug: Check scene and parent hierarchy
+                print("[ARSession] 🔍 ModelEntity scene: \(modelEntity.scene != nil ? "YES" : "NO")")
+                print("[ARSession] 🔍 ModelEntity parent: \(modelEntity.parent != nil ? "YES (\(type(of: modelEntity.parent!)))" : "NO")")
+                print("[ARSession] 🔍 Anchor in scene: \(anchor.scene != nil ? "YES" : "NO")")
+                
+                // Store ModelEntity and anchor for RealityKit mesh calculations
+                // Keep anchor in scene so raycasting works
+                referenceModelEntity = modelEntity
+                referenceModelAnchor = anchor
+                print("[ARSession] ✅ Stored ModelEntity for RealityKit raycasting (model has \(modelEntity.collision != nil ? "collision" : "NO collision"))")
+                
+                // NOTE: Keep anchor in scene - don't remove it
+                // The modelEntity needs to be in a scene for scene.raycast() to work
             }
             
         } catch {
@@ -1352,10 +1479,11 @@ struct ARSessionView: View {
     }
     
     /// Update the reference model's anchor to the latest FrameOrigin transform
+    /// Called automatically via frameOriginTransform didSet observer
     private func updateReferenceModelPosition() {
         guard let anchor = referenceModelAnchor else { return }
         anchor.transform = Transform(matrix: frameOriginTransform)
-        print("[ARSession] Updated reference model to new FrameOrigin transform")
+        print("[ARSession] 🔄 Auto-synchronized reference model with FrameOrigin")
     }
     
     // MARK: - Scan Model Management
@@ -1700,7 +1828,7 @@ struct MarkerBadgeView: View {
                         .background(Color.white.opacity(0.3))
                     
                     VStack(spacing: 8) {
-                        Text("Distances to Edges")
+                        Text("Distances to Edges (Plane)")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.white.opacity(0.8))
                         
@@ -1716,6 +1844,32 @@ struct MarkerBadgeView: View {
                         HStack(spacing: 16) {
                             EdgeDistanceView(label: "Top", distance: frameDims.top, color: .green)
                             EdgeDistanceView(label: "Bot", distance: frameDims.bottom, color: .green)
+                        }
+                    }
+                }
+                
+                // Mesh Frame Dimensions - distances to edges (surface tracing)
+                if let meshDims = info.meshFrameDims {
+                    Divider()
+                        .background(Color.white.opacity(0.3))
+                    
+                    VStack(spacing: 8) {
+                        Text("Distances to Edges (Mesh)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.8))
+                        
+                        // First row: Left, Right, Near, Far
+                        HStack(spacing: 16) {
+                            EdgeDistanceView(label: "L", distance: meshDims.left, color: .orange)
+                            EdgeDistanceView(label: "R", distance: meshDims.right, color: .orange)
+                            EdgeDistanceView(label: "N", distance: meshDims.near, color: .cyan)
+                            EdgeDistanceView(label: "F", distance: meshDims.far, color: .cyan)
+                        }
+                        
+                        // Second row: Top, Bottom
+                        HStack(spacing: 16) {
+                            EdgeDistanceView(label: "Top", distance: meshDims.top, color: .mint)
+                            EdgeDistanceView(label: "Bot", distance: meshDims.bottom, color: .mint)
                         }
                     }
                 }

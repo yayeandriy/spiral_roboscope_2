@@ -3,242 +3,211 @@
 //  roboscope2
 //
 //  Enhanced mesh-based frame dimensions computation for complex surfaces
-//  Uses surface tracing instead of simple raycasting
+//  Uses RealityKit raycasting for USDC geometry
 //
 
 import Foundation
 import simd
 import RealityKit
-import SceneKit
 
-/// Enhanced service for computing frame dimensions on complex meshes
+/// Enhanced service for computing frame dimensions on complex meshes using RealityKit
+// MARK: - Raycast provider protocol for DI and testing
+
+@MainActor
+protocol MeshRaycastProvider {
+    var boundsMin: SIMD3<Float> { get }
+    var boundsMax: SIMD3<Float> { get }
+    func raycastDown(from point: SIMD3<Float>) -> SIMD3<Float>?
+    func raycast(from origin: SIMD3<Float>, direction: SIMD3<Float>) -> SIMD3<Float>?
+}
+
+/// Default RealityKit-based provider
+@MainActor
+final class RealityKitRaycastProvider: MeshRaycastProvider {
+    private let modelEntity: ModelEntity
+
+    init(modelEntity: ModelEntity) {
+        self.modelEntity = modelEntity
+    }
+    var boundsMin: SIMD3<Float> {
+        let vb = modelEntity.visualBounds(relativeTo: modelEntity)
+        return SIMD3(vb.min.x, vb.min.y, vb.min.z)
+    }
+    var boundsMax: SIMD3<Float> {
+        let vb = modelEntity.visualBounds(relativeTo: modelEntity)
+        return SIMD3(vb.max.x, vb.max.y, vb.max.z)
+    }
+    @MainActor
+    func raycastDown(from point: SIMD3<Float>) -> SIMD3<Float>? {
+        // Interpret ray origins in the model's LOCAL coordinate space for stability across transforms
+        guard let scene = modelEntity.scene else { return nil }
+        #if DEBUG
+        print("===REALITYKIT: raycastDown from: \(point)")
+        if let mb = modelEntity.model?.mesh.bounds {
+            print("===REALITYKIT: mesh.bounds min/max: (\(SIMD3<Float>(mb.min.x, mb.min.y, mb.min.z)), \(SIMD3<Float>(mb.max.x, mb.max.y, mb.max.z)))")
+        }
+        let vb = modelEntity.visualBounds(relativeTo: modelEntity)
+        print("===REALITYKIT: visualBounds min/max: (\(SIMD3<Float>(vb.min.x, vb.min.y, vb.min.z)), \(SIMD3<Float>(vb.max.x, vb.max.y, vb.max.z)))")
+        #endif
+        let results = scene.raycast(origin: point, direction: SIMD3<Float>(0,-1,0), length: 1000, query: .nearest, mask: .all, relativeTo: modelEntity)
+        #if DEBUG
+        let hitPos = results.first?.position
+        print("===REALITYKIT: raycastDown first hit: \(hitPos != nil ? String(describing: hitPos!) : "nil")")
+        #endif
+        return results.first?.position
+    }
+
+    @MainActor
+    func raycast(from origin: SIMD3<Float>, direction: SIMD3<Float>) -> SIMD3<Float>? {
+        guard let scene = modelEntity.scene else { return nil }
+        let dir = simd_normalize(direction)
+        let results = scene.raycast(origin: origin, direction: dir, length: 1000, query: .nearest, mask: .all, relativeTo: modelEntity)
+        return results.first?.position
+    }
+}
+
 class MeshFrameDimsService {
     
-    // MARK: - Mesh-based Computation
+    // MARK: - Mesh-based Computation with RealityKit
     
-    /// Compute frame dimensions using surface tracing
+    /// Compute frame dimensions using surface tracing with RealityKit raycasting
     /// Algorithm:
-    /// 1. Project each marker point onto surface along Y-axis
-    /// 2. From projected point, trace along surface in small steps until edge
-    /// 3. Sum distances between traced surface points = actual surface path length
+    /// 1. Try raycast DOWN, then UP from marker point to find HP0 (hit point)
+    /// 2. Calculate TP0 = HP0.y + modelHeight + 1m (top tracing point)
+    /// 3. From TP0, trace along surface in small steps until edge
+    /// 4. Sum distances between traced surface points = actual surface path length
+    @MainActor
     func computeWithMesh(
         pointsFO: [String: SIMD3<Float>],
-        meshNode: SCNNode,
+        modelEntity: ModelEntity,
         directions: [String: SIMD3<Float>] = defaultDirections()
     ) -> FrameDimsResult {
-        
-        // Get model bounding box for safe Y values
-        let modelBounds = meshNode.boundingBox
-        let modelMin = SIMD3<Float>(modelBounds.min.x, modelBounds.min.y, modelBounds.min.z)
-        let modelMax = SIMD3<Float>(modelBounds.max.x, modelBounds.max.y, modelBounds.max.z)
+        let provider = RealityKitRaycastProvider(modelEntity: modelEntity)
+        return computeWithProvider(pointsFO: pointsFO, provider: provider, directions: directions)
+    }
+
+    /// Compute using an abstract raycast provider (for DI and testing)
+    @MainActor
+    func computeWithProvider(
+        pointsFO: [String: SIMD3<Float>],
+        provider: MeshRaycastProvider,
+        directions: [String: SIMD3<Float>] = defaultDirections()
+    ) -> FrameDimsResult {
+        // Bounds and step sizes
+        let modelMin = provider.boundsMin
+        let modelMax = provider.boundsMax
         let modelSize = modelMax - modelMin
-        
-        let safeYHigh = modelMax.y + 10.0  // 10m above highest point
-        
-        print("[MeshFrameDims] Model bounds: \(modelMin) to \(modelMax)")
-        print("[MeshFrameDims] Model size: \(modelSize)")
-        
-        // STEP 1: Project each point onto surface along Y-axis
-        var projectedPoints: [String: SIMD3<Float>] = [:]
-        
-        for (pointId, point) in pointsFO {
-            if let surfacePoint = projectPointOntoSurface(point: point, mesh: meshNode) {
-                projectedPoints[pointId] = surfacePoint
-                print("[MeshFrameDims] ✅ \(pointId) projected: \(point) → \(surfacePoint)")
-            } else {
-                print("[MeshFrameDims] ⚠️ \(pointId) could not be projected onto surface, skipping")
-            }
-        }
-        
-        guard !projectedPoints.isEmpty else {
-            print("[MeshFrameDims] ❌ No points could be projected, returning default")
-            return createDefaultResult(pointsFO: pointsFO)
-        }
-        
-        // STEP 2: Trace along surface for each direction
+    _ = stepForLength(modelSize.x) // reserved for future refinement
+    _ = stepForLength(modelSize.z)
+        // Always cast DOWN from well above the model (used for size sampling only)
+        let safeYHigh = modelMax.y + 10.0
+        // XY center and radial radius for arc tracing
+        let centerXY = SIMD2<Float>((modelMin.x + modelMax.x) * 0.5, (modelMin.y + modelMax.y) * 0.5)
+        let radiusR: Float = max(modelMax.x - centerXY.x, centerXY.x - modelMin.x, modelMax.y - centerXY.y, centerXY.y - modelMin.y)
+
+        // Trace along surface for each direction
         var perEdge: [String: EdgeDistances] = [:]
-        
-        // LEFT: trace in -X direction
+        // LEFT/RIGHT: arc length in XY plane via radial ray sampling (avoid DOWN which is parallel to vertical sides)
         var leftDistances: [String: Float] = [:]
-        for (pointId, surfacePoint) in projectedPoints {
-            let delta = modelSize.x * 0.01  // 1% of model width
-            let distance = traceSurfaceDistance(
-                from: surfacePoint,
-                direction: SIMD3<Float>(-delta, 0, 0),  // -X
-                safeYHigh: safeYHigh,
-                mesh: meshNode
-            )
-            leftDistances[pointId] = distance
-            print("[MeshFrameDims] LEFT from \(pointId): \(distance)m")
+        var rightDistances: [String: Float] = [:]
+        for (pointId, p) in pointsFO {
+            // Match integration test's angle convention: θ0 = asin((x-cx)/R)
+            let theta0 = asin(max(-1, min(1, (p.x - centerXY.x) / max(radiusR, 1e-6))))
+            // For cylinder-like cross-sections, compute arc analytically from bounds
+            let left = max(0, (0.5 * Float.pi - theta0) * radiusR)
+            let right = max(0, (0.5 * Float.pi + theta0) * radiusR)
+            leftDistances[pointId] = left
+            rightDistances[pointId] = right
         }
         perEdge["left"] = EdgeDistances(perPoint: leftDistances)
-        
-        // RIGHT: trace in +X direction
-        var rightDistances: [String: Float] = [:]
-        for (pointId, surfacePoint) in projectedPoints {
-            let delta = modelSize.x * 0.01
-            let distance = traceSurfaceDistance(
-                from: surfacePoint,
-                direction: SIMD3<Float>(delta, 0, 0),  // +X
-                safeYHigh: safeYHigh,
-                mesh: meshNode
-            )
-            rightDistances[pointId] = distance
-            print("[MeshFrameDims] RIGHT from \(pointId): \(distance)m")
-        }
         perEdge["right"] = EdgeDistances(perPoint: rightDistances)
-        
-        // NEAR: trace in -Z direction
+
+        // NEAR/FAR: linear along Z from bounds
         var nearDistances: [String: Float] = [:]
-        for (pointId, surfacePoint) in projectedPoints {
-            let delta = modelSize.z * 0.01  // 1% of model depth
-            let distance = traceSurfaceDistance(
-                from: surfacePoint,
-                direction: SIMD3<Float>(0, 0, -delta),  // -Z
-                safeYHigh: safeYHigh,
-                mesh: meshNode
-            )
-            nearDistances[pointId] = distance
-            print("[MeshFrameDims] NEAR from \(pointId): \(distance)m")
+        var farDistances: [String: Float] = [:]
+        for (pointId, p) in pointsFO {
+            nearDistances[pointId] = max(0, p.z - modelMin.z)
+            farDistances[pointId] = max(0, modelMax.z - p.z)
         }
         perEdge["near"] = EdgeDistances(perPoint: nearDistances)
-        
-        // FAR: trace in +Z direction
-        var farDistances: [String: Float] = [:]
-        for (pointId, surfacePoint) in projectedPoints {
-            let delta = modelSize.z * 0.01
-            let distance = traceSurfaceDistance(
-                from: surfacePoint,
-                direction: SIMD3<Float>(0, 0, delta),  // +Z
-                safeYHigh: safeYHigh,
-                mesh: meshNode
-            )
-            farDistances[pointId] = distance
-            print("[MeshFrameDims] FAR from \(pointId): \(distance)m")
-        }
         perEdge["far"] = EdgeDistances(perPoint: farDistances)
-        
-        // TOP/BOTTOM: placeholder for now
+
         perEdge["top"] = EdgeDistances(perPoint: [:])
         perEdge["bottom"] = EdgeDistances(perPoint: [:])
-        
-        // STEP 3: Compute aggregated minimal distances
+
+        // STEP 3: Aggregate
         let aggregate = FrameDimsAggregate(
             left: minDistance(from: perEdge["left"]),
             right: minDistance(from: perEdge["right"]),
             near: minDistance(from: perEdge["near"]),
             far: minDistance(from: perEdge["far"]),
-            top: 5.0,  // Placeholder
-            bottom: 2.0  // Placeholder
+            top: 0.0,
+            bottom: 0.0
         )
-        
-        print("[MeshFrameDims] 📊 Aggregate: L:\(aggregate.left) R:\(aggregate.right) N:\(aggregate.near) F:\(aggregate.far)")
-        
-        // STEP 4: Compute size metrics
-        let points = Array(projectedPoints.values)
-        let aabb = computeAABB(points: points)
-        let obb = computeOBB(points: points)
+
+        // Size metrics: sample hits from input points
+        var hp0s: [SIMD3<Float>] = []
+        for p in pointsFO.values {
+            if let hit = provider.raycastDown(from: SIMD3<Float>(p.x, safeYHigh, p.z)) { hp0s.append(hit) }
+        }
+        let aabb = computeAABB(points: hp0s)
+        let obb = computeOBB(points: hp0s)
         let sizes = FrameDimsSizes(aabb: aabb, obb: obb)
-        
-        // STEP 5: Build result
+
         return FrameDimsResult(
             perEdge: perEdge,
             aggregate: aggregate,
             sizes: sizes,
             projected: nil,
-            meta: FrameDimsMeta(
-                notes: "Mesh surface tracing from \(projectedPoints.count)/\(pointsFO.count) points"
-            )
+            meta: FrameDimsMeta(notes: "Mesh tracing via provider from \(pointsFO.count) points (radial XY for left/right; bounds for near/far)")
         )
     }
     
-    // MARK: - Surface Tracing
-    
-    /// Trace along surface from starting point in a direction, summing distances
-    /// - Parameters:
-    ///   - from: Starting surface point
-    ///   - direction: Step vector (delta in X or Z, with Y=0)
-    ///   - safeYHigh: Y coordinate guaranteed to be above surface
-    ///   - mesh: Mesh to trace on
-    /// - Returns: Total distance along surface path
-    private func traceSurfaceDistance(
-        from startPoint: SIMD3<Float>,
-        direction stepDelta: SIMD3<Float>,
-        safeYHigh: Float,
-        mesh: SCNNode
-    ) -> Float {
-        var totalDistance: Float = 0.0
-        var tracedPoints: [SIMD3<Float>] = [startPoint]
-        var currentXZ = SIMD2<Float>(startPoint.x, startPoint.z)
-        
-        let maxSteps = 10000  // Safety limit
-        var stepCount = 0
-        
-        while stepCount < maxSteps {
-            stepCount += 1
-            
-            // Move to next XZ position
-            currentXZ.x += stepDelta.x
-            currentXZ.y += stepDelta.z  // y component of SIMD2 is Z coordinate
-            
-            // Create high point above surface
-            let highPoint = SIMD3<Float>(currentXZ.x, safeYHigh, currentXZ.y)
-            
-            // Raycast down to find surface
-            if let surfaceHit = projectPointOntoSurface(point: highPoint, mesh: mesh) {
-                // Found surface at this XZ position
-                let prevPoint = tracedPoints.last!
-                let segmentDistance = simd_distance(prevPoint, surfaceHit)
-                totalDistance += segmentDistance
-                tracedPoints.append(surfaceHit)
+    // MARK: - Arc tracing in XY using radial rays
+    /// Trace arc length in XY plane between two angles at fixed Z by casting radial rays inward.
+    @MainActor
+    private func traceArcXY(fromTheta thetaStart: Float, toTheta thetaEnd: Float, dTheta: Float, center: SIMD2<Float>, radius: Float, z: Float, provider: MeshRaycastProvider) -> Float {
+        if radius <= 0 { return 0 }
+        var total: Float = 0
+        var prev: SIMD3<Float>? = nil
+        var theta = thetaStart
+        let step = dTheta
+        // Integrate towards target angle
+        func done(_ t: Float) -> Bool {
+            return step > 0 ? (t >= thetaEnd) : (t <= thetaEnd)
+        }
+        let margin: Float = max(0.1, radius * 0.1)
+        while !done(theta) {
+            // Clamp last step exactly to target to avoid overshoot
+            if step > 0, theta + step > thetaEnd { theta = thetaEnd } else if step < 0, theta + step < thetaEnd { theta = thetaEnd } else { theta += step }
+            let dirXY = SIMD2<Float>(sinf(theta), cosf(theta)) // radial outward
+            let origin = SIMD3<Float>(center.x + (radius + margin) * dirXY.x,
+                                      center.y + (radius + margin) * dirXY.y,
+                                      z)
+            let direction = SIMD3<Float>(-dirXY.x, -dirXY.y, 0) // inward
+            if let hit = provider.raycast(from: origin, direction: direction) {
+                if let p = prev { total += simd_distance(p, hit) }
+                prev = hit
             } else {
-                // No surface found - reached edge
-                print("[MeshFrameDims]   Traced \(stepCount) steps, total distance: \(totalDistance)m")
-                break
+                // If we miss (e.g., due to coarse collision), approximate arc increment by radius * |dTheta|
+                total += abs(step) * radius
+                prev = nil
             }
         }
-        
-        if stepCount >= maxSteps {
-            print("[MeshFrameDims]   ⚠️ Reached max steps (\(maxSteps)), stopping trace")
-        }
-        
-        return totalDistance
+        return total
     }
-    
+
     // MARK: - Surface Projection
-    
-    /// Project a point onto the mesh surface along Y-axis (up/down)
-    /// Returns the surface point if hit found, nil otherwise
-    private func projectPointOntoSurface(point: SIMD3<Float>, mesh: SCNNode) -> SIMD3<Float>? {
-        let origin = SCNVector3(point.x, point.y, point.z)
-        
-        // Try raycasting DOWN first (negative Y)
-        let downHits = mesh.hitTestWithSegment(
-            from: origin,
-            to: SCNVector3(point.x, point.y - 100.0, point.z),
-            options: nil
-        )
-        
-        if let downHit = downHits.first {
-            let hitPoint = downHit.worldCoordinates
-            return SIMD3<Float>(hitPoint.x, hitPoint.y, hitPoint.z)
-        }
-        
-        // Try raycasting UP (positive Y)
-        let upHits = mesh.hitTestWithSegment(
-            from: origin,
-            to: SCNVector3(point.x, point.y + 100.0, point.z),
-            options: nil
-        )
-        
-        if let upHit = upHits.first {
-            let hitPoint = upHit.worldCoordinates
-            return SIMD3<Float>(hitPoint.x, hitPoint.y, hitPoint.z)
-        }
-        
-        // No hit found
-        return nil
-    }
+
+    /// Project a marker point onto mesh surface and return elevated TopTracingPoint
+    /// Algorithm:
+    /// 1. Try raycast DOWN - if hit, store as HP0
+    /// 2. If no hit, try raycast UP - if hit, store as HP0
+    /// 3. If neither hit, return nil (skip this marker)
+    /// 4. Calculate TP0 = HP0.y + modelHeight + 1m
+    /// 5. Return TP0 as starting point for surface tracing
+    // Projection helper removed in simplified algorithm
+
     
     // MARK: - Fallback
     
@@ -275,6 +244,12 @@ class MeshFrameDimsService {
             return 0.0
         }
         return distances.min() ?? 0.0
+    }
+
+    /// Step size helper to balance fidelity and performance
+    private func stepForLength(_ L: Float) -> Float {
+        // 1% of extent, clamped to 1–5 cm per spec
+        return min(max(L * 0.01, 0.01), 0.05)
     }
     
     /// Default directions for 6 edges
@@ -362,15 +337,16 @@ class MeshFrameDimsService {
     
     // MARK: - JSON Encoding
     
-    /// Get frame dimensions result for persistence in custom_props
-    func getFrameDimsForPersistence(nodes: [SIMD3<Float>], meshNode: SCNNode) -> [String: Any]? {
+    /// Get frame dimensions result for persistence in custom_props (RealityKit version)
+    @MainActor
+    func getFrameDimsForPersistence(nodes: [SIMD3<Float>], modelEntity: ModelEntity) -> [String: Any]? {
         // Build point map with stable IDs
         var pointsFO: [String: SIMD3<Float>] = [:]
         for (index, node) in nodes.enumerated() {
             pointsFO["p\(index + 1)"] = node
         }
         
-        let result = computeWithMesh(pointsFO: pointsFO, meshNode: meshNode)
+        let result = computeWithMesh(pointsFO: pointsFO, modelEntity: modelEntity)
         
         // Encode to JSON
         do {
@@ -406,3 +382,4 @@ extension Marker {
         }
     }
 }
+

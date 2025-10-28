@@ -251,7 +251,8 @@ final class SpatialMarkerService: ObservableObject {
         let length: Float
         let centerX: Float
         let centerZ: Float
-        let frameDims: FrameDimsAggregate?  // Frame dimensions
+        let frameDims: FrameDimsAggregate?      // Plane-based frame dimensions
+        let meshFrameDims: FrameDimsAggregate?  // Mesh-based frame dimensions
     }
     
     /// Get info for the currently selected marker
@@ -287,7 +288,8 @@ final class SpatialMarkerService: ObservableObject {
             length: length,
             centerX: center.x,
             centerZ: center.z,
-            frameDims: frameDims?.aggregate
+            frameDims: frameDims?.aggregate,
+            meshFrameDims: nil  // Computed separately in ARSessionView
         )
     }
     

@@ -118,6 +118,8 @@ final class SyncManager: ObservableObject {
     
     /// Register background tasks for iOS background sync
     func registerBackgroundTasks() {
+        // Avoid registering in unit test sessions to prevent runtime instability
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil { return }
         guard !isBackgroundSyncRegistered else { return }
         
         BGTaskScheduler.shared.register(
@@ -132,6 +134,7 @@ final class SyncManager: ObservableObject {
     
     /// Schedule background sync task
     func scheduleBackgroundSync() {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil { return }
         let request = BGAppRefreshTaskRequest(identifier: backgroundTaskId)
         request.earliestBeginDate = Date(timeIntervalSinceNow: config.interval)
         
