@@ -22,10 +22,6 @@ final class SpatialMarkerService: ObservableObject {
     private var markerEdgesInTarget: [UUID: Set<Int>] = [:] // Stores which edges (0-3) are in target for each marker
     private var selectedEdgeIndex: Int? // Edge index (0-3) for currently selected marker
     
-    // Frame dimensions support
-    private let frameDimsService = FrameDimsService()
-    var roomPlanes: [String: Plane]? = nil  // Set externally for room boundaries
-    
     // Moving state
     private var movingMarkerIndex: Int?
     private var nodeScreenPositions: [CGPoint] = []
@@ -251,8 +247,6 @@ final class SpatialMarkerService: ObservableObject {
         let length: Float
         let centerX: Float
         let centerZ: Float
-        let frameDims: FrameDimsAggregate?      // Plane-based frame dimensions
-        let meshFrameDims: FrameDimsAggregate?  // Mesh-based frame dimensions
     }
     
     /// Get info for the currently selected marker
@@ -280,54 +274,19 @@ final class SpatialMarkerService: ObservableObject {
         let edge30 = simd_distance(nodes[3], nodes[0])
         let length = (edge12 + edge30) / 2.0
         
-        // Compute frame dimensions if room planes are available
-        let frameDims = computeFrameDims(for: nodes)
-        
         return MarkerInfo(
             width: width,
             length: length,
             centerX: center.x,
-            centerZ: center.z,
-            frameDims: frameDims?.aggregate,
-            meshFrameDims: nil  // Computed separately in ARSessionView
+            centerZ: center.z
         )
     }
     
-    /// Compute frame dimensions for marker nodes
-    func computeFrameDims(for nodes: [SIMD3<Float>]) -> FrameDimsResult? {
-        // Use room planes if available, otherwise create default room
-        let planes = roomPlanes ?? FrameDimsService.createDefaultRoomPlanes()
-        
-        // Build point map with stable IDs
-        var pointsFO: [String: SIMD3<Float>] = [:]
-        for (index, node) in nodes.enumerated() {
-            pointsFO["p\(index + 1)"] = node
-        }
-        
-        // Compute frame dimensions (no vertical projection for now)
-        let result = frameDimsService.compute(
-            pointsFO: pointsFO,
-            planesFO: planes,
-            verticalRaycast: nil
-        )
-        
-        return result
-    }
+    // MARK: - Marker Access & Updates
     
-    /// Get frame dimensions result for a marker (to persist in custom_props)
-    func getFrameDimsForPersistence(nodes: [SIMD3<Float>]) -> [String: Any]? {
-        guard let result = computeFrameDims(for: nodes) else { return nil }
-        
-        // Encode to JSON
-        do {
-            let encoder = JSONEncoder()
-            let data = try encoder.encode(result)
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            return json
-        } catch {
-            print("Failed to encode frame dims: \(error)")
-            return nil
-        }
+    /// Get a marker by its backend ID
+    func getMarkerByBackendId(_ backendId: UUID) -> SpatialMarker? {
+        return markers.first(where: { $0.backendId == backendId })
     }
     
     // MARK: - Marker Tracking

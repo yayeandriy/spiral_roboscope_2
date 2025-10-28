@@ -8,39 +8,7 @@ struct AnalyticalRaycastProvider: MeshRaycastProvider {
     let hc: HalfCylinderAnalytical
     var boundsMin: SIMD3<Float> { SIMD3(-hc.R, hc.yMin, hc.zMin) }
     var boundsMax: SIMD3<Float> { SIMD3(+hc.R, hc.yMax, hc.zMax) }
-    var upAxis: SIMD3<Float> { SIMD3<Float>(0, 1, 0) }
-    var upAxisIndex: Int { 1 }
     func raycastDown(from point: SIMD3<Float>) -> SIMD3<Float>? { hc.raycastDown(from: point) }
-    func raycastUp(from point: SIMD3<Float>) -> SIMD3<Float>? { hc.raycastUp(from: point) }
-    func raycast(from origin: SIMD3<Float>, direction: SIMD3<Float>) -> SIMD3<Float>? {
-        // Intersect a ray in XY-plane with the analytical semicircle x^2 + (y - R)^2 = R^2, z is extruded
-        // Only support rays with zero Z component as used by the service
-        if abs(direction.z) > 1e-6 { return nil }
-        let dirXY = SIMD2<Float>(direction.x, direction.y)
-        let len = simd_length(dirXY)
-        if len < 1e-6 { return nil }
-        let d = dirXY / len
-        let o = SIMD2<Float>(origin.x, origin.y)
-        let c = SIMD2<Float>(0, hc.R)
-        // Solve |(o + t d) - c|^2 = R^2 -> at^2 + bt + c0 = 0
-        let oc = o - c
-        let a: Float = simd_dot(d, d)
-        let b: Float = 2 * simd_dot(oc, d)
-        let c0: Float = simd_dot(oc, oc) - hc.R * hc.R
-        let disc = b*b - 4*a*c0
-        if disc < 0 { return nil }
-        let sqrtDisc = sqrt(max(0, disc))
-        let t1 = (-b - sqrtDisc) / (2*a)
-        let t2 = (-b + sqrtDisc) / (2*a)
-        let t = [t1, t2].filter { $0 >= 0 }.min()
-        guard let tHit = t else { return nil }
-        let hitXY = o + tHit * d
-        // Validate within y bounds of the semicircle
-        if hitXY.y < hc.yMin - 1e-4 || hitXY.y > hc.yMax + hc.R + 1e-4 { return nil }
-        // Clamp z within extruded bounds
-        if origin.z < hc.zMin - 1e-4 || origin.z > hc.zMax + 1e-4 { return nil }
-        return SIMD3<Float>(hitXY.x, hitXY.y, origin.z)
-    }
 }
 
 final class MeshAlgoAgainstAnalyticTests: XCTestCase {

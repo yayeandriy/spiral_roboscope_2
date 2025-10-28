@@ -410,11 +410,11 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2JL868AT85;
 				ENABLE_PREVIEWS = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = AppInfo.plist;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = roboscope2/AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Roboscope 2";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				EXCLUDED_SOURCE_FILE_NAMES = AppInfo.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -444,11 +444,11 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2JL868AT85;
 				ENABLE_PREVIEWS = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = AppInfo.plist;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = roboscope2/AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Roboscope 2";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				EXCLUDED_SOURCE_FILE_NAMES = AppInfo.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
