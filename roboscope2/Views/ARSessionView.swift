@@ -1195,11 +1195,15 @@ struct ARSessionView: View {
                 let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
                 
                 await MainActor.run {
-                    // Create anchor at FrameOrigin so the model (authored in FrameOrigin space)
-                    // is correctly transformed into AR world space
-                    let anchor = AnchorEntity(world: frameOriginTransform)
+                    // CRITICAL FIX: Apply the frameOriginTransform directly to the model entity,
+                    // not to the anchor. This matches how Space3DViewer applies registration:
+                    // composedTransform = result.transformMatrix * originalTransform
+                    modelEntity.transform = Transform(matrix: frameOriginTransform)
                     
-                    // Add the model to the anchor
+                    // Create anchor at world origin (identity)
+                    let anchor = AnchorEntity(world: matrix_identity_float4x4)
+                    
+                    // Add the transformed model to the anchor
                     anchor.addChild(modelEntity)
                     
                     // Store reference and add to scene
@@ -1207,7 +1211,8 @@ struct ARSessionView: View {
                     arView.scene.addAnchor(anchor)
                     
                     isLoadingModel = false
-                    print("[ARSession] Reference model placed at FrameOrigin")
+                    print("[ARSession] Reference model placed with transform applied directly to model")
+                    print("[ARSession] Transform: \(frameOriginTransform)")
                 }
                 
             } catch {
@@ -1246,8 +1251,18 @@ struct ARSessionView: View {
     /// Called automatically via frameOriginTransform didSet observer
     private func updateReferenceModelPosition() {
         guard let anchor = referenceModelAnchor else { return }
-        anchor.transform = Transform(matrix: frameOriginTransform)
-        print("[ARSession] 🔄 Auto-synchronized reference model with FrameOrigin")
+        
+        // CRITICAL FIX: Apply transform to the model entity itself, not the anchor
+        // The anchor stays at world origin (identity)
+        if let modelEntity = anchor.children.first as? ModelEntity {
+            modelEntity.transform = Transform(matrix: frameOriginTransform)
+            print("[ARSession] 🔄 Auto-synchronized reference model with FrameOrigin")
+            print("[ARSession] Transform: \(frameOriginTransform)")
+        } else {
+            // Fallback to old behavior if we can't find the model entity
+            anchor.transform = Transform(matrix: frameOriginTransform)
+            print("[ARSession] ⚠️ Fallback: Applied transform to anchor (old behavior)")
+        }
     }
     
     // MARK: - Scan Model Management
@@ -1297,11 +1312,14 @@ struct ARSessionView: View {
                 let scanEntity = try await ModelEntity.loadModel(contentsOf: scanPath)
                 
                 await MainActor.run {
-                    // Create anchor at FrameOrigin so the scan (authored in FrameOrigin space)
-                    // is correctly transformed into AR world space
-                    let anchor = AnchorEntity(world: frameOriginTransform)
+                    // CRITICAL FIX: Apply the frameOriginTransform directly to the scan entity,
+                    // not to the anchor. This matches how Space3DViewer applies registration.
+                    scanEntity.transform = Transform(matrix: frameOriginTransform)
                     
-                    // Add the scan to the anchor
+                    // Create anchor at world origin (identity)
+                    let anchor = AnchorEntity(world: matrix_identity_float4x4)
+                    
+                    // Add the transformed scan to the anchor
                     anchor.addChild(scanEntity)
                     
                     // Store reference and add to scene
@@ -1309,7 +1327,8 @@ struct ARSessionView: View {
                     arView.scene.addAnchor(anchor)
                     
                     isLoadingScan = false
-                    print("[ARSession] Scanned model placed at FrameOrigin")
+                    print("[ARSession] Scanned model placed with transform applied directly to model")
+                    print("[ARSession] Transform: \(frameOriginTransform)")
                 }
                 
             } catch {
@@ -1335,8 +1354,18 @@ struct ARSessionView: View {
     /// Update the scanned model's anchor to the latest FrameOrigin transform
     private func updateScanModelPosition() {
         guard let anchor = scanModelAnchor else { return }
-        anchor.transform = Transform(matrix: frameOriginTransform)
-        print("[ARSession] Updated scanned model to new FrameOrigin transform")
+        
+        // CRITICAL FIX: Apply transform to the scan entity itself, not the anchor
+        // The anchor stays at world origin (identity)
+        if let scanEntity = anchor.children.first as? ModelEntity {
+            scanEntity.transform = Transform(matrix: frameOriginTransform)
+            print("[ARSession] 🔄 Auto-synchronized scanned model with FrameOrigin")
+            print("[ARSession] Transform: \(frameOriginTransform)")
+        } else {
+            // Fallback to old behavior if we can't find the scan entity
+            anchor.transform = Transform(matrix: frameOriginTransform)
+            print("[ARSession] ⚠️ Fallback: Applied transform to anchor (old behavior)")
+        }
     }
 }
 
