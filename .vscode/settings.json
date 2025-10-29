@@ -1,4 +1,8 @@
 {
-    "editor.quickSuggestions": false,
+    "editor.quickSuggestions": {
+        "comments": "off",
+        "strings": "off",
+        "other": "off"
+    },
     "workbench.colorTheme": "Tokyo Night Light"
 }
