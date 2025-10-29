@@ -6,12 +6,6 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		4D3C89FC2EB0E8A900B63F30 /* cylinder.usdc in Resources */ = {isa = PBXBuildFile; fileRef = 4D3C89FB2EB0E8A900B63F30 /* cylinder.usdc */; };
-		4D3C89FD2EB0E8A900B63F30 /* cylinder.usdc in Resources */ = {isa = PBXBuildFile; fileRef = 4D3C89FB2EB0E8A900B63F30 /* cylinder.usdc */; };
-		4D3C89FE2EB0E8A900B63F30 /* cylinder.usdc in Resources */ = {isa = PBXBuildFile; fileRef = 4D3C89FB2EB0E8A900B63F30 /* cylinder.usdc */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXContainerItemProxy section */
 		4D12F5A02E9EAD140011EEF8 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -33,7 +27,6 @@
 		4D12F5922E9EAD130011EEF8 /* roboscope2.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = roboscope2.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D12F59F2E9EAD140011EEF8 /* roboscope2Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = roboscope2Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D12F5A92E9EAD150011EEF8 /* roboscope2UITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = roboscope2UITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		4D3C89FB2EB0E8A900B63F30 /* cylinder.usdc */ = {isa = PBXFileReference; lastKnownFileType = file; path = cylinder.usdc; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -82,7 +75,6 @@
 		4D12F5892E9EAD130011EEF8 = {
 			isa = PBXGroup;
 			children = (
-				4D3C89FB2EB0E8A900B63F30 /* cylinder.usdc */,
 				4D12F5942E9EAD130011EEF8 /* roboscope2 */,
 				4D12F5A22E9EAD150011EEF8 /* roboscope2Tests */,
 				4D12F5AC2E9EAD150011EEF8 /* roboscope2UITests */,
@@ -220,7 +212,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4D3C89FD2EB0E8A900B63F30 /* cylinder.usdc in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -228,7 +219,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4D3C89FC2EB0E8A900B63F30 /* cylinder.usdc in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -236,7 +226,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4D3C89FE2EB0E8A900B63F30 /* cylinder.usdc in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

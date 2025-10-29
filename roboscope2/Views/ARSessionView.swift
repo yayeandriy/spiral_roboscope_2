@@ -100,7 +100,8 @@ struct ARSessionView: View {
                                 meta: marker.meta,
                                 customProps: marker.customProps,
                                 createdAt: marker.createdAt,
-                                updatedAt: marker.updatedAt
+                                updatedAt: marker.updatedAt,
+                                details: marker.details
                             )
                         }
                         markerService.loadPersistedMarkers(transformedMarkers)
@@ -368,6 +369,7 @@ struct ARSessionView: View {
                 if let info = markerService.selectedMarkerInfo {
                     MarkerBadgeView(
                         info: info,
+                        details: markerService.selectedMarkerDetails,
                         onDelete: {
                             if let backendId = markerService.selectedBackendId {
                                 Task {
@@ -1134,7 +1136,8 @@ struct ARSessionView: View {
                         meta: marker.meta,
                         customProps: marker.customProps,
                         createdAt: marker.createdAt,
-                        updatedAt: marker.updatedAt
+                        updatedAt: marker.updatedAt,
+                        details: marker.details
                     )
                 }
                 
@@ -1525,61 +1528,145 @@ private struct TwoFingerTouchOverlay: UIViewRepresentable {
 
 struct MarkerBadgeView: View {
     let info: SpatialMarkerService.MarkerInfo
+    var details: MarkerDetails? = nil
     var onDelete: (() -> Void)? = nil
     
     var body: some View {
         ZStack(alignment: .topTrailing) {
             VStack(spacing: 12) {
-                // Dimensions row
-                HStack(spacing: 20) {
-                    VStack(spacing: 4) {
-                        Text("Width")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.7))
-                        Text(String(format: "%.2f m", info.width))
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
+                // Show detailed metrics if available, otherwise show basic dimensions
+                if let details = details {
+                    // Header with title
+                    Text("Marker Details")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Divider()
+                        .background(Color.white.opacity(0.3))
+                    
+                    // Size measurements (long x cross)
+                    HStack(spacing: 20) {
+                        VStack(spacing: 4) {
+                            Text("Long Size")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(String(format: "%.2f m", details.longSize))
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        
+                        Rectangle()
+                            .fill(Color.white.opacity(0.3))
+                            .frame(width: 1, height: 30)
+                        
+                        VStack(spacing: 4) {
+                            Text("Cross Size")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(String(format: "%.2f m", details.crossSize))
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
                     }
                     
-                    Rectangle()
-                        .fill(Color.white.opacity(0.3))
-                        .frame(width: 1, height: 30)
+                    Divider()
+                        .background(Color.white.opacity(0.3))
                     
-                    VStack(spacing: 4) {
-                        Text("Length")
+                    // Edge distances
+                    VStack(spacing: 8) {
+                        Text("Edge Distances")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.white.opacity(0.7))
-                        Text(String(format: "%.2f m", info.length))
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                }
-                
-                Divider()
-                    .background(Color.white.opacity(0.3))
-                
-                // Center coordinates row
-                HStack(spacing: 20) {
-                    VStack(spacing: 4) {
-                        Text("X")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.7))
-                        Text(String(format: "%.2f", info.centerX))
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        HStack(spacing: 12) {
+                            EdgeDistanceView(label: "Left", distance: details.leftDistance, color: .blue)
+                            EdgeDistanceView(label: "Right", distance: details.rightDistance, color: .green)
+                            EdgeDistanceView(label: "Near", distance: details.nearDistance, color: .orange)
+                            EdgeDistanceView(label: "Far", distance: details.farDistance, color: .purple)
+                        }
                     }
                     
-                    Rectangle()
-                        .fill(Color.white.opacity(0.3))
-                        .frame(width: 1, height: 30)
+                    Divider()
+                        .background(Color.white.opacity(0.3))
                     
-                    VStack(spacing: 4) {
-                        Text("Z")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.7))
-                        Text(String(format: "%.2f", info.centerZ))
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white)
+                    // Center position (long/cross axes)
+                    HStack(spacing: 20) {
+                        VStack(spacing: 4) {
+                            Text("Long (Z)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(String(format: "%.2f m", details.centerLocationLong))
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                        
+                        Rectangle()
+                            .fill(Color.white.opacity(0.3))
+                            .frame(width: 1, height: 30)
+                        
+                        VStack(spacing: 4) {
+                            Text("Cross (X)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(String(format: "%.2f m", details.centerLocationCross))
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                    }
+                } else {
+                    // Fallback to basic dimensions from MarkerInfo
+                    HStack(spacing: 20) {
+                        VStack(spacing: 4) {
+                            Text("Width")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(String(format: "%.2f m", info.width))
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        
+                        Rectangle()
+                            .fill(Color.white.opacity(0.3))
+                            .frame(width: 1, height: 30)
+                        
+                        VStack(spacing: 4) {
+                            Text("Length")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(String(format: "%.2f m", info.length))
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                    }
+                    
+                    Divider()
+                        .background(Color.white.opacity(0.3))
+                    
+                    // Center coordinates row
+                    HStack(spacing: 20) {
+                        VStack(spacing: 4) {
+                            Text("X")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(String(format: "%.2f", info.centerX))
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                        
+                        Rectangle()
+                            .fill(Color.white.opacity(0.3))
+                            .frame(width: 1, height: 30)
+                        
+                        VStack(spacing: 4) {
+                            Text("Z")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(String(format: "%.2f", info.centerZ))
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white)
+                        }
                     }
                 }
             }

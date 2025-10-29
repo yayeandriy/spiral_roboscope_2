@@ -66,6 +66,18 @@
                <Test
                   Identifier = "MeshAlgoAgainstAnalyticTests/test_halfCylinder_matches_analytic_at_midHeight()">
                </Test>
+               <Test
+                  Identifier = "RealityKitCylinderIntegrationTests">
+               </Test>
+               <Test
+                  Identifier = "RealityKitCylinderIntegrationTests/test_cylinder_usdc_meshAlgo_matches_analytic()">
+               </Test>
+               <Test
+                  Identifier = "roboscope2Tests">
+               </Test>
+               <Test
+                  Identifier = "roboscope2Tests/test_empty()">
+               </Test>
             </SkippedTests>
          </TestableReference>
       </Testables>

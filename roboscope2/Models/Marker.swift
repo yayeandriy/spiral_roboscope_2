@@ -11,6 +11,37 @@ import UIKit
 
 // MARK: - Marker Models
 
+/// Detailed metrics for a marker, computed server-side from the 4 corner points
+struct MarkerDetails: Codable, Sendable, Hashable {
+    let markerId: UUID
+    let centerLocationLong: Float
+    let centerLocationCross: Float
+    let leftDistance: Float
+    let rightDistance: Float
+    let farDistance: Float
+    let nearDistance: Float
+    let longSize: Float
+    let crossSize: Float
+    let customProps: [String: AnyCodable]
+    let createdAt: Date
+    let updatedAt: Date
+    
+    enum CodingKeys: String, CodingKey {
+        case markerId = "marker_id"
+        case centerLocationLong = "center_location_long"
+        case centerLocationCross = "center_location_cross"
+        case leftDistance = "left_distance"
+        case rightDistance = "right_distance"
+        case farDistance = "far_distance"
+        case nearDistance = "near_distance"
+        case longSize = "long_size"
+        case crossSize = "cross_size"
+        case customProps = "custom_props"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
 /// Core Marker model representing a 3D annotation in space with 4 corner points
 struct Marker: Codable, Identifiable, Hashable {
     let id: UUID
@@ -26,9 +57,10 @@ struct Marker: Codable, Identifiable, Hashable {
     let customProps: [String: AnyCodable]  // Custom properties for domain-specific metadata
     let createdAt: Date
     let updatedAt: Date
+    let details: MarkerDetails? // Server-computed details (may be nil if not yet calculated)
     
     enum CodingKeys: String, CodingKey {
-        case id, label, p1, p2, p3, p4, color, version, meta
+        case id, label, p1, p2, p3, p4, color, version, meta, details
         case workSessionId = "work_session_id"
         case customProps = "custom_props"
         case createdAt = "created_at"

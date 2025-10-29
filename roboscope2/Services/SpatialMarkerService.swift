@@ -39,14 +39,15 @@ final class SpatialMarkerService: ObservableObject {
         var nodes: [SIMD3<Float>] // 4 corner positions (mutable for moving)
         let anchorEntity: AnchorEntity
         var isSelected: Bool = false
+        var details: MarkerDetails? = nil // Server-computed marker details
     }
     
     /// Create and add a marker from world-space points (used when loading from server)
     @discardableResult
-    func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil, version: Int64 = 0) -> SpatialMarker {
+    func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil, version: Int64 = 0, details: MarkerDetails? = nil) -> SpatialMarker {
         guard let arView = arView else {
             print("AR view not available")
-            return SpatialMarker(version: version, nodes: points, anchorEntity: AnchorEntity(world: .zero))
+            return SpatialMarker(version: version, nodes: points, anchorEntity: AnchorEntity(world: .zero), details: details)
         }
         // Create anchor and geometry similar to placeMarker()
         let anchorEntity = AnchorEntity(world: .zero)
@@ -83,7 +84,7 @@ final class SpatialMarkerService: ObservableObject {
         }
         
         arView.scene.addAnchor(anchorEntity)
-        let marker = SpatialMarker(backendId: backendId, version: version, nodes: points, anchorEntity: anchorEntity, isSelected: false)
+        let marker = SpatialMarker(backendId: backendId, version: version, nodes: points, anchorEntity: anchorEntity, isSelected: false, details: details)
         markers.append(marker)
         print("[Marker] Added id=\(marker.id) backendId=\(backendId?.uuidString ?? "nil") version=\(version) nodes=\(points)")
         return marker
@@ -129,10 +130,11 @@ final class SpatialMarkerService: ObservableObject {
             if let idx = markers.firstIndex(where: { $0.backendId == m.id }) {
                 // Update existing visual marker to match backend
                 markers[idx].version = m.version
+                markers[idx].details = m.details
                 applyNodePositions(markerIndex: idx, newNodePositions: m.points)
             } else {
                 // Add new marker from backend
-                addMarker(points: m.points, backendId: m.id, version: m.version)
+                addMarker(points: m.points, backendId: m.id, version: m.version, details: m.details)
             }
         }
     }
@@ -282,11 +284,28 @@ final class SpatialMarkerService: ObservableObject {
         )
     }
     
+    /// Get details for the currently selected marker (from server-computed data)
+    var selectedMarkerDetails: MarkerDetails? {
+        guard let selectedID = selectedMarkerID,
+              let marker = markers.first(where: { $0.id == selectedID }) else {
+            return nil
+        }
+        return marker.details
+    }
+    
     // MARK: - Marker Access & Updates
     
     /// Get a marker by its backend ID
     func getMarkerByBackendId(_ backendId: UUID) -> SpatialMarker? {
         return markers.first(where: { $0.backendId == backendId })
+    }
+    
+    /// Update marker details (called when details are computed/fetched from server)
+    func updateMarkerDetails(backendId: UUID, details: MarkerDetails) {
+        if let idx = markers.firstIndex(where: { $0.backendId == backendId }) {
+            markers[idx].details = details
+            print("[Marker] Updated details for marker \(backendId)")
+        }
     }
     
     // MARK: - Marker Tracking
