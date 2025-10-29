@@ -29,7 +29,9 @@ struct ARSessionView: View {
     @State private var registrationProgress: String = ""
     @State private var frameOriginTransform: simd_float4x4 = matrix_identity_float4x4 {
         didSet {
-            // Automatically update all anchors that should follow FrameOrigin
+            // Automatically update all entities when FrameOrigin changes
+            // FrameOrigin represents the reference model's coordinate system origin
+            updateFrameOriginGizmoPosition()
             updateReferenceModelPosition()
             updateScanModelPosition()
         }
@@ -441,8 +443,20 @@ struct ARSessionView: View {
                 session: session,
                 captureSession: captureSession,
                 onRegistrationComplete: { transform in
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    print("[🔧 TRANSFORM][REGISTRATION] ✅ Registration Complete!")
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    print("[🔧 TRANSFORM][REGISTRATION] Computed transform matrix:")
+                    print("[🔧 TRANSFORM][REGISTRATION]   [\(transform.columns.0)]")
+                    print("[🔧 TRANSFORM][REGISTRATION]   [\(transform.columns.1)]")
+                    print("[🔧 TRANSFORM][REGISTRATION]   [\(transform.columns.2)]")
+                    print("[🔧 TRANSFORM][REGISTRATION]   [\(transform.columns.3)]")
+                    print("[🔧 TRANSFORM][REGISTRATION] Translation: (\(transform.columns.3.x), \(transform.columns.3.y), \(transform.columns.3.z))")
+                    print("[🔧 TRANSFORM][REGISTRATION] Setting frameOriginTransform...")
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    
                     frameOriginTransform = transform
-                    placeFrameOriginGizmo(at: transform)
+                    // Gizmo is automatically updated via frameOriginTransform didSet observer
                     // Update all existing markers to new coordinate system
                     updateMarkersForNewFrameOrigin()
                     // NOTE: Reference model and scan model positions are automatically
@@ -1014,8 +1028,12 @@ struct ARSessionView: View {
         arView.scene.addAnchor(anchor)
         frameOriginAnchor = anchor
         
-        print("[ARSession] Placed frame origin gizmo at transform: \(transform)")
-        print("[ARSession] Gizmo position in world: \(anchor.position(relativeTo: nil))")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[🔧 TRANSFORM][GIZMO] 🎯 Placed FrameOrigin Gizmo")
+        print("━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[🔧 TRANSFORM][GIZMO] Transform provided: \(transform)")
+        print("[🔧 TRANSFORM][GIZMO] Gizmo position in world: \(anchor.position(relativeTo: nil))")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━��━━━━━━")
     }
     
     /// Drop FrameOrigin on the floor at screen center using raycast
@@ -1195,15 +1213,12 @@ struct ARSessionView: View {
                 let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
                 
                 await MainActor.run {
-                    // CRITICAL FIX: Apply the frameOriginTransform directly to the model entity,
-                    // not to the anchor. This matches how Space3DViewer applies registration:
-                    // composedTransform = result.transformMatrix * originalTransform
-                    modelEntity.transform = Transform(matrix: frameOriginTransform)
+                    // In RealityKit, we need to apply the transform at the anchor level
+                    // The anchor represents where this model should be in the world
+                    let anchor = AnchorEntity(world: frameOriginTransform)
                     
-                    // Create anchor at world origin (identity)
-                    let anchor = AnchorEntity(world: matrix_identity_float4x4)
-                    
-                    // Add the transformed model to the anchor
+                    // Model is at identity relative to the anchor
+                    // This way, the model's authored (0,0,0) is at the anchor position
                     anchor.addChild(modelEntity)
                     
                     // Store reference and add to scene
@@ -1211,8 +1226,22 @@ struct ARSessionView: View {
                     arView.scene.addAnchor(anchor)
                     
                     isLoadingModel = false
-                    print("[ARSession] Reference model placed with transform applied directly to model")
-                    print("[ARSession] Transform: \(frameOriginTransform)")
+                    
+                    // Detailed logging
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    print("[🔧 TRANSFORM][REF_MODEL] 📦 Reference Model Loaded")
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    print("[🔧 TRANSFORM][REF_MODEL] Current frameOriginTransform:")
+                    print("[🔧 TRANSFORM][REF_MODEL]   [\(frameOriginTransform.columns.0)]")
+                    print("[🔧 TRANSFORM][REF_MODEL]   [\(frameOriginTransform.columns.1)]")
+                    print("[🔧 TRANSFORM][REF_MODEL]   [\(frameOriginTransform.columns.2)]")
+                    print("[🔧 TRANSFORM][REF_MODEL]   [\(frameOriginTransform.columns.3)]")
+                    print("[🔧 TRANSFORM][REF_MODEL] Anchor world position: \(anchor.position(relativeTo: nil))")
+                    print("[🔧 TRANSFORM][REF_MODEL] Model local position: \(modelEntity.position)")
+                    print("[🔧 TRANSFORM][REF_MODEL] Model local scale: \(modelEntity.scale)")
+                    print("[🔧 TRANSFORM][REF_MODEL] Model bounds: \(modelEntity.visualBounds(relativeTo: nil))")
+                    print("[🔧 TRANSFORM][REF_MODEL] Model world position: \(modelEntity.position(relativeTo: nil))")
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 }
                 
             } catch {
@@ -1247,22 +1276,51 @@ struct ARSessionView: View {
         }
     }
     
+    /// Update the FrameOrigin gizmo to match where the model is positioned
+    /// Called automatically via frameOriginTransform didSet observer
+    private func updateFrameOriginGizmoPosition() {
+        guard let anchor = frameOriginAnchor else { return }
+        
+        // FrameOrigin represents the reference model's coordinate system
+        // When we transform the model, we want FrameOrigin to show where (0,0,0) of the model is
+        // Since the model entity gets frameOriginTransform applied, the gizmo should too
+        anchor.transform = Transform(matrix: frameOriginTransform)
+        
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[🔧 TRANSFORM][GIZMO] 🎯 FrameOrigin Gizmo Updated")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[🔧 TRANSFORM][GIZMO] New frameOriginTransform:")
+        print("[🔧 TRANSFORM][GIZMO]   [\(frameOriginTransform.columns.0)]")
+        print("[🔧 TRANSFORM][GIZMO]   [\(frameOriginTransform.columns.1)]")
+        print("[🔧 TRANSFORM][GIZMO]   [\(frameOriginTransform.columns.2)]")
+        print("[🔧 TRANSFORM][GIZMO]   [\(frameOriginTransform.columns.3)]")
+        print("[🔧 TRANSFORM][GIZMO] Gizmo world position: \(anchor.position(relativeTo: nil))")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    }
+    
     /// Update the reference model's anchor to the latest FrameOrigin transform
     /// Called automatically via frameOriginTransform didSet observer
     private func updateReferenceModelPosition() {
         guard let anchor = referenceModelAnchor else { return }
         
-        // CRITICAL FIX: Apply transform to the model entity itself, not the anchor
-        // The anchor stays at world origin (identity)
+        // Update the anchor's transform to move the entire model
+        // The model stays at identity relative to the anchor
+        anchor.transform = Transform(matrix: frameOriginTransform)
+        
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[🔧 TRANSFORM][REF_MODEL] 🔄 Reference Model Updated")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[🔧 TRANSFORM][REF_MODEL] New frameOriginTransform:")
+        print("[🔧 TRANSFORM][REF_MODEL]   [\(frameOriginTransform.columns.0)]")
+        print("[🔧 TRANSFORM][REF_MODEL]   [\(frameOriginTransform.columns.1)]")
+        print("[🔧 TRANSFORM][REF_MODEL]   [\(frameOriginTransform.columns.2)]")
+        print("[🔧 TRANSFORM][REF_MODEL]   [\(frameOriginTransform.columns.3)]")
+        print("[🔧 TRANSFORM][REF_MODEL] Anchor world position: \(anchor.position(relativeTo: nil))")
         if let modelEntity = anchor.children.first as? ModelEntity {
-            modelEntity.transform = Transform(matrix: frameOriginTransform)
-            print("[ARSession] 🔄 Auto-synchronized reference model with FrameOrigin")
-            print("[ARSession] Transform: \(frameOriginTransform)")
-        } else {
-            // Fallback to old behavior if we can't find the model entity
-            anchor.transform = Transform(matrix: frameOriginTransform)
-            print("[ARSession] ⚠️ Fallback: Applied transform to anchor (old behavior)")
+            print("[🔧 TRANSFORM][REF_MODEL] Model local position: \(modelEntity.position)")
+            print("[🔧 TRANSFORM][REF_MODEL] Model world position: \(modelEntity.position(relativeTo: nil))")
         }
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
     
     // MARK: - Scan Model Management
@@ -1312,14 +1370,11 @@ struct ARSessionView: View {
                 let scanEntity = try await ModelEntity.loadModel(contentsOf: scanPath)
                 
                 await MainActor.run {
-                    // CRITICAL FIX: Apply the frameOriginTransform directly to the scan entity,
-                    // not to the anchor. This matches how Space3DViewer applies registration.
-                    scanEntity.transform = Transform(matrix: frameOriginTransform)
-                    
-                    // Create anchor at world origin (identity)
+                    // Scan stays at identity (it's the reference frame in registration)
+                    // Place anchor at world origin with scan at identity
                     let anchor = AnchorEntity(world: matrix_identity_float4x4)
                     
-                    // Add the transformed scan to the anchor
+                    // Scan entity has no additional transform (stays at world origin)
                     anchor.addChild(scanEntity)
                     
                     // Store reference and add to scene
@@ -1327,8 +1382,21 @@ struct ARSessionView: View {
                     arView.scene.addAnchor(anchor)
                     
                     isLoadingScan = false
-                    print("[ARSession] Scanned model placed with transform applied directly to model")
-                    print("[ARSession] Transform: \(frameOriginTransform)")
+                    
+                    // Detailed logging
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    print("[🔧 TRANSFORM][SCAN_MODEL] 🔍 Scan Model Loaded")
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    print("[🔧 TRANSFORM][SCAN_MODEL] Current frameOriginTransform:")
+                    print("[🔧 TRANSFORM][SCAN_MODEL]   [\(frameOriginTransform.columns.0)]")
+                    print("[🔧 TRANSFORM][SCAN_MODEL]   [\(frameOriginTransform.columns.1)]")
+                    print("[🔧 TRANSFORM][SCAN_MODEL]   [\(frameOriginTransform.columns.2)]")
+                    print("[🔧 TRANSFORM][SCAN_MODEL]   [\(frameOriginTransform.columns.3)]")
+                    print("[🔧 TRANSFORM][SCAN_MODEL] Anchor world position: \(anchor.position(relativeTo: nil))")
+                    print("[🔧 TRANSFORM][SCAN_MODEL] Scan local position: \(scanEntity.position)")
+                    print("[🔧 TRANSFORM][SCAN_MODEL] Scan local transform: \(scanEntity.transform)")
+                    print("[🔧 TRANSFORM][SCAN_MODEL] Scan world position: \(scanEntity.position(relativeTo: nil))")
+                    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 }
                 
             } catch {
@@ -1355,17 +1423,23 @@ struct ARSessionView: View {
     private func updateScanModelPosition() {
         guard let anchor = scanModelAnchor else { return }
         
-        // CRITICAL FIX: Apply transform to the scan entity itself, not the anchor
-        // The anchor stays at world origin (identity)
+        // Scan stays at identity (it's the reference frame)
+        // No update needed - scan doesn't move when frameOriginTransform changes
+        
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[🔧 TRANSFORM][SCAN_MODEL] 🔄 Scan Model Updated")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("[🔧 TRANSFORM][SCAN_MODEL] New frameOriginTransform:")
+        print("[🔧 TRANSFORM][SCAN_MODEL]   [\(frameOriginTransform.columns.0)]")
+        print("[🔧 TRANSFORM][SCAN_MODEL]   [\(frameOriginTransform.columns.1)]")
+        print("[🔧 TRANSFORM][SCAN_MODEL]   [\(frameOriginTransform.columns.2)]")
+        print("[🔧 TRANSFORM][SCAN_MODEL]   [\(frameOriginTransform.columns.3)]")
+        print("[🔧 TRANSFORM][SCAN_MODEL] Anchor world position: \(anchor.position(relativeTo: nil))")
         if let scanEntity = anchor.children.first as? ModelEntity {
-            scanEntity.transform = Transform(matrix: frameOriginTransform)
-            print("[ARSession] 🔄 Auto-synchronized scanned model with FrameOrigin")
-            print("[ARSession] Transform: \(frameOriginTransform)")
-        } else {
-            // Fallback to old behavior if we can't find the scan entity
-            anchor.transform = Transform(matrix: frameOriginTransform)
-            print("[ARSession] ⚠️ Fallback: Applied transform to anchor (old behavior)")
+            print("[🔧 TRANSFORM][SCAN_MODEL] Scan local position: \(scanEntity.position)")
+            print("[🔧 TRANSFORM][SCAN_MODEL] Scan world position: \(scanEntity.position(relativeTo: nil))")
         }
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
 }
 
