@@ -57,7 +57,7 @@ struct Marker: Codable, Identifiable, Hashable {
     let customProps: [String: AnyCodable]  // Custom properties for domain-specific metadata
     let createdAt: Date
     let updatedAt: Date
-    let details: MarkerDetails? // Server-computed details (may be nil if not yet calculated)
+    var details: MarkerDetails? // Server-computed details (may be nil if not yet calculated)
     
     enum CodingKeys: String, CodingKey {
         case id, label, p1, p2, p3, p4, color, version, meta, details

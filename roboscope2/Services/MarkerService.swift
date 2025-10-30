@@ -258,25 +258,100 @@ final class MarkerService: ObservableObject {
     func createSimpleMarker(
         workSessionId: UUID,
         position: SIMD3<Float>,
-        size: Float = 0.1,
         label: String? = nil,
         color: String? = nil
     ) async throws -> Marker {
-        // Create a square marker around the position
-        let halfSize = size / 2
-        let points = [
-            SIMD3<Float>(position.x - halfSize, position.y, position.z - halfSize), // Bottom-left
-            SIMD3<Float>(position.x + halfSize, position.y, position.z - halfSize), // Bottom-right
-            SIMD3<Float>(position.x + halfSize, position.y, position.z + halfSize), // Top-right
-            SIMD3<Float>(position.x - halfSize, position.y, position.z + halfSize)  // Top-left
-        ]
+        // For backward compatibility - implement if needed
+        fatalError("Not implemented yet")
+    }
+    
+    // MARK: - Marker Details Operations
+    
+    /// Calculate marker details for a specific marker
+    /// - Parameter markerId: The marker UUID
+    /// - Returns: MarkerDetails object
+    func calculateMarkerDetails(for markerId: UUID) async throws -> MarkerDetails {
+        print("[MarkerDetails] [API] Starting detail calculation for marker \(markerId)")
         
-        return try await createMarkerFromARPoints(
-            workSessionId: workSessionId,
-            points: points,
-            label: label,
-            color: color
-        )
+        await setLoading(true)
+        defer { Task { await setLoading(false) } }
+        
+        do {
+            print("[MarkerDetails] [API] POST /markers/\(markerId.uuidString)/details/calculate")
+            let details: MarkerDetails = try await networkManager.post(
+                endpoint: "/markers/\(markerId.uuidString)/details/calculate",
+                body: [String: String]()  // Empty encodable dictionary
+            )
+            
+            print("[MarkerDetails] [API] Successfully calculated details for marker \(markerId)")
+            print("[MarkerDetails] [API] Details: Long=\(details.longSize), Cross=\(details.crossSize), Left=\(details.leftDistance), Right=\(details.rightDistance)")
+            
+            await clearError()
+            return details
+        } catch {
+            print("[MarkerDetails] [API] Failed to calculate details for marker \(markerId): \(error)")
+            await setError(error.localizedDescription)
+            throw error
+        }
+    }
+    
+    /// Get marker details for a specific marker
+    /// - Parameter markerId: The marker UUID
+    /// - Returns: MarkerDetails object or nil if not found
+    func getMarkerDetails(for markerId: UUID) async throws -> MarkerDetails? {
+        print("[MarkerDetails] [API] GET /markers/\(markerId.uuidString)/details")
+        
+        await setLoading(true)
+        defer { Task { await setLoading(false) } }
+        
+        do {
+            let details: MarkerDetails = try await networkManager.get(
+                endpoint: "/markers/\(markerId.uuidString)/details"
+            )
+            
+            print("[MarkerDetails] [API] Found existing details for marker \(markerId)")
+            await clearError()
+            return details
+        } catch {
+            print("[MarkerDetails] [API] Details not found for marker \(markerId): \(error)")
+            if let apiError = error as? APIError, case .notFound = apiError {
+                await clearError()
+                return nil
+            }
+            await setError(error.localizedDescription)
+            throw error
+        }
+    }
+    
+    /// Refresh marker details for all markers in a session
+    /// - Parameter sessionId: The work session UUID
+    /// - Returns: Updated array of markers with details
+    func refreshMarkerDetailsForSession(_ sessionId: UUID) async throws -> [Marker] {
+        let markers = try await getMarkersForSession(sessionId)
+        var updatedMarkers: [Marker] = []
+        
+        for marker in markers {
+            do {
+                // Try to get existing details or calculate them
+                var updatedMarker = marker
+                if let details = try await getMarkerDetails(for: marker.id) {
+                    updatedMarker.details = details
+                } else {
+                    // Calculate details if they don't exist
+                    let calculatedDetails = try await calculateMarkerDetails(for: marker.id)
+                    updatedMarker.details = calculatedDetails
+                }
+                updatedMarkers.append(updatedMarker)
+            } catch {
+                print("[MarkerService] Failed to get details for marker \(marker.id): \(error)")
+                // Keep the marker without details if calculation fails
+                updatedMarkers.append(marker)
+            }
+        }
+        
+        // Update the local markers array
+        await updateMarkers(updatedMarkers)
+        return updatedMarkers
     }
     
     /// Delete all markers for a work session

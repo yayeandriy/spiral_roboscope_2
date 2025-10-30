@@ -9,6 +9,7 @@ import ARKit
 import RealityKit
 import Combine
 import UIKit
+import Foundation
 
 /// Manages spatial markers placed in AR
 final class SpatialMarkerService: ObservableObject {
@@ -126,15 +127,40 @@ final class SpatialMarkerService: ObservableObject {
     
     /// Load persisted markers from API models
     func loadPersistedMarkers(_ apiMarkers: [Marker]) {
+        print("[MarkerDetails] [Load] Loading \(apiMarkers.count) markers from server")
+        
         for m in apiMarkers {
+            print("[MarkerDetails] [Load] Processing marker \(m.id), hasDetails: \(m.details != nil)")
+            
             if let idx = markers.firstIndex(where: { $0.backendId == m.id }) {
                 // Update existing visual marker to match backend
+                print("[MarkerDetails] [Load] Updating existing marker \(m.id)")
                 markers[idx].version = m.version
                 markers[idx].details = m.details
                 applyNodePositions(markerIndex: idx, newNodePositions: m.points)
             } else {
                 // Add new marker from backend
+                print("[MarkerDetails] [Load] Adding new marker \(m.id)")
                 addMarker(points: m.points, backendId: m.id, version: m.version, details: m.details)
+            }
+        }
+        
+        // Automatically calculate details for any markers that don't have them
+        Task {
+            print("[MarkerDetails] [Load] Checking markers for detail calculation...")
+            
+            for marker in markers where marker.backendId != nil && marker.details == nil {
+                if let backendId = marker.backendId {
+                    print("[MarkerDetails] [Load] Auto-calculating details for loaded marker \(backendId)")
+                    await refreshMarkerDetails(backendId: backendId)
+                }
+            }
+            
+            print("[MarkerDetails] [Load] Completed checking all markers for detail calculation")
+            
+            // Ensure UI update happens on main thread
+            await MainActor.run {
+                self.objectWillChange.send()
             }
         }
     }
@@ -291,6 +317,84 @@ final class SpatialMarkerService: ObservableObject {
             return nil
         }
         return marker.details
+    }
+    
+    // MARK: - Marker Details Auto-Refresh
+    
+    /// Automatically refresh marker details for all markers
+    /// This should be called periodically to ensure details are always up to date
+    func autoRefreshMarkerDetails(for sessionId: UUID) async {
+        guard !markers.isEmpty else { return }
+        
+        print("[SpatialMarkerService] Auto-refreshing marker details for \(markers.count) markers")
+        
+        for marker in markers {
+            guard let backendId = marker.backendId else { continue }
+            
+            do {
+                let details = try await MarkerService.shared.getMarkerDetails(for: backendId)
+                await MainActor.run {
+                    if let index = markers.firstIndex(where: { $0.id == marker.id }) {
+                        markers[index].details = details
+                        print("[SpatialMarkerService] Updated details for marker \(backendId)")
+                    }
+                }
+            } catch {
+                print("[SpatialMarkerService] Failed to refresh details for marker \(backendId): \(error)")
+            }
+        }
+        
+        // Trigger UI update
+        await MainActor.run {
+            self.objectWillChange.send()
+        }
+    }
+    
+    /// Refresh details for a specific marker by backend ID
+    func refreshMarkerDetails(backendId: UUID) async {
+        print("[MarkerDetails] [Refresh] Starting refresh for marker \(backendId)")
+        
+        guard let markerIndex = markers.firstIndex(where: { $0.backendId == backendId }) else {
+            print("[MarkerDetails] [Refresh] Marker with backendId \(backendId) not found")
+            return
+        }
+        
+        do {
+            // Try to get existing details first
+            var updatedDetails: MarkerDetails? = nil
+            
+            let existingDetails = try await MarkerService.shared.getMarkerDetails(for: backendId)
+            if let details = existingDetails {
+                print("[MarkerDetails] [Refresh] Found existing details for marker \(backendId)")
+                updatedDetails = details
+            } else {
+                // Details don't exist, need to calculate them
+                print("[MarkerDetails] [Refresh] Details not found for marker \(backendId), calculating...")
+                print("[MarkerDetails] [Refresh] Calling calculateMarkerDetails for marker \(backendId)")
+                updatedDetails = try await MarkerService.shared.calculateMarkerDetails(for: backendId)
+                print("[MarkerDetails] [Refresh] Successfully calculated details for marker \(backendId): Long=\(updatedDetails!.longSize), Cross=\(updatedDetails!.crossSize)")
+            }
+            
+            // Ensure UI updates happen on main thread
+            await MainActor.run {
+                markers[markerIndex].details = updatedDetails
+                print("[MarkerDetails] [Refresh] Updated details in spatial marker \(backendId)")
+                
+                // Trigger UI update
+                self.objectWillChange.send()
+                print("[MarkerDetails] [Refresh] UI update triggered for marker \(backendId)")
+            }
+        } catch {
+            print("[MarkerDetails] [Refresh] Failed to refresh details for marker \(backendId): \(error)")
+        }
+    }
+    
+    /// Update marker details after marker move/transform
+    func updateDetailsAfterTransform(backendId: UUID) async {
+        // Add a small delay to allow the marker to settle
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        
+        await refreshMarkerDetails(backendId: backendId)
     }
     
     // MARK: - Marker Access & Updates

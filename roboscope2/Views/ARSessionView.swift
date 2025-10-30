@@ -59,6 +59,15 @@ struct ARSessionView: View {
     @State private var currentScale: CGFloat = 1.0
     // one-finger edge move is now handled by the overlay's one-finger pan
     
+    // MARK: - Computed Properties
+    
+    private var associatedSpaceName: String? {
+        guard let space = spaceService.spaces.first(where: { $0.id == session.spaceId }) else {
+            return "Space: \(session.spaceId.uuidString.prefix(8))..."
+        }
+        return space.name
+    }
+    
     var body: some View {
         ZStack {
             // AR View
@@ -108,6 +117,16 @@ struct ARSessionView: View {
                         }
                         markerService.loadPersistedMarkers(transformedMarkers)
                         print("[ARSession] Loaded \(persisted.count) markers and transformed to world coordinates")
+                        
+                        // Calculate details for any markers that don't have them yet
+                        for marker in transformedMarkers {
+                            if marker.details == nil {
+                                print("[ARSession] Calculating details for marker \(marker.id)")
+                                Task {
+                                    await markerService.refreshMarkerDetails(backendId: marker.id)
+                                }
+                            }
+                        }
                     } catch {
                         print("Failed to load markers: \(error)")
                     }
@@ -183,6 +202,9 @@ struct ARSessionView: View {
                                         customProps: nil
                                     )
                                     print("[ARSession] Updated marker position in FrameOrigin coordinates")
+                                    
+                                    // Refresh marker details after position update
+                                    await markerService.updateDetailsAfterTransform(backendId: backendId)
                                 } catch {
                                     // Silently handle error
                                 }
@@ -219,6 +241,9 @@ struct ARSessionView: View {
                                         customProps: nil
                                     )
                                     print("[ARSession] Updated marker transform in FrameOrigin coordinates")
+                                    
+                                    // Refresh marker details after transform update
+                                    await markerService.updateDetailsAfterTransform(backendId: backendId)
                                 } catch {
                                     // Silently handle error
                                 }
@@ -310,9 +335,9 @@ struct ARSessionView: View {
                             )
                     }
 
-                    Spacer()
+                    Spacer(minLength: 8)
                     
-                    // Marker count in center
+                    // Marker count in center-left
                     HStack(spacing: 6) {
                         Image(systemName: "mappin.circle.fill")
                             .font(.system(size: 14, weight: .semibold))
@@ -334,13 +359,26 @@ struct ARSessionView: View {
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         ),
-                                        lineWidth: 1
+                                            lineWidth: 1
                                     )
                             )
                     )
                     
-                    Spacer()
-
+                    Spacer(minLength: 8)
+                    
+                    // Space name (smaller, center-right)
+                    if let spaceName = associatedSpaceName {
+                        Text(spaceName)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    
+                    Spacer(minLength: 8)
+                    
                     Button("Done") { dismiss() }
                         .buttonStyle(.plain)
                         .padding(.horizontal, 16)
@@ -618,7 +656,14 @@ struct ARSessionView: View {
                         )
                     )
                     markerService.linkSpatialMarker(localId: spatial.id, backendId: created.id)
-                    print("[ARSession] Created marker in FrameOrigin coordinates")
+                    print("[ARSession] [MarkerCreation] Created marker in FrameOrigin coordinates, id: \(created.id)")
+                    
+                    // Immediately refresh marker details for the newly created marker
+                    Task {
+                        print("[MarkerDetails] [NewMarker] Starting detail calculation for newly created marker \(created.id)")
+                        await markerService.refreshMarkerDetails(backendId: created.id)
+                        print("[MarkerDetails] [NewMarker] Completed detail calculation for marker \(created.id)")
+                    }
                 } catch {
                     print("Failed to persist marker: \(error)")
                 }
