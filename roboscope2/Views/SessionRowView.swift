@@ -23,18 +23,24 @@ struct SessionRowView: View {
     
     var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-            // Top row: status (left) + time ago (right)
+            // Top row: status (left) + updated date (right)
             HStack(alignment: .firstTextBaseline) {
                 Text(session.status.displayName)
                     .font(.caption)
                     .fontWeight(.medium)
                     .foregroundColor(statusColor)
                 Spacer()
-                if let timeAgo = timeAgoString {
-                    Text(timeAgo)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                if let updatedTime = updatedRelativeString {
+                Text(updatedTime)
+                    .font(.caption)
+                    .foregroundColor(.secondary) // Lighter color for updated date
+            } else {
+                // Debug: show why updated date is not available
+                Text("No updated date")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .opacity(0.3)
+            }
             }
 
             // Title: Space name (or fallback)
@@ -43,7 +49,7 @@ struct SessionRowView: View {
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
 
-            // Bottom row: session type (left) + markers badge (right)
+            // Bottom row: session type + markers badge
             HStack {
                 Text(session.sessionType.displayName.capitalized)
                     .font(.subheadline)
@@ -70,6 +76,7 @@ struct SessionRowView: View {
         .task {
             // Fetch accurate per-session marker count without mutating global markers
             print("[SessionRow] Fetching markers for session \(session.id)")
+            print("[SessionRow] Session dates - created: \(session.createdAt?.description ?? "nil"), updated: \(session.updatedAt?.description ?? "nil")")
             await fetchMarkerCount()
         }
         .onChange(of: refreshTrigger) { _ in
@@ -117,6 +124,26 @@ struct SessionRowView: View {
         return "Space: \(session.spaceId.uuidString.prefix(8))..."
     }
     
+    private var updatedDateString: String? {
+        guard let updatedAt = session.updatedAt else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: updatedAt)
+    }
+    
+    private var updatedRelativeString: String? {
+        guard let updatedAt = session.updatedAt else { 
+            print("[SessionRow] No updatedAt found for session \(session.id)")
+            return nil 
+        }
+        let fmt = RelativeDateTimeFormatter()
+        fmt.unitsStyle = .full
+        let relativeString = fmt.localizedString(for: updatedAt, relativeTo: Date())
+        print("[SessionRow] Updated date: \(relativeString) for session \(session.id)")
+        return relativeString
+    }
+    
     private var markersCount: Int {
         let count = sessionMarkersCount ?? markerService.markers.filter { $0.workSessionId == session.id }.count
         print("[SessionRow] Displaying count: \(count) (exact: \(sessionMarkersCount?.description ?? "nil"), filtered: \(markerService.markers.filter { $0.workSessionId == session.id }.count))")
@@ -134,23 +161,6 @@ struct SessionRowView: View {
                     .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
                     .background(Capsule().fill(Color(.systemBackground)))
             )
-    }
-    
-    // MARK: - Formatters
-    
-    private var dateFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter
-    }
-    
-    private var timeAgoString: String? {
-        let ref = session.updatedAt ?? session.startedAt ?? session.createdAt
-        guard let date = ref else { return nil }
-        let fmt = RelativeDateTimeFormatter()
-        fmt.unitsStyle = .full
-        return fmt.localizedString(for: date, relativeTo: Date())
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
