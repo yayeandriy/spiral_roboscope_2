@@ -18,6 +18,7 @@ struct SessionsView: View {
     // Search and filters removed for a simpler UI
     @State private var arSession: WorkSession?
     @State private var isLaunchingAR: Bool = false
+    @State private var refreshTrigger: Bool = false  // Force row refresh
     
     var body: some View {
         NavigationView {
@@ -74,6 +75,15 @@ struct SessionsView: View {
             .onChange(of: arSession) { oldValue, newValue in
                 // As soon as navigation triggers, hide the local overlay
                 if newValue != nil { isLaunchingAR = false }
+                
+                // When returning from AR session, refresh the data to reflect any marker changes
+                if oldValue != nil && newValue == nil {
+                    // Toggle refresh trigger to force row views to re-fetch marker counts
+                    refreshTrigger.toggle()
+                    Task {
+                        await refreshData()
+                    }
+                }
             }
             .alert("Delete Session", isPresented: $showingDeleteAlert, presenting: sessionToDelete) { session in
                 Button("Delete", role: .destructive) {
@@ -108,7 +118,7 @@ struct SessionsView: View {
             } else {
                 List {
                     ForEach(allSessions) { session in
-                        SessionRowView(session: session) {
+                        SessionRowView(session: session, refreshTrigger: refreshTrigger) {
                             // Start AR Session
                             startARSession(session)
                         } onEdit: { }

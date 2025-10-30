@@ -9,6 +9,7 @@ import SwiftUI
 
 struct SessionRowView: View {
     let session: WorkSession
+    let refreshTrigger: Bool  // Force re-fetch marker count
     let onStartAR: () -> Void
     // These are kept for compatibility but handled via swipe actions in the list
     // rather than inline buttons in the row. They are optional and unused here.
@@ -69,10 +70,23 @@ struct SessionRowView: View {
         .task {
             // Fetch accurate per-session marker count without mutating global markers
             print("[SessionRow] Fetching markers for session \(session.id)")
-            let count = await markerService.getMarkerCountForSession(session.id)
-            print("[SessionRow] Got count: \(count) for session \(session.id)")
-            sessionMarkersCount = count
+            await fetchMarkerCount()
         }
+        .onChange(of: refreshTrigger) { _ in
+            // Re-fetch marker count when refresh trigger changes
+            Task {
+                await fetchMarkerCount()
+            }
+        }
+    }
+    
+    // MARK: - Actions
+    
+    private func fetchMarkerCount() async {
+        print("[SessionRow] Re-fetching markers for session \(session.id)")
+        let count = await markerService.getMarkerCountForSession(session.id)
+        print("[SessionRow] Got updated count: \(count) for session \(session.id)")
+        sessionMarkersCount = count
     }
     
     // MARK: - Computed Properties
@@ -214,6 +228,7 @@ struct StatusBadge: View {
                 createdAt: Date().addingTimeInterval(-7200), // 2 hours ago
                 updatedAt: Date()
             ),
+            refreshTrigger: false,
             onStartAR: { print("Start AR") },
             onEdit: { print("Edit") },
             onDelete: { print("Delete") }
@@ -232,6 +247,7 @@ struct StatusBadge: View {
                 createdAt: Date().addingTimeInterval(-14400),
                 updatedAt: Date()
             ),
+            refreshTrigger: false,
             onStartAR: { print("Start AR") },
             onEdit: { print("Edit") },
             onDelete: { print("Delete") }
