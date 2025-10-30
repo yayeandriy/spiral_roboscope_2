@@ -279,6 +279,14 @@ struct ARSessionView: View {
                         } label: {
                             Label("Use saved scan", systemImage: "cube.transparent")
                         }
+                        
+                        Divider()
+                        
+                        Button(role: .destructive) {
+                            clearAllMarkersPersisted()
+                        } label: {
+                            Label("Delete All Markers", systemImage: "trash")
+                        }
                         // Future: add more actions here
                     } label: {
                         Image(systemName: "ellipsis")
@@ -416,17 +424,6 @@ struct ARSessionView: View {
                     .lgCircle(tint: .white)
                     
                     Spacer()
-                    
-                    // Clear all markers button (right)
-                    Button {
-                        clearAllMarkersPersisted()
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 20))
-                            .frame(width: 50, height: 50)
-                    }
-                    .buttonStyle(.plain)
-                    .lgCircle(tint: .red)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 50)
