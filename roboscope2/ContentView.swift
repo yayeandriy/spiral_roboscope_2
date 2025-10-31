@@ -644,30 +644,58 @@ struct ContentView : View {
 // MARK: - Target Overlay View
 
 struct TargetOverlayView: View {
-    let targetSize: CGFloat = 150  // Half the original size
+    enum Style { case brackets, cross }
+    let style: Style
+    let targetSize: CGFloat = 150  // For brackets style
     let cornerLength: CGFloat = 20
     let cornerWidth: CGFloat = 4
+
+    init(style: Style = .brackets) {
+        self.style = style
+    }
     
     var body: some View {
         GeometryReader { geometry in
             let centerX = geometry.size.width / 2
-            let targetY: CGFloat = 80 + targetSize / 2  // 80px from top
+            let centerY = geometry.size.height / 2
+            let targetY: CGFloat = 80 + targetSize / 2  // For brackets style
             let halfSize = targetSize / 2
             
             ZStack {
-                // Four corner brackets
-                ForEach(0..<4) { index in
-                    CornerBracket(length: cornerLength, width: cornerWidth)
-                        .stroke(Color.white, lineWidth: cornerWidth)
-                        .frame(width: cornerLength, height: cornerLength)
-                        .rotationEffect(.degrees(Double(index * 90)))
-                        .position(
-                            x: centerX + (index == 1 || index == 2 ? halfSize : -halfSize),
-                            y: targetY + (index >= 2 ? halfSize : -halfSize)
-                        )
+                if style == .brackets {
+                    // Four corner brackets (top target area)
+                    ForEach(0..<4) { index in
+                        CornerBracket(length: cornerLength, width: cornerWidth)
+                            .stroke(Color.white, lineWidth: cornerWidth)
+                            .frame(width: cornerLength, height: cornerLength)
+                            .rotationEffect(.degrees(Double(index * 90)))
+                            .position(
+                                x: centerX + (index == 1 || index == 2 ? halfSize : -halfSize),
+                                y: targetY + (index >= 2 ? halfSize : -halfSize)
+                            )
+                    }
+                } else {
+                    // Crosshair at screen center
+                    let crossLength: CGFloat = 40
+                    let lineWidth: CGFloat = 3
+                    // Horizontal line
+                    Path { path in
+                        path.move(to: CGPoint(x: centerX - crossLength/2, y: centerY))
+                        path.addLine(to: CGPoint(x: centerX + crossLength/2, y: centerY))
+                    }
+                    .stroke(Color.white.opacity(0.95), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    // Vertical line
+                    Path { path in
+                        path.move(to: CGPoint(x: centerX, y: centerY - crossLength/2))
+                        path.addLine(to: CGPoint(x: centerX, y: centerY + crossLength/2))
+                    }
+                    .stroke(Color.white.opacity(0.95), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    // Small center dot
+                    Circle()
+                        .fill(Color.white.opacity(0.95))
+                        .frame(width: 4, height: 4)
+                        .position(x: centerX, y: centerY)
                 }
-                
-
             }
         }
     }

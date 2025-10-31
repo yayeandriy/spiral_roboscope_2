@@ -38,6 +38,14 @@ struct ARSessionView: View {
     }
     @State private var frameOriginAnchor: AnchorEntity?
     
+    // Manual Two-Point Origin placement
+    private enum ManualPlacementState { case inactive, placeFirst, placeSecond, readyToApply }
+    @State private var manualPlacementState: ManualPlacementState = .inactive
+    @State private var manualFirstPoint: SIMD3<Float>? = nil
+    @State private var manualSecondPoint: SIMD3<Float>? = nil
+    @State private var manualFirstAnchor: AnchorEntity? = nil
+    @State private var manualSecondAnchor: AnchorEntity? = nil
+    
     // Reference model state
     @State private var showReferenceModel = false
     @State private var referenceModelAnchor: AnchorEntity?
@@ -266,8 +274,8 @@ struct ARSessionView: View {
             .allowsHitTesting(true)
             .edgesIgnoringSafeArea(.all)
 
-            // Target overlay (same as Scan)
-            TargetOverlayView()
+            // Target overlay (switch to crosshair in manual placement mode)
+            TargetOverlayView(style: manualPlacementState == .inactive ? .brackets : .cross)
                 .allowsHitTesting(false)
                 .zIndex(1)
 
@@ -453,11 +461,18 @@ struct ARSessionView: View {
                         } label: {
                             Label("Scan", systemImage: "scanner")
                         }
-                        Button {
-                            // Placeholder for Manual Two Points
-                            errorMessage = "Manual Two Points - coming soon"
-                        } label: {
-                            Label("Manual Two Points", systemImage: "point.2.connected.trianglepath.filled")
+                        if manualPlacementState == .inactive {
+                            Button {
+                                enterManualTwoPointsMode()
+                            } label: {
+                                Label("Manual Two Points", systemImage: "point.2.connected.trianglepath.filled")
+                            }
+                        } else {
+                            Button(role: .destructive) {
+                                cancelManualTwoPointsMode()
+                            } label: {
+                                Label("Cancel Manual Placement", systemImage: "xmark.circle")
+                            }
                         }
                         Button {
                             // Placeholder for Manual Freehand Moving
@@ -475,14 +490,26 @@ struct ARSessionView: View {
 
                     Spacer()
 
-                    // Plus button (center)
-                    Button { createAndPersistMarker() } label: {
-                        Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
-                            .font(.system(size: 36))
-                            .frame(width: 80, height: 80)
+                    // Center action button
+                    if manualPlacementState == .inactive {
+                        Button { createAndPersistMarker() } label: {
+                            Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
+                                .font(.system(size: 36))
+                                .frame(width: 80, height: 80)
+                        }
+                        .buttonStyle(.plain)
+                        .lgCircle(tint: .white)
+                    } else {
+                        Button {
+                            manualPlacementPrimaryAction()
+                        } label: {
+                            Text(manualPlacementButtonTitle())
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(minWidth: 200, minHeight: 54)
+                        }
+                        .buttonStyle(.plain)
+                        .lgCapsule(tint: .blue)
                     }
-                    .buttonStyle(.plain)
-                    .lgCircle(tint: .white)
 
                     Spacer()
                 }
@@ -523,6 +550,121 @@ struct ARSessionView: View {
             )
         }
         .navigationBarBackButtonHidden()
+    }
+
+    // MARK: - Manual Two-Point Placement
+    private func enterManualTwoPointsMode() {
+        // Reset any previous points
+        removeManualAnchors()
+        manualFirstPoint = nil
+        manualSecondPoint = nil
+        manualPlacementState = .placeFirst
+        // Hide markers and gizmo
+        markerService.setMarkersVisible(false)
+        frameOriginAnchor?.isEnabled = false
+    }
+
+    private func cancelManualTwoPointsMode() {
+        manualPlacementState = .inactive
+        // Remove helper anchors
+        removeManualAnchors()
+        // Show markers and gizmo again
+        markerService.setMarkersVisible(true)
+        frameOriginAnchor?.isEnabled = true
+    }
+
+    private func manualPlacementButtonTitle() -> String {
+        switch manualPlacementState {
+        case .placeFirst: return "Place First Point"
+        case .placeSecond: return "Place Second Point"
+        case .readyToApply: return "Apply"
+        case .inactive: return ""
+        }
+    }
+
+    private func manualPlacementPrimaryAction() {
+        switch manualPlacementState {
+        case .placeFirst:
+            if let p = raycastFromScreenCenter() {
+                placeManualPoint(p, color: .red, isFirst: true)
+                manualFirstPoint = p
+                manualPlacementState = .placeSecond
+            }
+        case .placeSecond:
+            if let p = raycastFromScreenCenter() {
+                placeManualPoint(p, color: .blue, isFirst: false)
+                manualSecondPoint = p
+                manualPlacementState = .readyToApply
+            }
+        case .readyToApply:
+            applyManualTwoPointOrigin()
+        case .inactive:
+            break
+        }
+    }
+
+    private func raycastFromScreenCenter() -> SIMD3<Float>? {
+        guard let arView = arView else { return nil }
+        let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+        // Prefer existing planes; fall back to estimated
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: .any) {
+            let results = arView.session.raycast(query)
+            if let first = results.first {
+                let t = first.worldTransform
+                return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            }
+        }
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: .any) {
+            let results = arView.session.raycast(query)
+            if let first = results.first {
+                let t = first.worldTransform
+                return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            }
+        }
+        return nil
+    }
+
+    private func placeManualPoint(_ position: SIMD3<Float>, color: UIColor, isFirst: Bool) {
+        guard let arView = arView else { return }
+    var t = matrix_identity_float4x4
+    t.columns.3 = SIMD4<Float>(position.x, position.y, position.z, 1)
+    let anchor = AnchorEntity(world: t)
+        let sphere = ModelEntity(mesh: .generateSphere(radius: 0.02), materials: [SimpleMaterial(color: color, isMetallic: false)])
+        anchor.addChild(sphere)
+        arView.scene.addAnchor(anchor)
+        if isFirst { manualFirstAnchor = anchor } else { manualSecondAnchor = anchor }
+    }
+
+    private func removeManualAnchors() {
+        if let a = manualFirstAnchor { arView?.scene.removeAnchor(a) }
+        if let a = manualSecondAnchor { arView?.scene.removeAnchor(a) }
+        manualFirstAnchor = nil
+        manualSecondAnchor = nil
+    }
+
+    private func applyManualTwoPointOrigin() {
+        guard let p1 = manualFirstPoint, let p2 = manualSecondPoint else { return }
+        // Compute yaw so +Z points toward p2 on XZ plane
+        let dir = SIMD3<Float>(p2.x - p1.x, 0, p2.z - p1.z)
+        var forward = dir
+        let len = simd_length(forward)
+        if len >= 1e-4 {
+            forward /= len
+        } else {
+            forward = SIMD3<Float>(0, 0, 1)
+        }
+        let yaw = atan2(forward.x, forward.z)
+        let rotation = simd_quatf(angle: yaw, axis: SIMD3<Float>(0, 1, 0))
+    var transform = float4x4(rotation)
+    transform.columns.3 = SIMD4<Float>(p1.x, p1.y, p1.z, 1)
+        
+        // Apply new FrameOrigin
+        frameOriginTransform = transform
+        placeFrameOriginGizmo(at: transform)
+        updateMarkersForNewFrameOrigin()
+        
+        // Exit manual mode and restore UI
+        cancelManualTwoPointsMode()
     }
     
     // MARK: - Registration Progress Overlay

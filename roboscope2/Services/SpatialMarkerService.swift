@@ -267,6 +267,13 @@ final class SpatialMarkerService: ObservableObject {
         
         markers.removeAll()
     }
+
+    /// Show or hide all markers visually without removing them from the scene
+    func setMarkersVisible(_ visible: Bool) {
+        for marker in markers {
+            marker.anchorEntity.isEnabled = visible
+        }
+    }
     
     // MARK: - Marker Info
     
