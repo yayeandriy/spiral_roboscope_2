@@ -45,6 +45,10 @@ struct ARSessionView: View {
     @State private var manualSecondPoint: SIMD3<Float>? = nil
     @State private var manualFirstAnchor: AnchorEntity? = nil
     @State private var manualSecondAnchor: AnchorEntity? = nil
+    @State private var manualFirstPreferredAlignment: ARRaycastQuery.TargetAlignment? = nil
+    @State private var manualSecondPreferredAlignment: ARRaycastQuery.TargetAlignment? = nil
+    @State private var selectedManualPointIndex: Int? = nil // 1 or 2
+    @State private var manualPointMoveTimer: Timer? = nil
     
     // Reference model state
     @State private var showReferenceModel = false
@@ -98,6 +102,10 @@ struct ARSessionView: View {
                 let tracking = Timer(timeInterval: 0.1, repeats: true) { _ in
                     // print("[Timer] Marker tracking tick")
                     checkMarkersInTarget()
+                    // While holding to move a manual point, freeze selection to avoid drops
+                    if !(isHoldingScreen && manualPlacementState != .inactive) {
+                        updateManualPointSelection()
+                    }
                 }
                 RunLoop.main.add(tracking, forMode: .common)
                 markerTrackingTimer = tracking
@@ -151,6 +159,7 @@ struct ARSessionView: View {
                 autoDropTimer = nil
                 autoDropAttempts = 0
                 stopMovingMarker()
+                endManualPointMove()
                 endARSession()
             }
             .onChange(of: arView) { newValue in
@@ -162,6 +171,10 @@ struct ARSessionView: View {
             // Invisible two-finger overlay to detect two-finger contact immediately
             TwoFingerTouchOverlay(
                 onStart: {
+                    if manualPlacementState != .inactive {
+                        // Ignore two-finger in manual mode for now
+                        return
+                    }
                     // Two-finger whole-marker move
                     guard !isTwoFingers else { return }
                     isTwoFingers = true
@@ -186,6 +199,14 @@ struct ARSessionView: View {
                     }
                 },
                 onOneFingerStart: {
+                    if manualPlacementState != .inactive {
+                        // Begin moving selected manual point (if any)
+                        if selectedManualPointIndex != nil {
+                            isHoldingScreen = true
+                            startManualPointMove()
+                        }
+                        return
+                    }
                     // Start one-finger edge movement with grace already applied inside overlay
                     if !isTwoFingers && moveUpdateTimer == nil {
                         isHoldingScreen = true
@@ -199,6 +220,12 @@ struct ARSessionView: View {
                     }
                 },
                 onOneFingerEnd: {
+                    if manualPlacementState != .inactive {
+                        // End moving manual point
+                        isHoldingScreen = false
+                        endManualPointMove()
+                        return
+                    }
                     // End one-finger edge move if not in two-finger mode
                     if !isTwoFingers {
                         isHoldingScreen = false
@@ -232,42 +259,50 @@ struct ARSessionView: View {
                     }
                 },
                 onChange: { translation, scale in
+                    if manualPlacementState != .inactive {
+                        // Drag not used for manual point; movement is by cross + hold
+                        return
+                    }
                     // Stream pan/pinch changes
                     currentDrag = translation
                     currentScale = scale
                 },
                 onEnd: {
-                    // Two-finger ended: stop whole-marker movement
-                    if isTwoFingers {
-                        isTwoFingers = false
-                        isHoldingScreen = false
-                        if let (backendId, version, updatedNodes) = markerService.endTransform() {
-                            // Transform to FrameOrigin coordinates before persisting
-                            let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
-                            
-                            // Persist updated marker to backend
-                            Task {
-                                do {
-                                    _ = try await markerApi.updateMarkerPosition(
-                                        id: backendId,
-                                        workSessionId: session.id,
-                                        points: frameOriginPoints,
-                                        version: version,
-                                        customProps: nil
-                                    )
-                                    print("[ARSession] Updated marker transform in FrameOrigin coordinates")
-                                    
-                                    // Refresh marker details after transform update
-                                    await markerService.updateDetailsAfterTransform(backendId: backendId)
-                                } catch {
-                                    // Silently handle error
+                    if manualPlacementState != .inactive {
+                        // Ignore two-finger end in manual mode
+                    } else {
+                        // Two-finger ended: stop whole-marker movement
+                        if isTwoFingers {
+                            isTwoFingers = false
+                            isHoldingScreen = false
+                            if let (backendId, version, updatedNodes) = markerService.endTransform() {
+                                // Transform to FrameOrigin coordinates before persisting
+                                let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
+                                
+                                // Persist updated marker to backend
+                                Task {
+                                    do {
+                                        _ = try await markerApi.updateMarkerPosition(
+                                            id: backendId,
+                                            workSessionId: session.id,
+                                            points: frameOriginPoints,
+                                            version: version,
+                                            customProps: nil
+                                        )
+                                        print("[ARSession] Updated marker transform in FrameOrigin coordinates")
+                                        
+                                        // Refresh marker details after transform update
+                                        await markerService.updateDetailsAfterTransform(backendId: backendId)
+                                    } catch {
+                                        // Silently handle error
+                                    }
                                 }
                             }
+                            moveUpdateTimer?.invalidate()
+                            moveUpdateTimer = nil
+                            currentScale = 1.0
+                            currentDrag = .zero
                         }
-                        moveUpdateTimer?.invalidate()
-                        moveUpdateTimer = nil
-                        currentScale = 1.0
-                        currentDrag = .zero
                     }
                 }
             )
@@ -558,10 +593,14 @@ struct ARSessionView: View {
         removeManualAnchors()
         manualFirstPoint = nil
         manualSecondPoint = nil
+        manualFirstPreferredAlignment = nil
+        manualSecondPreferredAlignment = nil
         manualPlacementState = .placeFirst
         // Hide markers and gizmo
         markerService.setMarkersVisible(false)
         frameOriginAnchor?.isEnabled = false
+        selectedManualPointIndex = nil
+        print("[ManualOrigin][State] Enter manual mode")
     }
 
     private func cancelManualTwoPointsMode() {
@@ -571,6 +610,9 @@ struct ARSessionView: View {
         // Show markers and gizmo again
         markerService.setMarkersVisible(true)
         frameOriginAnchor?.isEnabled = true
+        selectedManualPointIndex = nil
+        endManualPointMove()
+        print("[ManualOrigin][State] Cancel manual mode")
     }
 
     private func manualPlacementButtonTitle() -> String {
@@ -585,16 +627,20 @@ struct ARSessionView: View {
     private func manualPlacementPrimaryAction() {
         switch manualPlacementState {
         case .placeFirst:
-            if let p = raycastFromScreenCenter() {
+            if let (p, align) = prioritizedRaycastFromCenter() {
                 placeManualPoint(p, color: .red, isFirst: true)
                 manualFirstPoint = p
+                manualFirstPreferredAlignment = align
                 manualPlacementState = .placeSecond
+                print(String(format: "[ManualOrigin][Place] First point %@ at (%.3f, %.3f, %.3f)", String(describing: align), p.x, p.y, p.z))
             }
         case .placeSecond:
-            if let p = raycastFromScreenCenter() {
+            if let (p, align) = prioritizedRaycastFromCenter() {
                 placeManualPoint(p, color: .blue, isFirst: false)
                 manualSecondPoint = p
+                manualSecondPreferredAlignment = align
                 manualPlacementState = .readyToApply
+                print(String(format: "[ManualOrigin][Place] Second point %@ at (%.3f, %.3f, %.3f)", String(describing: align), p.x, p.y, p.z))
             }
         case .readyToApply:
             applyManualTwoPointOrigin()
@@ -611,6 +657,7 @@ struct ARSessionView: View {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
+                print(String(format: "[ManualOrigin][Raycast] existing any -> (%.3f, %.3f, %.3f)", t.columns.3.x, t.columns.3.y, t.columns.3.z))
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
@@ -618,9 +665,96 @@ struct ARSessionView: View {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
+                print(String(format: "[ManualOrigin][Raycast] estimated any -> (%.3f, %.3f, %.3f)", t.columns.3.x, t.columns.3.y, t.columns.3.z))
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
+        print("[ManualOrigin][Raycast] No hit (any)")
+        return nil
+    }
+
+    /// Raycast helper with explicit alignment preference. Used by placement and as a fallback.
+    private func raycastFromScreenCenter(preferredAlignment: ARRaycastQuery.TargetAlignment) -> SIMD3<Float>? {
+        guard let arView = arView else { return nil }
+        let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+        // Prefer existing plane geometry for stability
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: preferredAlignment) {
+            let results = arView.session.raycast(query)
+            if let first = results.first {
+                let t = first.worldTransform
+                print(String(format: "[ManualOrigin][Raycast] existing %@ -> (%.3f, %.3f, %.3f)", String(describing: preferredAlignment), t.columns.3.x, t.columns.3.y, t.columns.3.z))
+                return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            }
+        }
+        // Then fall back to estimated plane with the same alignment
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: preferredAlignment) {
+            let results = arView.session.raycast(query)
+            if let first = results.first {
+                let t = first.worldTransform
+                print(String(format: "[ManualOrigin][Raycast] estimated %@ -> (%.3f, %.3f, %.3f)", String(describing: preferredAlignment), t.columns.3.x, t.columns.3.y, t.columns.3.z))
+                return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            }
+        }
+        // Last resort: existing any, then estimated any
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: .any) {
+            let results = arView.session.raycast(query)
+            if let first = results.first {
+                let t = first.worldTransform
+                print(String(format: "[ManualOrigin][Raycast] existing any (fallback) -> (%.3f, %.3f, %.3f)", t.columns.3.x, t.columns.3.y, t.columns.3.z))
+                return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            }
+        }
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: .any) {
+            let results = arView.session.raycast(query)
+            if let first = results.first {
+                let t = first.worldTransform
+                print(String(format: "[ManualOrigin][Raycast] estimated any (fallback) -> (%.3f, %.3f, %.3f)", t.columns.3.x, t.columns.3.y, t.columns.3.z))
+                return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            }
+        }
+        print(String(format: "[ManualOrigin][Raycast] No hit (preferred=%@)", String(describing: preferredAlignment)))
+        return nil
+    }
+
+    /// Movement-focused raycast: prefer existing plane geometry only; skip if no stable surface under crosshair.
+    private func raycastFromCenterForMove(preferredAlignment: ARRaycastQuery.TargetAlignment) -> SIMD3<Float>? {
+        guard let arView = arView else { return nil }
+        let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: preferredAlignment) {
+            let results = arView.session.raycast(query)
+            if let first = results.first {
+                let t = first.worldTransform
+                print(String(format: "[ManualOrigin][Raycast][Move] existing %@ -> (%.3f, %.3f, %.3f)", String(describing: preferredAlignment), t.columns.3.x, t.columns.3.y, t.columns.3.z))
+                return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            }
+        }
+        // Optional: if needed, allow any alignment on existing planes
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: .any) {
+            let results = arView.session.raycast(query)
+            if let first = results.first {
+                let t = first.worldTransform
+                print(String(format: "[ManualOrigin][Raycast][Move] existing any -> (%.3f, %.3f, %.3f)", t.columns.3.x, t.columns.3.y, t.columns.3.z))
+                return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            }
+        }
+        // As a fallback, allow estimated plane with preferred alignment (comment out if too jittery)
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: preferredAlignment) {
+            let results = arView.session.raycast(query)
+            if let first = results.first {
+                let t = first.worldTransform
+                print(String(format: "[ManualOrigin][Raycast][Move] estimated %@ -> (%.3f, %.3f, %.3f)", String(describing: preferredAlignment), t.columns.3.x, t.columns.3.y, t.columns.3.z))
+                return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+            }
+        }
+        print(String(format: "[ManualOrigin][Raycast][Move] No hit (preferred=%@)", String(describing: preferredAlignment)))
+        return nil
+    }
+
+    // Try horizontal first (floors/tables), then vertical (walls), then any. Returns position and chosen alignment.
+    private func prioritizedRaycastFromCenter() -> (SIMD3<Float>, ARRaycastQuery.TargetAlignment)? {
+        if let p = raycastFromScreenCenter(preferredAlignment: .horizontal) { return (p, .horizontal) }
+        if let p = raycastFromScreenCenter(preferredAlignment: .vertical) { return (p, .vertical) }
+        if let p = raycastFromScreenCenter() { return (p, .any) }
         return nil
     }
 
@@ -630,6 +764,9 @@ struct ARSessionView: View {
     t.columns.3 = SIMD4<Float>(position.x, position.y, position.z, 1)
     let anchor = AnchorEntity(world: t)
         let sphere = ModelEntity(mesh: .generateSphere(radius: 0.02), materials: [SimpleMaterial(color: color, isMetallic: false)])
+        sphere.name = isFirst ? "manual_point_1" : "manual_point_2"
+        // Enable hit-testing against the sphere to improve selection robustness
+        sphere.generateCollisionShapes(recursive: true)
         anchor.addChild(sphere)
         arView.scene.addAnchor(anchor)
         if isFirst { manualFirstAnchor = anchor } else { manualSecondAnchor = anchor }
@@ -657,6 +794,12 @@ struct ARSessionView: View {
         let rotation = simd_quatf(angle: yaw, axis: SIMD3<Float>(0, 1, 0))
     var transform = float4x4(rotation)
     transform.columns.3 = SIMD4<Float>(p1.x, p1.y, p1.z, 1)
+        print(String(format: "[ManualOrigin][Apply] p1=(%.3f, %.3f, %.3f) p2=(%.3f, %.3f, %.3f) yaw=%.3f", p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, yaw))
+        print("[ManualOrigin][Apply] Transform:")
+        print("[ManualOrigin][Apply] [\(transform.columns.0)]")
+        print("[ManualOrigin][Apply] [\(transform.columns.1)]")
+        print("[ManualOrigin][Apply] [\(transform.columns.2)]")
+        print("[ManualOrigin][Apply] [\(transform.columns.3)]")
         
         // Apply new FrameOrigin
         frameOriginTransform = transform
@@ -665,6 +808,162 @@ struct ARSessionView: View {
         
         // Exit manual mode and restore UI
         cancelManualTwoPointsMode()
+    }
+
+    // MARK: - Manual point selection + moving
+    private func updateManualPointSelection() {
+        guard manualPlacementState != .inactive, let arView = arView, let frame = arView.session.currentFrame else { return }
+        // First, try a precise hit-test at the screen center against our manual spheres
+        if let hitIdx = manualPointIndexHitAtCenter(arView: arView) {
+            if hitIdx != selectedManualPointIndex {
+                selectedManualPointIndex = hitIdx
+                updateManualPointColors()
+                print("[ManualOrigin][Select] Hit center -> index = \(hitIdx)")
+            }
+            return
+        }
+        // Fallback: Determine which point (if any) is under crosshair by projecting to screen
+        let center = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+        let threshold: CGFloat = 36
+        var nearestIndex: Int? = nil
+        var nearestDist: CGFloat = .infinity
+        if let a1 = manualFirstAnchor {
+            let wp = a1.position(relativeTo: nil)
+            if let sp = projectWorldToScreen(worldPosition: SIMD3<Float>(wp.x, wp.y, wp.z), frame: frame, arView: arView) {
+                let d = hypot(sp.x - center.x, sp.y - center.y)
+                print(String(format: "[ManualOrigin][Select] First dist=%.1f (th=%.1f)", d, threshold))
+                if d < threshold && d < nearestDist { nearestDist = d; nearestIndex = 1 }
+            }
+        }
+        if let a2 = manualSecondAnchor {
+            let wp = a2.position(relativeTo: nil)
+            if let sp = projectWorldToScreen(worldPosition: SIMD3<Float>(wp.x, wp.y, wp.z), frame: frame, arView: arView) {
+                let d = hypot(sp.x - center.x, sp.y - center.y)
+                print(String(format: "[ManualOrigin][Select] Second dist=%.1f (th=%.1f)", d, threshold))
+                if d < threshold && d < nearestDist { nearestDist = d; nearestIndex = 2 }
+            }
+        }
+        if nearestIndex != selectedManualPointIndex {
+            selectedManualPointIndex = nearestIndex
+            updateManualPointColors()
+            print("[ManualOrigin][Select] Selected index = \(nearestIndex.map(String.init) ?? "nil")")
+        }
+    }
+
+    private func manualPointIndexHitAtCenter(arView: ARView) -> Int? {
+        let center = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+        // entity(at:) returns the topmost entity with collisions at that screen point
+        if let entity = arView.entity(at: center) {
+            if entity.name == "manual_point_1" { return 1 }
+            if entity.name == "manual_point_2" { return 2 }
+            // In case the returned entity is not the sphere but a child/parent, walk up one level
+            if let parent = entity.parent {
+                if parent.name == "manual_point_1" { return 1 }
+                if parent.name == "manual_point_2" { return 2 }
+            }
+        }
+        return nil
+    }
+
+    private func updateManualPointColors() {
+        func setColor(anchor: AnchorEntity?, normalColor: UIColor, selected: Bool) {
+            guard let anchor = anchor else { return }
+            if let sphere = anchor.children.first(where: { $0.name.hasPrefix("manual_point_") }) as? ModelEntity {
+                let color = selected ? UIColor.black : normalColor
+                sphere.model?.materials = [SimpleMaterial(color: color, isMetallic: false)]
+            }
+        }
+        setColor(anchor: manualFirstAnchor, normalColor: .red, selected: selectedManualPointIndex == 1)
+        setColor(anchor: manualSecondAnchor, normalColor: .blue, selected: selectedManualPointIndex == 2)
+    }
+
+    private func startManualPointMove() {
+        guard manualPointMoveTimer == nil else { return }
+        // Move at 5 Hz to reduce jitter and stabilize hits
+        let timer = Timer(timeInterval: 0.2, repeats: true) { _ in
+            moveSelectedPointToCrossRaycast()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        manualPointMoveTimer = timer
+        print("[ManualOrigin][Move] Start move loop")
+    }
+
+    private func endManualPointMove() {
+        manualPointMoveTimer?.invalidate()
+        manualPointMoveTimer = nil
+        print("[ManualOrigin][Move] End move loop")
+    }
+
+    private func moveSelectedPointToCrossRaycast() {
+        guard let idx = selectedManualPointIndex else { return }
+        // Use per-point alignment chosen at placement; fallback to horizontal, then any.
+        let preferred: ARRaycastQuery.TargetAlignment = {
+            if idx == 1, let a = manualFirstPreferredAlignment { return a }
+            if idx == 2, let a = manualSecondPreferredAlignment { return a }
+            return .horizontal
+        }()
+        let newPos = raycastFromCenterForMove(preferredAlignment: preferred)
+        guard let newPos else { return }
+        // Optional: reject large jumps between discrete ticks
+        if let old = (idx == 1 ? manualFirstPoint : manualSecondPoint) {
+            let jump = simd_length(newPos - old)
+            if jump > 0.5 { // 50 cm between 0.2s ticks is suspicious
+                print(String(format: "[ManualOrigin][Move] Ignored jump=%.3f m", jump))
+                return
+            }
+        }
+        var t = matrix_identity_float4x4
+        t.columns.3 = SIMD4<Float>(newPos.x, newPos.y, newPos.z, 1)
+        if idx == 1 {
+            if let old = manualFirstPoint {
+                print(String(format: "[ManualOrigin][Move] First Δ=(%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)", newPos.x-old.x, newPos.y-old.y, newPos.z-old.z, newPos.x, newPos.y, newPos.z))
+            } else {
+                print(String(format: "[ManualOrigin][Move] First -> (%.3f, %.3f, %.3f)", newPos.x, newPos.y, newPos.z))
+            }
+            manualFirstPoint = newPos
+            if let a = manualFirstAnchor {
+                a.transform = Transform(matrix: t)
+                let ap = a.position(relativeTo: nil)
+                let diff = SIMD3<Float>(ap.x - newPos.x, ap.y - newPos.y, ap.z - newPos.z)
+                if simd_length(diff) > 1e-4 {
+                    print(String(format: "[ManualOrigin][Move][Verify] Anchor-Target Δ=(%.4f, %.4f, %.4f)", diff.x, diff.y, diff.z))
+                }
+            }
+        } else if idx == 2 {
+            if let old = manualSecondPoint {
+                print(String(format: "[ManualOrigin][Move] Second Δ=(%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)", newPos.x-old.x, newPos.y-old.y, newPos.z-old.z, newPos.x, newPos.y, newPos.z))
+            } else {
+                print(String(format: "[ManualOrigin][Move] Second -> (%.3f, %.3f, %.3f)", newPos.x, newPos.y, newPos.z))
+            }
+            manualSecondPoint = newPos
+            if let a = manualSecondAnchor {
+                a.transform = Transform(matrix: t)
+                let ap = a.position(relativeTo: nil)
+                let diff = SIMD3<Float>(ap.x - newPos.x, ap.y - newPos.y, ap.z - newPos.z)
+                if simd_length(diff) > 1e-4 {
+                    print(String(format: "[ManualOrigin][Move][Verify] Anchor-Target Δ=(%.4f, %.4f, %.4f)", diff.x, diff.y, diff.z))
+                }
+            }
+        }
+    }
+
+    private func projectWorldToScreen(worldPosition: SIMD3<Float>, frame: ARFrame, arView: ARView) -> CGPoint? {
+        let camera = frame.camera
+        // Use the current interface orientation instead of hard-coding portrait
+        let orientation = arView.window?.windowScene?.interfaceOrientation ?? .portrait
+        let viewMatrix = camera.viewMatrix(for: orientation)
+        let projectionMatrix = camera.projectionMatrix(for: orientation, viewportSize: arView.bounds.size, zNear: 0.001, zFar: 1000)
+        let worldPos4 = SIMD4<Float>(worldPosition.x, worldPosition.y, worldPosition.z, 1.0)
+        let viewPos = viewMatrix * worldPos4
+        // Discard points behind the camera
+        if viewPos.z > 0 { return nil }
+        let projPos = projectionMatrix * viewPos
+        guard projPos.w != 0 else { return nil }
+        let ndcX = projPos.x / projPos.w
+        let ndcY = projPos.y / projPos.w
+        let screenX = (ndcX + 1.0) * 0.5 * Float(arView.bounds.width)
+        let screenY = (1.0 - ndcY) * 0.5 * Float(arView.bounds.height)
+        return CGPoint(x: CGFloat(screenX), y: CGFloat(screenY))
     }
     
     // MARK: - Registration Progress Overlay
