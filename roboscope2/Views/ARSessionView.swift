@@ -54,6 +54,8 @@ struct ARSessionView: View {
     @State private var isTwoFingers = false
     @State private var moveUpdateTimer: Timer?
     @State private var markerTrackingTimer: Timer?
+    @State private var autoDropTimer: Timer?
+    @State private var autoDropAttempts: Int = 0
     // Transform state (for finger-driven move/resize)
     @State private var currentDrag: CGSize = .zero
     @State private var currentScale: CGFloat = 1.0
@@ -81,6 +83,8 @@ struct ARSessionView: View {
                 // Place initial frame origin at AR session origin
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     placeFrameOriginGizmo(at: frameOriginTransform)
+                    // Start auto-drop with retries so it lands as soon as a plane is available
+                    startAutoDropFrameOrigin()
                 }
                 // Start tracking markers continuously
                 let tracking = Timer(timeInterval: 0.1, repeats: true) { _ in
@@ -135,6 +139,9 @@ struct ARSessionView: View {
             .onDisappear {
                 markerTrackingTimer?.invalidate()
                 markerTrackingTimer = nil
+                autoDropTimer?.invalidate()
+                autoDropTimer = nil
+                autoDropAttempts = 0
                 stopMovingMarker()
                 endARSession()
             }
@@ -439,19 +446,35 @@ struct ARSessionView: View {
                 }
                 
                 HStack(spacing: 20) {
-                    // Scan button (left)
-                    Button {
-                        showScanView = true
+                    // Setup menu (left)
+                    Menu {
+                        Button {
+                            showScanView = true
+                        } label: {
+                            Label("Scan", systemImage: "scanner")
+                        }
+                        Button {
+                            // Placeholder for Manual Two Points
+                            errorMessage = "Manual Two Points - coming soon"
+                        } label: {
+                            Label("Manual Two Points", systemImage: "point.2.connected.trianglepath.filled")
+                        }
+                        Button {
+                            // Placeholder for Manual Freehand Moving
+                            errorMessage = "Manual Freehand Moving - coming soon"
+                        } label: {
+                            Label("Manual Freehand", systemImage: "hand.raised")
+                        }
                     } label: {
-                        Image(systemName: "scanner")
+                        Image(systemName: "slider.horizontal.3")
                             .font(.system(size: 24))
                             .frame(width: 60, height: 60)
                     }
                     .buttonStyle(.plain)
                     .lgCircle(tint: .blue)
-                    
+
                     Spacer()
-                    
+
                     // Plus button (center)
                     Button { createAndPersistMarker() } label: {
                         Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
@@ -460,7 +483,7 @@ struct ARSessionView: View {
                     }
                     .buttonStyle(.plain)
                     .lgCircle(tint: .white)
-                    
+
                     Spacer()
                 }
                 .padding(.horizontal, 16)
@@ -1140,6 +1163,45 @@ struct ARSessionView: View {
         
         // No floor found
         print("[ARSession] ⚠️ Could not find floor. Move device to scan horizontal surfaces.")
+    }
+
+    /// Start auto-dropping the FrameOrigin with retries until a plane is found or attempts are exhausted
+    private func startAutoDropFrameOrigin(maxAttempts: Int = 15, interval: TimeInterval = 0.3) {
+        // Prevent multiple timers
+        autoDropTimer?.invalidate()
+        autoDropAttempts = 0
+
+        func attempt() {
+            autoDropAttempts += 1
+            let before = autoDropAttempts
+            dropFrameOriginOnFloor()
+            // Heuristic: if we have a non-identity transform on the gizmo anchor, consider it a success
+            if let anchor = frameOriginAnchor {
+                let t = anchor.transform.matrix
+                let translation = t.columns.3
+                let hasMoved = !(translation.x == 0 && translation.y == 0 && translation.z == 0)
+                if hasMoved {
+                    autoDropTimer?.invalidate()
+                    autoDropTimer = nil
+                    print("[ARSession] ✅ Auto-drop succeeded after \(before) attempt(s)")
+                    return
+                }
+            }
+            if before >= maxAttempts {
+                autoDropTimer?.invalidate()
+                autoDropTimer = nil
+                print("[ARSession] ⚠️ Auto-drop attempts exhausted; keep FrameOrigin at current position")
+            }
+        }
+
+        // First immediate attempt
+        attempt()
+        // Schedule subsequent attempts
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            attempt()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        autoDropTimer = timer
     }
     
     // MARK: - Coordinate System Transformation
