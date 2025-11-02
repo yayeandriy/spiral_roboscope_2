@@ -45,6 +45,7 @@ struct ARSessionView: View {
     @State private var showScanView = false
     @State private var isRegistering = false
     @State private var registrationProgress: String = ""
+    @State private var showActionsDialog: Bool = false
     @State private var frameOriginTransform: simd_float4x4 = matrix_identity_float4x4 {
         didSet {
             // Automatically update all entities when FrameOrigin changes
@@ -222,7 +223,7 @@ struct ARSessionView: View {
                     }
                 }
             )
-            .allowsHitTesting(true)
+            .allowsHitTesting(!showActionsDialog)
             .edgesIgnoringSafeArea(.all)
 
             // Target overlay (switch to crosshair in manual placement mode)
@@ -233,69 +234,9 @@ struct ARSessionView: View {
             // Top controls styled like Scan + left 'more' menu in liquid glass
             VStack {
                 HStack(spacing: 12) {
-                    // Top-left context menu (ellipsis)
-                    Menu {
-                        Toggle(isOn: $showReferenceModel) {
-                            Label("Show Reference Model", systemImage: "cube.box")
-                        }
-                        .onChange(of: showReferenceModel) { oldValue, newValue in
-                            if newValue {
-                                placeModelAtFrameOrigin()
-                            } else {
-                                removeReferenceModel()
-                            }
-                        }
-                        
-                        Toggle(isOn: $showScanModel) {
-                            Label("Show Scanned Model", systemImage: "camera.metering.matrix")
-                        }
-                        .onChange(of: showScanModel) { oldValue, newValue in
-                            if newValue {
-                                placeScanModelAtFrameOrigin()
-                            } else {
-                                removeScanModel()
-                            }
-                        }
-                        
-                        Divider()
-                        
-                        Button {
-                            dropFrameOriginOnFloor()
-                        } label: {
-                            Label("Drop FrameOrigin", systemImage: "arrow.down.to.line")
-                        }
-                        
-                        Button {
-                            Task { await useSavedScan() }
-                        } label: {
-                            Label("Use saved scan", systemImage: "cube.transparent")
-                        }
-                        
-                        Divider()
-
-                        // Move Two Point setup command into the main (ellipsis) menu
-                        if manualPlacementState == .inactive {
-                            Button {
-                                enterManualTwoPointsMode()
-                            } label: {
-                                Label("Manual Two Points", systemImage: "point.2.connected.trianglepath.filled")
-                            }
-                        } else {
-                            Button(role: .destructive) {
-                                cancelManualTwoPointsMode()
-                            } label: {
-                                Label("Cancel Manual Placement", systemImage: "xmark.circle")
-                            }
-                        }
-
-                        Divider()
-                        
-                        Button(role: .destructive) {
-                            clearAllMarkersPersisted()
-                        } label: {
-                            Label("Delete All Markers", systemImage: "trash")
-                        }
-                        // Future: add more actions here
+                    // Top-left actions presented via confirmationDialog to avoid gesture interception
+                    Button {
+                        showActionsDialog = true
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 18, weight: .semibold))
@@ -468,6 +409,41 @@ struct ARSessionView: View {
             Button("OK") { errorMessage = nil }
         } message: {
             if let errorMessage = errorMessage { Text(errorMessage) }
+        }
+        .confirmationDialog("Actions", isPresented: $showActionsDialog, titleVisibility: .visible) {
+            // Show/Hide Reference Model
+            Button(showReferenceModel ? "Hide Reference Model" : "Show Reference Model") {
+                showReferenceModel.toggle()
+                if showReferenceModel { placeModelAtFrameOrigin() } else { removeReferenceModel() }
+            }
+
+            // Show/Hide Scanned Model
+            Button(showScanModel ? "Hide Scanned Model" : "Show Scanned Model") {
+                showScanModel.toggle()
+                if showScanModel { placeScanModelAtFrameOrigin() } else { removeScanModel() }
+            }
+
+            // Drop FrameOrigin on floor
+            Button("Drop FrameOrigin", role: .none) {
+                dropFrameOriginOnFloor()
+            }
+
+            // Use saved scan
+            Button("Use saved scan", role: .none) {
+                Task { await useSavedScan() }
+            }
+
+            // Two Point setup
+            if manualPlacementState == .inactive {
+                Button("Manual Two Points") { enterManualTwoPointsMode() }
+            } else {
+                Button("Cancel Manual Placement", role: .destructive) { cancelManualTwoPointsMode() }
+            }
+
+            // Delete all markers
+            Button("Delete All Markers", role: .destructive) {
+                clearAllMarkersPersisted()
+            }
         }
         .sheet(isPresented: $showScanView) {
             SessionScanView(
