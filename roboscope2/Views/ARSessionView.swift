@@ -67,6 +67,7 @@ struct ARSessionView: View {
     @State private var manualSecondPreferredAlignment: ARRaycastQuery.TargetAlignment? = nil
     @State private var selectedManualPointIndex: Int? = nil // 1 or 2
     @State private var manualPointMoveTimer: Timer? = nil
+    @State private var fixedManualMoveScreenPoint: CGPoint? = nil // Fixed screen point captured at movement start
     
     // Reference model state
     @State private var showReferenceModel = false
@@ -788,18 +789,39 @@ struct ARSessionView: View {
 
     private func startManualPointMove() {
         guard manualPointMoveTimer == nil else { return }
-        // Move at 5 Hz to reduce jitter and stabilize hits
-        let timer = Timer(timeInterval: 0.2, repeats: true) { _ in
-            moveSelectedPointToCrossRaycast()
+        // Capture FIXED screen point of the selected sphere to avoid feedback loops (like v1)
+        if let arView, let frame = arView.session.currentFrame, let idx = selectedManualPointIndex {
+            let anchor = (idx == 1) ? manualFirstAnchor : manualSecondAnchor
+            if let a = anchor {
+                let wp = a.position(relativeTo: nil)
+                if let sp = projectWorldToScreen(worldPosition: SIMD3<Float>(wp.x, wp.y, wp.z), frame: frame, arView: arView) {
+                    fixedManualMoveScreenPoint = sp
+                    print("[ManualOrigin][Move] Fixed screen point set to: \(sp)")
+                } else {
+                    // Fallback to screen center
+                    fixedManualMoveScreenPoint = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
+                    print("[ManualOrigin][Move] Projection failed, using screen center as fixed point")
+                }
+            }
+        }
+
+        // Run at ~60 Hz for smooth movement
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
+            if fixedManualMoveScreenPoint != nil {
+                moveSelectedPointUsingFixedScreenPoint()
+            } else {
+                moveSelectedPointToCrossRaycast()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         manualPointMoveTimer = timer
-        print("[ManualOrigin][Move] Start move loop")
+        print("[ManualOrigin][Move] Start move loop (60Hz)")
     }
 
     private func endManualPointMove() {
         manualPointMoveTimer?.invalidate()
         manualPointMoveTimer = nil
+        fixedManualMoveScreenPoint = nil
         print("[ManualOrigin][Move] End move loop")
     }
 
@@ -824,35 +846,135 @@ struct ARSessionView: View {
         var t = matrix_identity_float4x4
         t.columns.3 = SIMD4<Float>(newPos.x, newPos.y, newPos.z, 1)
         if idx == 1 {
+            // Log before/after with [TwoPointMotion] prefix (measure on sphere child in world space)
+            let before: SIMD3<Float> = {
+                if let a = manualFirstAnchor,
+                   let sphere = a.children.first(where: { $0.name == "manual_point_1" }) {
+                    let p = sphere.position(relativeTo: nil)
+                    return SIMD3<Float>(p.x, p.y, p.z)
+                }
+                return manualFirstPoint ?? newPos
+            }()
             if let old = manualFirstPoint {
                 print(String(format: "[ManualOrigin][Move] First Δ=(%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)", newPos.x-old.x, newPos.y-old.y, newPos.z-old.z, newPos.x, newPos.y, newPos.z))
             } else {
                 print(String(format: "[ManualOrigin][Move] First -> (%.3f, %.3f, %.3f)", newPos.x, newPos.y, newPos.z))
             }
+            print(String(format: "[TwoPointMotion] idx=1 before=(%.3f, %.3f, %.3f) after=(%.3f, %.3f, %.3f) source=crosshair", before.x, before.y, before.z, newPos.x, newPos.y, newPos.z))
             manualFirstPoint = newPos
-            if let a = manualFirstAnchor {
-                a.transform = Transform(matrix: t)
-                let ap = a.position(relativeTo: nil)
+            if let a = manualFirstAnchor,
+               let sphere = a.children.first(where: { $0.name == "manual_point_1" }) {
+                // Set the sphere's world transform (avoid anchor composition)
+                sphere.setTransformMatrix(t, relativeTo: nil)
+                let ap = sphere.position(relativeTo: nil)
                 let diff = SIMD3<Float>(ap.x - newPos.x, ap.y - newPos.y, ap.z - newPos.z)
                 if simd_length(diff) > 1e-4 {
                     print(String(format: "[ManualOrigin][Move][Verify] Anchor-Target Δ=(%.4f, %.4f, %.4f)", diff.x, diff.y, diff.z))
                 }
             }
         } else if idx == 2 {
+            // Log before/after with [TwoPointMotion] prefix (measure on sphere child in world space)
+            let before: SIMD3<Float> = {
+                if let a = manualSecondAnchor,
+                   let sphere = a.children.first(where: { $0.name == "manual_point_2" }) {
+                    let p = sphere.position(relativeTo: nil)
+                    return SIMD3<Float>(p.x, p.y, p.z)
+                }
+                return manualSecondPoint ?? newPos
+            }()
             if let old = manualSecondPoint {
                 print(String(format: "[ManualOrigin][Move] Second Δ=(%.3f, %.3f, %.3f) -> (%.3f, %.3f, %.3f)", newPos.x-old.x, newPos.y-old.y, newPos.z-old.z, newPos.x, newPos.y, newPos.z))
             } else {
                 print(String(format: "[ManualOrigin][Move] Second -> (%.3f, %.3f, %.3f)", newPos.x, newPos.y, newPos.z))
             }
+            print(String(format: "[TwoPointMotion] idx=2 before=(%.3f, %.3f, %.3f) after=(%.3f, %.3f, %.3f) source=crosshair", before.x, before.y, before.z, newPos.x, newPos.y, newPos.z))
             manualSecondPoint = newPos
-            if let a = manualSecondAnchor {
-                a.transform = Transform(matrix: t)
-                let ap = a.position(relativeTo: nil)
+            if let a = manualSecondAnchor,
+               let sphere = a.children.first(where: { $0.name == "manual_point_2" }) {
+                // Set the sphere's world transform (avoid anchor composition)
+                sphere.setTransformMatrix(t, relativeTo: nil)
+                let ap = sphere.position(relativeTo: nil)
                 let diff = SIMD3<Float>(ap.x - newPos.x, ap.y - newPos.y, ap.z - newPos.z)
                 if simd_length(diff) > 1e-4 {
                     print(String(format: "[ManualOrigin][Move][Verify] Anchor-Target Δ=(%.4f, %.4f, %.4f)", diff.x, diff.y, diff.z))
                 }
             }
+        }
+    }
+
+    /// Move currently selected point using a FIXED screen point captured at movement start
+    private func moveSelectedPointUsingFixedScreenPoint() {
+        guard let arView, let idx = selectedManualPointIndex, let screenPoint = fixedManualMoveScreenPoint else { return }
+
+        // Use per-point alignment chosen at placement; fallback to horizontal, then any.
+        let preferred: ARRaycastQuery.TargetAlignment = {
+            if idx == 1, let a = manualFirstPreferredAlignment { return a }
+            if idx == 2, let a = manualSecondPreferredAlignment { return a }
+            return .horizontal
+        }()
+
+        // Try existing plane with preferred alignment first
+        func raycast(at p: CGPoint, allowing: ARRaycastQuery.Target, alignment: ARRaycastQuery.TargetAlignment) -> SIMD3<Float>? {
+            guard let q = arView.makeRaycastQuery(from: p, allowing: allowing, alignment: alignment) else { return nil }
+            let results = arView.session.raycast(q)
+            guard let first = results.first else { return nil }
+            let t = first.worldTransform
+            return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+        }
+
+        let newPos =
+            raycast(at: screenPoint, allowing: .existingPlaneGeometry, alignment: preferred) ??
+            raycast(at: screenPoint, allowing: .existingPlaneGeometry, alignment: .any) ??
+            raycast(at: screenPoint, allowing: .estimatedPlane, alignment: preferred) ??
+            raycast(at: screenPoint, allowing: .estimatedPlane, alignment: .any)
+
+        guard let newPos else { return }
+
+        // Optional: reject large jumps
+        if let old = (idx == 1 ? manualFirstPoint : manualSecondPoint) {
+            let jump = simd_length(newPos - old)
+            if jump > 0.5 {
+                print(String(format: "[ManualOrigin][Move][Fixed] Ignored jump=%.3f m", jump))
+                return
+            }
+        }
+
+        var t = matrix_identity_float4x4
+        t.columns.3 = SIMD4<Float>(newPos.x, newPos.y, newPos.z, 1)
+        if idx == 1 {
+            let before: SIMD3<Float> = {
+                if let a = manualFirstAnchor,
+                   let sphere = a.children.first(where: { $0.name == "manual_point_1" }) {
+                    let p = sphere.position(relativeTo: nil)
+                    return SIMD3<Float>(p.x, p.y, p.z)
+                }
+                return manualFirstPoint ?? newPos
+            }()
+            print(String(format: "[TwoPointMotion] idx=1 before=(%.3f, %.3f, %.3f) after=(%.3f, %.3f, %.3f) source=fixed", before.x, before.y, before.z, newPos.x, newPos.y, newPos.z))
+            manualFirstPoint = newPos
+            // Move the sphere child in world space (avoid anchor composition)
+            if let a = manualFirstAnchor,
+               let sphere = a.children.first(where: { $0.name == "manual_point_1" }) {
+                sphere.setTransformMatrix(t, relativeTo: nil)
+            }
+            print(String(format: "[ManualOrigin][Move][Fixed] First -> (%.3f, %.3f, %.3f)", newPos.x, newPos.y, newPos.z))
+        } else {
+            let before: SIMD3<Float> = {
+                if let a = manualSecondAnchor,
+                   let sphere = a.children.first(where: { $0.name == "manual_point_2" }) {
+                    let p = sphere.position(relativeTo: nil)
+                    return SIMD3<Float>(p.x, p.y, p.z)
+                }
+                return manualSecondPoint ?? newPos
+            }()
+            print(String(format: "[TwoPointMotion] idx=2 before=(%.3f, %.3f, %.3f) after=(%.3f, %.3f, %.3f) source=fixed", before.x, before.y, before.z, newPos.x, newPos.y, newPos.z))
+            manualSecondPoint = newPos
+            // Move the sphere child in world space (avoid anchor composition)
+            if let a = manualSecondAnchor,
+               let sphere = a.children.first(where: { $0.name == "manual_point_2" }) {
+                sphere.setTransformMatrix(t, relativeTo: nil)
+            }
+            print(String(format: "[ManualOrigin][Move][Fixed] Second -> (%.3f, %.3f, %.3f)", newPos.x, newPos.y, newPos.z))
         }
     }
 
