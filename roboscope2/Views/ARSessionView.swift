@@ -401,11 +401,6 @@ struct ARSessionView: View {
                 HStack(spacing: 20) {
                     // Setup menu (left)
                     Menu {
-                        Button {
-                            showScanView = true
-                        } label: {
-                            Label("Scan", systemImage: "scanner")
-                        }
                         if manualPlacementState == .inactive {
                             Button {
                                 enterManualTwoPointsMode()
@@ -418,12 +413,6 @@ struct ARSessionView: View {
                             } label: {
                                 Label("Cancel Manual Placement", systemImage: "xmark.circle")
                             }
-                        }
-                        Button {
-                            // Placeholder for Manual Freehand Moving
-                            errorMessage = "Manual Freehand Moving - coming soon"
-                        } label: {
-                            Label("Manual Freehand", systemImage: "hand.raised")
                         }
                     } label: {
                         Image(systemName: "slider.horizontal.3")
