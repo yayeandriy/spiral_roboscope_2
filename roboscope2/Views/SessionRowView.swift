@@ -75,8 +75,6 @@ struct SessionRowView: View {
         }
         .task {
             // Fetch accurate per-session marker count without mutating global markers
-            print("[SessionRow] Fetching markers for session \(session.id)")
-            print("[SessionRow] Session dates - created: \(session.createdAt?.description ?? "nil"), updated: \(session.updatedAt?.description ?? "nil")")
             await fetchMarkerCount()
         }
         .onChange(of: refreshTrigger) { _ in
@@ -90,9 +88,7 @@ struct SessionRowView: View {
     // MARK: - Actions
     
     private func fetchMarkerCount() async {
-        print("[SessionRow] Re-fetching markers for session \(session.id)")
         let count = await markerService.getMarkerCountForSession(session.id)
-        print("[SessionRow] Got updated count: \(count) for session \(session.id)")
         sessionMarkersCount = count
     }
     
@@ -134,19 +130,16 @@ struct SessionRowView: View {
     
     private var updatedRelativeString: String? {
         guard let updatedAt = session.updatedAt else { 
-            print("[SessionRow] No updatedAt found for session \(session.id)")
             return nil 
         }
         let fmt = RelativeDateTimeFormatter()
         fmt.unitsStyle = .full
         let relativeString = fmt.localizedString(for: updatedAt, relativeTo: Date())
-        print("[SessionRow] Updated date: \(relativeString) for session \(session.id)")
         return relativeString
     }
     
     private var markersCount: Int {
         let count = sessionMarkersCount ?? markerService.markers.filter { $0.workSessionId == session.id }.count
-        print("[SessionRow] Displaying count: \(count) (exact: \(sessionMarkersCount?.description ?? "nil"), filtered: \(markerService.markers.filter { $0.workSessionId == session.id }.count))")
         return count
     }
     
@@ -239,9 +232,9 @@ struct StatusBadge: View {
                 updatedAt: Date()
             ),
             refreshTrigger: false,
-            onStartAR: { print("Start AR") },
-            onEdit: { print("Edit") },
-            onDelete: { print("Delete") }
+            onStartAR: { },
+            onEdit: { },
+            onDelete: { }
         )
         
         SessionRowView(
@@ -258,9 +251,9 @@ struct StatusBadge: View {
                 updatedAt: Date()
             ),
             refreshTrigger: false,
-            onStartAR: { print("Start AR") },
-            onEdit: { print("Edit") },
-            onDelete: { print("Delete") }
+            onStartAR: { },
+            onEdit: { },
+            onDelete: { }
         )
     }
     .padding()

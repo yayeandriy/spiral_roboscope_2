@@ -87,8 +87,6 @@ class SpiralStorageService {
         // Calculate number of parts needed
         let numberOfParts = Int(ceil(Double(totalSize) / Double(chunkSize)))
         
-        print("[Storage] Uploading file: \(fileURL.lastPathComponent)")
-        print("[Storage] Size: \(formatBytes(totalSize)), Parts: \(numberOfParts)")
         
         // Step 1: Create multipart upload
         let createResponse = try await createMultipartUpload(
@@ -111,12 +109,9 @@ class SpiralStorageService {
                 parts: completedParts
             )
             
-            print("[Storage] Upload successful: \(objectUrl)")
             return objectUrl
-            
         } catch {
             // If upload fails, abort the multipart upload to clean up
-            print("[Storage] Upload failed, aborting multipart upload")
             try? await abortMultipartUpload(
                 key: destinationPath,
                 uploadId: createResponse.uploadId
@@ -156,7 +151,6 @@ class SpiralStorageService {
                 if attempt < maxRetries - 1 {
                     // Exponential backoff: 1s, 2s, 4s
                     let delay = UInt64(pow(2.0, Double(attempt))) * 1_000_000_000
-                    print("[Storage] Retry attempt \(attempt + 1) after \(Int(delay / 1_000_000_000))s")
                     try await Task.sleep(nanoseconds: delay)
                 }
             }
@@ -193,13 +187,11 @@ class SpiralStorageService {
         
         guard (200...299).contains(httpResponse.statusCode) else {
             let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-            print("[Storage] Create multipart failed: \(httpResponse.statusCode) - \(errorMessage)")
             throw StorageError.serverError(httpResponse.statusCode, errorMessage)
         }
         
         // Log the raw response for debugging
         if let responseString = String(data: data, encoding: .utf8) {
-            print("[Storage] 📥 Create multipart response: \(responseString)")
         }
         
         return try JSONDecoder().decode(CreateUploadResponse.self, from: data)
@@ -220,7 +212,7 @@ class SpiralStorageService {
             let endIndex = min(startIndex + chunkSize, fileData.count)
             let chunkData = fileData.subdata(in: startIndex..<endIndex)
             
-            print("[Storage] Uploading part \(index + 1)/\(totalParts) (\(formatBytes(chunkData.count)))")
+            
             
             // Upload chunk
             let etag = try await uploadChunk(
@@ -307,7 +299,6 @@ class SpiralStorageService {
         
         guard (200...299).contains(httpResponse.statusCode) else {
             let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-            print("[Storage] Complete multipart failed: \(httpResponse.statusCode) - \(errorMessage)")
             throw StorageError.serverError(httpResponse.statusCode, errorMessage)
         }
         

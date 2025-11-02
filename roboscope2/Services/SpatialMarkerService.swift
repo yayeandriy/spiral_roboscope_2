@@ -47,7 +47,6 @@ final class SpatialMarkerService: ObservableObject {
     @discardableResult
     func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil, version: Int64 = 0, details: MarkerDetails? = nil) -> SpatialMarker {
         guard let arView = arView else {
-            print("AR view not available")
             return SpatialMarker(version: version, nodes: points, anchorEntity: AnchorEntity(world: .zero), details: details)
         }
         // Create anchor and geometry similar to placeMarker()
@@ -87,7 +86,6 @@ final class SpatialMarkerService: ObservableObject {
         arView.scene.addAnchor(anchorEntity)
         let marker = SpatialMarker(backendId: backendId, version: version, nodes: points, anchorEntity: anchorEntity, isSelected: false, details: details)
         markers.append(marker)
-        print("[Marker] Added id=\(marker.id) backendId=\(backendId?.uuidString ?? "nil") version=\(version) nodes=\(points)")
         return marker
     }
     
@@ -127,36 +125,25 @@ final class SpatialMarkerService: ObservableObject {
     
     /// Load persisted markers from API models
     func loadPersistedMarkers(_ apiMarkers: [Marker]) {
-        print("[MarkerDetails] [Load] Loading \(apiMarkers.count) markers from server")
-        
         for m in apiMarkers {
-            print("[MarkerDetails] [Load] Processing marker \(m.id), hasDetails: \(m.details != nil)")
-            
             if let idx = markers.firstIndex(where: { $0.backendId == m.id }) {
                 // Update existing visual marker to match backend
-                print("[MarkerDetails] [Load] Updating existing marker \(m.id)")
                 markers[idx].version = m.version
                 markers[idx].details = m.details
                 applyNodePositions(markerIndex: idx, newNodePositions: m.points)
             } else {
                 // Add new marker from backend
-                print("[MarkerDetails] [Load] Adding new marker \(m.id)")
                 addMarker(points: m.points, backendId: m.id, version: m.version, details: m.details)
             }
         }
         
         // Automatically calculate details for any markers that don't have them
         Task {
-            print("[MarkerDetails] [Load] Checking markers for detail calculation...")
-            
             for marker in markers where marker.backendId != nil && marker.details == nil {
                 if let backendId = marker.backendId {
-                    print("[MarkerDetails] [Load] Auto-calculating details for loaded marker \(backendId)")
                     await refreshMarkerDetails(backendId: backendId)
                 }
             }
-            
-            print("[MarkerDetails] [Load] Completed checking all markers for detail calculation")
             
             // Ensure UI update happens on main thread
             await MainActor.run {
@@ -167,11 +154,10 @@ final class SpatialMarkerService: ObservableObject {
     
     /// Place a marker by raycasting from target corners
     func placeMarker(targetCorners: [CGPoint]) {
-        guard let arView = arView,
-              let frame = arView.session.currentFrame else {
-            print("AR view or frame not available")
-            return
-        }
+                guard let arView = arView,
+                            let frame = arView.session.currentFrame else {
+                        return
+                }
         
         // First, raycast from the center to establish a reference plane and distance
         let screenCenter = CGPoint(
@@ -180,7 +166,6 @@ final class SpatialMarkerService: ObservableObject {
         )
         
         guard let centerResult = arView.raycast(from: screenCenter, allowing: .estimatedPlane, alignment: .any).first else {
-            print("No raycast hit at center")
             return
         }
         
@@ -215,21 +200,17 @@ final class SpatialMarkerService: ObservableObject {
                 )
                 hitPoints.append(worldPosition)
             } else {
-                print("No raycast hit for corner: \(corner)")
                 return
             }
         }
         
         // Need 4 hit points for a valid marker
         guard hitPoints.count == 4 else {
-            print("Failed to get all 4 hit points")
             return
         }
         
         // Create spatial marker from computed points
         _ = addMarker(points: hitPoints)
-        
-        print("Marker placed with \(hitPoints.count) nodes")
     }
     
     /// Place a marker and return the created SpatialMarker (for persistence)
@@ -312,7 +293,6 @@ extension SpatialMarkerService {
               let frame = arView.session.currentFrame,
               let selectedID = selectedMarkerID,
               let markerIndex = markers.firstIndex(where: { $0.id == selectedID }) else {
-            print("Cannot start transform: no selected marker or no AR frame.")
             return false
         }
 
@@ -320,7 +300,6 @@ extension SpatialMarkerService {
         // Project all nodes to screen and store their positions
         let screenPts = marker.nodes.compactMap { projectWorldToScreen(worldPosition: $0, frame: frame, arView: arView) }
         guard screenPts.count == 4 else {
-            print("Start transform failed: could not project all nodes")
             return false
         }
         originalNodeScreenPositions = screenPts
@@ -329,7 +308,6 @@ extension SpatialMarkerService {
         referenceCenterScreen = referenceCenter
         movingMarkerIndex = markerIndex
         updateCounter = 0
-        print("✓ Transform ready for marker index: \(markerIndex)")
         return true
     }
 

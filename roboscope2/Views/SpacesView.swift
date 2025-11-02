@@ -147,17 +147,13 @@ struct SpacesView: View {
     private func refreshSpaces() async {
         do {
             _ = try await spaceService.listSpaces()
-        } catch {
-            print("Error loading spaces: \(error)")
-        }
+        } catch { }
     }
     
     private func deleteSpace(_ space: Space) async {
         do {
             try await spaceService.deleteSpace(id: space.id)
-        } catch {
-            print("Error deleting space: \(error)")
-        }
+        } catch { }
     }
 }
 

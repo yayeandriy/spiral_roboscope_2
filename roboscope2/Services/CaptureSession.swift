@@ -29,7 +29,6 @@ final class CaptureSession: NSObject, ObservableObject {
     
     func start() {
         guard !isRunning else {
-            print("ARSession already running, skipping start")
             return
         }
         
@@ -52,7 +51,6 @@ final class CaptureSession: NSObject, ObservableObject {
     
     func startScanning() {
         guard ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) else {
-            print("Mesh scanning not supported on this device")
             return
         }
         
@@ -64,7 +62,6 @@ final class CaptureSession: NSObject, ObservableObject {
         session.run(config, options: [])
         isScanning = true
         meshAnchors.removeAll()
-        print("Started mesh scanning")
     }
     
     func stopScanning() {
@@ -75,7 +72,6 @@ final class CaptureSession: NSObject, ObservableObject {
         
         session.run(config, options: [])
         isScanning = false
-        print("Stopped mesh scanning - captured \(meshAnchors.count) mesh anchors")
     }
     
     func exportMeshData(
@@ -83,7 +79,6 @@ final class CaptureSession: NSObject, ObservableObject {
         completion: @escaping (URL?) -> Void
     ) {
         guard !meshAnchors.isEmpty else {
-            print("No mesh data to export")
             completion(nil)
             return
         }
@@ -120,7 +115,6 @@ final class CaptureSession: NSObject, ObservableObject {
             
             do {
                 try mdlAsset.export(to: exportURL)
-                print("Exported mesh data to: \(exportURL.path)")
                 
                 progress(1.0, "Export complete!")
                 
@@ -129,7 +123,6 @@ final class CaptureSession: NSObject, ObservableObject {
                     completion(exportURL)
                 }
             } catch {
-                print("Failed to export mesh: \(error)")
                 DispatchQueue.main.async {
                     completion(nil)
                 }
@@ -306,7 +299,6 @@ extension CaptureSession: ARSessionDelegate {
         for anchor in anchors {
             if let meshAnchor = anchor as? ARMeshAnchor {
                 meshAnchors.append(meshAnchor)
-                print("Added mesh anchor - total: \(meshAnchors.count)")
             }
         }
     }
@@ -376,7 +368,6 @@ extension CaptureSession {
                     completion(localURL, cloudURL)
                     
                 } catch {
-                    print("[CaptureSession] Upload failed: \(error)")
                     // Still return local URL even if upload fails
                     completion(localURL, nil)
                 }

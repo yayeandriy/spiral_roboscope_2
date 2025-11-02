@@ -16,7 +16,6 @@ extension SpatialMarkerService {
               let frame = arView.session.currentFrame,
               let selectedID = selectedMarkerID,
               let markerIndex = markers.firstIndex(where: { $0.id == selectedID }) else {
-            print("Cannot start moving: no selected marker or no AR frame. SelectedID: \(selectedMarkerID?.uuidString ?? "nil")")
             return false
         }
         let marker = markers[markerIndex]
@@ -52,7 +51,6 @@ extension SpatialMarkerService {
                         projectWorldToScreen(worldPosition: nodePos, frame: frame, arView: arView)
                     }
                     if nodeScreenPositions.count == 4 {
-                        print("Started moving marker \(index)")
                         return true
                     }
                 }

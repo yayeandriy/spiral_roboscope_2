@@ -366,7 +366,5 @@ struct EditSessionView: View {
             createdAt: Date().addingTimeInterval(-7200),
             updatedAt: Date()
         )
-    ) { session in
-        print("Updated session: \(session)")
-    }
+    ) { _ in }
 }

@@ -244,12 +244,9 @@ final class MarkerService: ObservableObject {
     /// Get marker count for a session
     func getMarkerCountForSession(_ sessionId: UUID) async -> Int {
         do {
-            print("[MarkerService] Fetching markers for session \(sessionId)")
             let markers = try await getMarkersForSession(sessionId)
-            print("[MarkerService] Got \(markers.count) markers for session \(sessionId)")
             return markers.count
         } catch {
-            print("[MarkerService] Error fetching markers for session \(sessionId): \(error)")
             return 0
         }
     }
@@ -271,25 +268,23 @@ final class MarkerService: ObservableObject {
     /// - Parameter markerId: The marker UUID
     /// - Returns: MarkerDetails object
     func calculateMarkerDetails(for markerId: UUID) async throws -> MarkerDetails {
-        print("[MarkerDetails] [API] Starting detail calculation for marker \(markerId)")
+        
         
         await setLoading(true)
         defer { Task { await setLoading(false) } }
         
         do {
-            print("[MarkerDetails] [API] POST /markers/\(markerId.uuidString)/details/calculate")
+            
             let details: MarkerDetails = try await networkManager.post(
                 endpoint: "/markers/\(markerId.uuidString)/details/calculate",
                 body: [String: String]()  // Empty encodable dictionary
             )
             
-            print("[MarkerDetails] [API] Successfully calculated details for marker \(markerId)")
-            print("[MarkerDetails] [API] Details: Long=\(details.longSize), Cross=\(details.crossSize), Left=\(details.leftDistance), Right=\(details.rightDistance)")
+            
             
             await clearError()
             return details
         } catch {
-            print("[MarkerDetails] [API] Failed to calculate details for marker \(markerId): \(error)")
             await setError(error.localizedDescription)
             throw error
         }
@@ -299,7 +294,7 @@ final class MarkerService: ObservableObject {
     /// - Parameter markerId: The marker UUID
     /// - Returns: MarkerDetails object or nil if not found
     func getMarkerDetails(for markerId: UUID) async throws -> MarkerDetails? {
-        print("[MarkerDetails] [API] GET /markers/\(markerId.uuidString)/details")
+        
         
         await setLoading(true)
         defer { Task { await setLoading(false) } }
@@ -309,11 +304,10 @@ final class MarkerService: ObservableObject {
                 endpoint: "/markers/\(markerId.uuidString)/details"
             )
             
-            print("[MarkerDetails] [API] Found existing details for marker \(markerId)")
+            
             await clearError()
             return details
         } catch {
-            print("[MarkerDetails] [API] Details not found for marker \(markerId): \(error)")
             if let apiError = error as? APIError, case .notFound = apiError {
                 await clearError()
                 return nil
@@ -343,7 +337,6 @@ final class MarkerService: ObservableObject {
                 }
                 updatedMarkers.append(updatedMarker)
             } catch {
-                print("[MarkerService] Failed to get details for marker \(marker.id): \(error)")
                 // Keep the marker without details if calculation fails
                 updatedMarkers.append(marker)
             }

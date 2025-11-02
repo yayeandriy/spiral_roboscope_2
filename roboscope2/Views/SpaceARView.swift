@@ -228,9 +228,7 @@ struct SpaceARView: View {
                     arView.scene.addAnchor(anchor)
                 }
             }
-        } catch {
-            print("Failed to load space model: \(error)")
-        }
+        } catch { }
     }
     
     // MARK: - Scanning Actions
@@ -239,28 +237,23 @@ struct SpaceARView: View {
         captureSession.startScanning()
         isScanning = true
         hasScanData = false
-        print("[SpaceAR] Started scanning")
     }
     
     private func stopScanning() {
         captureSession.stopScanning()
         isScanning = false
         hasScanData = true
-        print("[SpaceAR] Stopped scanning")
     }
     
     private func startAgain() {
         hasScanData = false
         isScanning = false
-        print("[SpaceAR] Starting new scan")
     }
     
     private func saveToSpace() {
         isExporting = true
         exportProgress = 0.0
         exportStatus = "Preparing scan data..."
-        
-        print("[SpaceAR] Saving scan to space: \(space.name)")
         
         // Export and upload mesh data
         captureSession.exportAndUploadMeshData(
@@ -277,12 +270,9 @@ struct SpaceARView: View {
                     self.isExporting = false
                     
                     guard let cloudURL = cloudURL else {
-                        print("[SpaceAR] Upload failed - no cloud URL")
                         self.exportStatus = "Upload failed"
                         return
                     }
-                    
-                    print("[SpaceAR] Scan uploaded: \(cloudURL)")
                     
                     // Update space with scan URL
                     Task {
@@ -295,17 +285,8 @@ struct SpaceARView: View {
     
     private func updateSpaceWithScanUrl(_ scanUrl: String) async {
         do {
-            print("[SpaceAR] 🔄 Starting space update...")
-            print("[SpaceAR] 📍 Space ID: \(space.id)")
-            print("[SpaceAR] 🔗 Scan URL: \(scanUrl)")
-            
             let update = UpdateSpace(scanUrl: scanUrl)
-            print("[SpaceAR] 📦 Created UpdateSpace DTO")
-            
             let updatedSpace = try await spaceService.updateSpace(id: space.id, update: update)
-            
-            print("[SpaceAR] ✅ Space updated successfully!")
-            print("[SpaceAR] 📊 Updated space scan_url: \(updatedSpace.scanUrl ?? "nil")")
             
             await MainActor.run {
                 hasScanData = false
@@ -315,9 +296,6 @@ struct SpaceARView: View {
             }
             
         } catch {
-            print("[SpaceAR] ❌ Failed to update space!")
-            print("[SpaceAR] ❌ Error: \(error)")
-            print("[SpaceAR] ❌ Error description: \(error.localizedDescription)")
             await MainActor.run {
                 exportStatus = "Failed to update space"
             }

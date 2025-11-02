@@ -234,7 +234,7 @@ struct SessionsView: View {
         do {
             _ = try await (sessions, spaces)
         } catch {
-            print("Error refreshing data: \(error)")
+            // TODO: handle error UI if needed
         }
     }
     
@@ -251,7 +251,6 @@ struct SessionsView: View {
             try await workSessionService.deleteWorkSession(id: session.id)
             await refreshData()
         } catch {
-            print("Error deleting session: \(error)")
             // TODO: Show error alert
         }
     }

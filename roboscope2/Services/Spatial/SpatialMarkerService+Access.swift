@@ -15,7 +15,6 @@ extension SpatialMarkerService {
     func updateMarkerDetails(backendId: UUID, details: MarkerDetails) {
         if let idx = markers.firstIndex(where: { $0.backendId == backendId }) {
             markers[idx].details = details
-            print("[Marker] Updated details for marker \(backendId)")
         }
     }
 }

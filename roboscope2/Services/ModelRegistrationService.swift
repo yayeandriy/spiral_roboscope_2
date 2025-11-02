@@ -69,9 +69,7 @@ class ModelRegistrationService {
                 maxPoint.y = max(maxPoint.y, p.y)
                 maxPoint.z = max(maxPoint.z, p.z)
             }
-            print("[Registration] Point cloud bounds: min=\(minPoint), max=\(maxPoint)")
             let size = maxPoint - minPoint
-            print("[Registration] Point cloud size: (\(size.x), \(size.y), \(size.z))")
         }
         
         // Downsample if too many points
@@ -80,7 +78,7 @@ class ModelRegistrationService {
             points = stride(from: 0, to: points.count, by: step).map { points[$0] }
         }
         
-        print("[Registration] Extracted \(points.count) points from \(childCount) child nodes")
+        
         return points
     }
     
@@ -94,11 +92,9 @@ class ModelRegistrationService {
     ) async -> RegistrationResult? {
         
         guard !modelPoints.isEmpty && !scanPoints.isEmpty else {
-            print("[Registration] Error: Empty point clouds")
             return nil
         }
         
-        print("[Registration] Starting ICP with \(modelPoints.count) model points and \(scanPoints.count) scan points")
         
         // Compute initial centroids for alignment
         var modelCentroid = SIMD3<Float>(0, 0, 0)
@@ -108,8 +104,7 @@ class ModelRegistrationService {
         modelCentroid /= Float(modelPoints.count)
         scanCentroid /= Float(scanPoints.count)
         
-        print("[Registration] Model centroid: \(modelCentroid)")
-        print("[Registration] Scan centroid: \(scanCentroid)")
+        
         
         // Perform coarse yaw search to find initial alignment
         let initialYaw = findBestInitialYaw(
@@ -118,7 +113,7 @@ class ModelRegistrationService {
             modelCentroid: modelCentroid,
             scanCentroid: scanCentroid
         )
-        print("[Registration] Initial yaw search result: \(initialYaw * 180 / .pi)°")
+        
         
         // Initialize transform with centroid alignment and initial yaw
         let c = cosf(initialYaw)
@@ -135,12 +130,7 @@ class ModelRegistrationService {
         currentTransform.columns.2 = SIMD4<Float>(rotY[2,0], rotY[2,1], rotY[2,2], 0)
         currentTransform.columns.3 = SIMD4<Float>(initialTranslation.x, initialTranslation.y, initialTranslation.z, 1.0)
         
-        print("[Registration] Initial translation: \(initialTranslation)")
-        print("[Registration] Initial transform matrix:")
-        print("[Registration]   [\(currentTransform.columns.0)]")
-        print("[Registration]   [\(currentTransform.columns.1)]")
-        print("[Registration]   [\(currentTransform.columns.2)]")
-        print("[Registration]   [\(currentTransform.columns.3)]")
+        
         
         var previousError: Float = .infinity
         var iterations = 0
@@ -187,16 +177,13 @@ class ModelRegistrationService {
             }
             
             guard !correspondences.isEmpty else {
-                print("[Registration] No correspondences found")
                 break
             }
             
             let rmse = sqrt(totalError / Float(correspondences.count))
-            print("[Registration] Iteration \(iteration + 1): RMSE = \(rmse), Correspondences = \(correspondences.count)")
             
             // Check convergence
             if abs(previousError - rmse) < convergenceThreshold {
-                print("[Registration] Converged at iteration \(iteration + 1)")
                 break
             }
             previousError = rmse
@@ -209,7 +196,6 @@ class ModelRegistrationService {
             if let deltaTransform = computeOptimalYawTransform(correspondences: correspondences) ?? computeOptimalTransform(correspondences: correspondences) {
                 // Compose the transforms: new = delta * current
                 currentTransform = deltaTransform * currentTransform
-                print("[Registration] Delta transform applied, new translation: \(currentTransform.columns.3)")
             }
         }
         
@@ -220,12 +206,7 @@ class ModelRegistrationService {
             transform: currentTransform
         )
         
-        print("[Registration] Final transform matrix:")
-        print("[Registration]   [\(currentTransform.columns.0)]")
-        print("[Registration]   [\(currentTransform.columns.1)]")
-        print("[Registration]   [\(currentTransform.columns.2)]")
-        print("[Registration]   [\(currentTransform.columns.3)]")
-        print("[Registration] Final translation: (\(currentTransform.columns.3.x), \(currentTransform.columns.3.y), \(currentTransform.columns.3.z))")
+        
         
         return RegistrationResult(
             transformMatrix: currentTransform,
@@ -412,7 +393,7 @@ class ModelRegistrationService {
         T.columns.2 = SIMD4<Float>(R[2,0], R[2,1], R[2,2], 0)
         T.columns.3 = SIMD4<Float>(t.x, t.y, t.z, 1)
 
-        print("[Registration] Yaw-only angle (deg): \(theta * 180 / .pi)")
+        
         return T
     }
     

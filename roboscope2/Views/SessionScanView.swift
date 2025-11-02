@@ -381,14 +381,12 @@ struct SessionScanView: View {
         captureSession.startScanning()
         isScanning = true
         hasScanData = false
-        print("[SessionScan] Started scanning for session: \(session.id)")
     }
     
     private func stopScanning() {
         captureSession.stopScanning()
         isScanning = false
         hasScanData = true
-        print("[SessionScan] Stopped scanning")
     }
 
     /// Save the current scanned mesh to Spiral Storage and set it as the Space's scan model URL
@@ -418,7 +416,6 @@ struct SessionScanView: View {
                             self.showSuccessMessage = true
                         } catch {
                             self.exportStatus = "Failed to save scan URL"
-                            print("[SessionScan] Failed to update space with scan URL: \(error)")
                         }
                     } else {
                         self.exportStatus = "Upload failed"
@@ -440,19 +437,7 @@ struct SessionScanView: View {
     private func performSpaceRegistration() async {
         let startTime = Date()
         
-        // Log registration settings
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("[SessionScan] REGISTRATION SETTINGS")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("Preset: \(settings.currentPreset.rawValue)")
-        print("Model Points: \(settings.modelPointsSampleCount)")
-        print("Scan Points: \(settings.scanPointsSampleCount)")
-        print("Max Iterations: \(settings.maxICPIterations)")
-        print("Convergence Threshold: \(settings.icpConvergenceThreshold)")
-        print("AR Pause: \(settings.pauseARDuringRegistration ? "ON" : "OFF")")
-        print("Background Loading: \(settings.useBackgroundLoading ? "ON" : "OFF")")
-        print("Skip Checks: \(settings.skipModelConsistencyChecks ? "ON" : "OFF")")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    // Registration settings logging removed
         
         // Optionally pause AR session updates during registration for better performance
         if settings.pauseARDuringRegistration {
@@ -482,15 +467,10 @@ struct SessionScanView: View {
                     registrationProgress = "Error: Space has no Reference model"
                     isRegistering = false
                 }
-                print("[SessionScan] Error: Space has no Reference model (USDC)")
                 return
             }
             
-            if settings.showPerformanceLogs {
-                print("[SessionScan] Found space: \(space.name)")
-                print("[SessionScan] USDC URL: \(usdcUrlString)")
-                print("[SessionScan] ⏱️ Step 1 (Fetch space): \(Date().timeIntervalSince(stepStart))s")
-            }
+            
             
             // Step 2: Download and load the USDC model
             let downloadStart = Date()
@@ -503,10 +483,7 @@ struct SessionScanView: View {
             let modelPath = tempDir.appendingPathComponent("space_model.usdc")
             try modelData.write(to: modelPath)
             
-            if settings.showPerformanceLogs {
-                print("[SessionScan] Downloaded Reference model to: \(modelPath)")
-                print("[SessionScan] ⏱️ Step 2 (Download model): \(Date().timeIntervalSince(downloadStart))s")
-            }
+            
             
             // Step 3: Export the scan mesh to temp file
             let exportStart = Date()
@@ -524,10 +501,7 @@ struct SessionScanView: View {
                 return
             }
             
-            if settings.showPerformanceLogs {
-                print("[SessionScan] Exported scan to: \(scanPath)")
-                print("[SessionScan] ⏱️ Step 3 (Export scan): \(Date().timeIntervalSince(exportStart))s")
-            }
+            
             
             // Step 4: Load both models into SceneKit
             let loadStart = Date()
@@ -567,11 +541,7 @@ struct SessionScanView: View {
             let flattenedScanNode = SCNNode()
             flattenModelHierarchy(scanScene.rootNode, into: flattenedScanNode)
             
-            if settings.showPerformanceLogs {
-                print("[SessionScan] Model node children: \(flattenedModelNode.childNodes.count)")
-                print("[SessionScan] Scan node children: \(flattenedScanNode.childNodes.count)")
-                print("[SessionScan] ⏱️ Step 4 (Load models): \(Date().timeIntervalSince(loadStart))s")
-            }
+            
             
             // Step 5: Extract point clouds
             let extractStart = Date()
@@ -589,11 +559,7 @@ struct SessionScanView: View {
                 sampleCount: settings.scanPointsSampleCount
             )
             
-            if settings.showPerformanceLogs {
-                print("[SessionScan] Model points: \(modelPoints.count) (target: \(settings.modelPointsSampleCount))")
-                print("[SessionScan] Scan points: \(scanPoints.count) (target: \(settings.scanPointsSampleCount))")
-                print("[SessionScan] ⏱️ Step 5 (Extract points): \(Date().timeIntervalSince(extractStart))s")
-            }
+            
             
             // Validate we have enough points
             guard !modelPoints.isEmpty else {
@@ -601,7 +567,6 @@ struct SessionScanView: View {
                     registrationProgress = "Error: Could not extract points from space model"
                     isRegistering = false
                 }
-                print("[SessionScan] Error: Model has no extractable geometry")
                 return
             }
             
@@ -610,7 +575,6 @@ struct SessionScanView: View {
                     registrationProgress = "Error: Could not extract points from scan"
                     isRegistering = false
                 }
-                print("[SessionScan] Error: Scan has no extractable geometry")
                 return
             }
             
@@ -619,7 +583,6 @@ struct SessionScanView: View {
                     registrationProgress = "Error: Not enough points for registration (model: \(modelPoints.count), scan: \(scanPoints.count))"
                     isRegistering = false
                 }
-                print("[SessionScan] Error: Insufficient points for registration")
                 return
             }
             
@@ -648,14 +611,7 @@ struct SessionScanView: View {
                 return
             }
             
-            if settings.showPerformanceLogs {
-                print("[SessionScan] Registration complete!")
-                print("[SessionScan] RMSE: \(result.rmse)")
-                print("[SessionScan] Inliers: \(result.inlierFraction)")
-                print("[SessionScan] Transform matrix: \(result.transformMatrix)")
-                print("[SessionScan] ⏱️ Step 6 (ICP registration): \(Date().timeIntervalSince(registrationStart))s")
-                print("[SessionScan] ⏱️ TOTAL TIME: \(Date().timeIntervalSince(startTime))s")
-            }
+            
             
             // Step 7: Apply transformation to AR session
             await MainActor.run {
@@ -681,7 +637,6 @@ struct SessionScanView: View {
                 registrationProgress = "Error: \(error.localizedDescription)"
                 isRegistering = false
             }
-            print("[SessionScan] Registration error: \(error)")
         }
     }
     
@@ -709,8 +664,7 @@ struct SessionScanView: View {
         // Store this anchor for later use in the parent view
         arView.scene.addAnchor(anchor)
         
-        print("[SessionScan] Applied transform to AR session")
-        print("[SessionScan] Transform: \(transform)")
+        
     }
     
     /// Recursively flatten scene hierarchy and collect all geometry nodes
@@ -734,7 +688,6 @@ struct SessionScanView: View {
     /// Place the reference model at FrameOrigin (the AR camera's initial position and orientation)
     private func placeModelAtFrameOrigin() {
         guard let arView = arView else {
-            print("[SessionScan] ARView not available")
             return
         }
         
@@ -751,14 +704,13 @@ struct SessionScanView: View {
                 guard let usdcUrlString = space.modelUsdcUrl,
                       let usdcUrl = URL(string: usdcUrlString) else {
                     await MainActor.run {
-                        print("[SessionScan] Space has no USDC model URL")
                         isLoadingModel = false
                         showReferenceModel = false
                     }
                     return
                 }
                 
-                print("[SessionScan] Loading reference model from: \(usdcUrlString)")
+                
                 
                 // Download the model
                 let (modelData, _) = try await URLSession.shared.data(from: usdcUrl)
@@ -771,7 +723,7 @@ struct SessionScanView: View {
                 // Load the model entity
                 let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
                 
-                await MainActor.run {
+                    await MainActor.run {
                     // Anchor at the current transformMatrix (FrameOrigin in this view)
                     let anchor = AnchorEntity(world: transformMatrix ?? matrix_identity_float4x4)
                     
@@ -783,12 +735,11 @@ struct SessionScanView: View {
                     arView.scene.addAnchor(anchor)
                     
                     isLoadingModel = false
-                    print("[SessionScan] Reference model placed at FrameOrigin")
+                    
                 }
                 
             } catch {
                 await MainActor.run {
-                    print("[SessionScan] Failed to load reference model: \(error)")
                     isLoadingModel = false
                     showReferenceModel = false
                 }
@@ -803,7 +754,7 @@ struct SessionScanView: View {
         arView?.scene.removeAnchor(anchor)
         referenceModelAnchor = nil
         
-        print("[SessionScan] Reference model removed")
+        
     }
     
     // MARK: - Scan Model Management
@@ -811,7 +762,6 @@ struct SessionScanView: View {
     /// Place the scanned model at FrameOrigin (the AR camera's initial position and orientation)
     private func placeScanModelAtFrameOrigin() {
         guard let arView = arView else {
-            print("[SessionScan] ARView not available")
             return
         }
         
@@ -828,14 +778,13 @@ struct SessionScanView: View {
                 guard let scanUrlString = space.scanUrl,
                       let scanUrl = URL(string: scanUrlString) else {
                     await MainActor.run {
-                        print("[SessionScan] Space has no scan URL")
                         isLoadingScan = false
                         showScanModel = false
                     }
                     return
                 }
                 
-                print("[SessionScan] Loading scanned model from: \(scanUrlString)")
+                
                 
                 // Download the scan
                 let (scanData, _) = try await URLSession.shared.data(from: scanUrl)
@@ -852,7 +801,7 @@ struct SessionScanView: View {
                 // Load the model entity
                 let scanEntity = try await ModelEntity.loadModel(contentsOf: scanPath)
                 
-                await MainActor.run {
+                    await MainActor.run {
                     // Anchor at the current transformMatrix (FrameOrigin in this view)
                     let anchor = AnchorEntity(world: transformMatrix ?? matrix_identity_float4x4)
                     
@@ -864,12 +813,11 @@ struct SessionScanView: View {
                     arView.scene.addAnchor(anchor)
                     
                     isLoadingScan = false
-                    print("[SessionScan] Scanned model placed at FrameOrigin")
+                    
                 }
                 
             } catch {
                 await MainActor.run {
-                    print("[SessionScan] Failed to load scanned model: \(error)")
                     isLoadingScan = false
                     showScanModel = false
                 }
@@ -884,7 +832,7 @@ struct SessionScanView: View {
         arView?.scene.removeAnchor(anchor)
         scanModelAnchor = nil
         
-        print("[SessionScan] Scanned model removed")
+        
     }
 }
 
@@ -903,8 +851,6 @@ struct SessionScanView: View {
             updatedAt: Date()
         ),
         captureSession: CaptureSession(),
-        onRegistrationComplete: { transform in
-            print("Registration complete with transform: \(transform)")
-        }
+        onRegistrationComplete: { _ in }
     )
 }

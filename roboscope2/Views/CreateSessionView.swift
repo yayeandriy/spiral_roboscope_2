@@ -265,6 +265,6 @@ struct SpacePickerView: View {
 
 #Preview {
     CreateSessionView { session in
-        print("Created session: \(session)")
+        _ = session
     }
 }

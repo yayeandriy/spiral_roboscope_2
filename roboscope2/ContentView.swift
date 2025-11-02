@@ -89,7 +89,6 @@ struct ContentView : View {
                         // Two fingers detected
                         if !isTwoFingers {
                             isTwoFingers = true
-                            print("Two fingers detected - starting move")
                             // Try to start moving if a marker is selected
                             if markerService.selectedMarkerID != nil {
                                 startMovingMarker()
@@ -98,7 +97,6 @@ struct ContentView : View {
                     }
                     .onEnded { _ in
                         isTwoFingers = false
-                        print("Two fingers released - stopping move")
                         stopMovingMarker()
                     }
             )
@@ -285,7 +283,6 @@ struct ContentView : View {
             moveUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { _ in
                 markerService.updateMovingMarker()
             }
-            print("Started moving selected marker")
         }
     }
     
@@ -348,39 +345,33 @@ struct ContentView : View {
                 
                 // Approach 1: Try loading from Models subdirectory
                 if let url = Bundle.main.url(forResource: "room", withExtension: "usdc", subdirectory: "Models") {
-                    print("Found room.usdc at: \(url.path)")
                     entity = try await Entity.load(contentsOf: url)
                 }
                 // Approach 2: Try loading from bundle root
                 else if let url = Bundle.main.url(forResource: "room", withExtension: "usdc") {
-                    print("Found room.usdc in bundle root at: \(url.path)")
                     entity = try await Entity.load(contentsOf: url)
                 }
                 // Approach 3: Try named resource (for Reality Composer scenes)
                 else {
-                    print("Trying to load as named resource 'room'")
                     entity = try await Entity.load(named: "room")
                 }
                 
                 guard let loadedEntity = entity else {
-                    print("Failed to find room.usdc in any location")
                     return
                 }
                 
                 await MainActor.run {
                     if let modelEntity = loadedEntity as? ModelEntity {
                         roomModel = modelEntity
-                        print("Room model loaded successfully as ModelEntity")
                     } else {
                         // If it's not a ModelEntity, wrap it in one
                         let model = ModelEntity()
                         model.addChild(loadedEntity)
                         roomModel = model
-                        print("Room model wrapped in ModelEntity")
                     }
                 }
             } catch {
-                print("Failed to load room model: \(error)")
+                // Silent fail; UI can present error state if needed
             }
         }
     }
@@ -388,15 +379,11 @@ struct ContentView : View {
     private func placeRoomModel() {
         guard let arView = arView,
               let model = roomModel else {
-            print("AR view or model not ready")
             return
         }
         
         // Get camera transform for placement
-        guard let cameraTransform = arView.session.currentFrame?.camera.transform else {
-            print("No camera transform available")
-            return
-        }
+        guard let cameraTransform = arView.session.currentFrame?.camera.transform else { return }
         
         if isModelPlaced, let anchor = placedModelAnchor {
             // Remove existing model
@@ -405,7 +392,7 @@ struct ContentView : View {
             isModelPlaced = false
             isAlignmentScanning = false
             alignmentScanData = false
-            print("Model removed")
+            
         } else {
             // Place model at world origin with no rotation (identity)
             // Since the model is now Y-up (matching ARKit), it should appear correctly oriented
@@ -423,7 +410,7 @@ struct ContentView : View {
             
             placedModelAnchor = anchor
             isModelPlaced = true
-            print("Model placed at: \(modelTransform.translation)")
+            
         }
     }
     
@@ -440,15 +427,14 @@ struct ContentView : View {
     private func startAlignmentScanning() {
         isAlignmentScanning = true
         alignmentScanData = false
-        captureSession.startScanning()
-        print("Started alignment scanning")
+    captureSession.startScanning()
     }
     
     private func stopAlignmentScanning() {
         isAlignmentScanning = false
-        captureSession.stopScanning()
+    captureSession.stopScanning()
         alignmentScanData = true
-        print("Stopped alignment scanning, preparing to align model")
+        
         
         // Start alignment process
         alignModelWithServer()
@@ -456,7 +442,6 @@ struct ContentView : View {
     
     private func alignModelWithServer() {
         guard let anchor = placedModelAnchor else {
-            print("No model placed to align")
             return
         }
         
@@ -474,7 +459,6 @@ struct ContentView : View {
             guard let url = url else {
                 DispatchQueue.main.async {
                     self.isExporting = false
-                    print("Failed to export scan data")
                 }
                 return
             }
@@ -528,26 +512,16 @@ struct ContentView : View {
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("❌ No HTTP response received")
                 throw URLError(.badServerResponse)
-            }
-            
-            print("Server response status: \(httpResponse.statusCode)")
-            
-            // Log response body for debugging
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("Server response body: \(responseString.prefix(500))")
             }
             
             // Parse response JSON
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                print("❌ Failed to parse JSON response")
                 throw URLError(.cannotParseResponse)
             }
             
             // Check for error response (400/500 status codes)
             if let errorMessage = json["error"] as? String {
-                print("❌ Server error: \(errorMessage)")
                 await MainActor.run {
                     self.exportStatus = "Server error: \(errorMessage)"
                 }
@@ -555,7 +529,6 @@ struct ContentView : View {
             }
             
             guard httpResponse.statusCode == 200 else {
-                print("❌ Server returned status: \(httpResponse.statusCode)")
                 throw URLError(.badServerResponse)
             }
             
@@ -566,18 +539,13 @@ struct ContentView : View {
             
             // Extract transformation matrix
             guard let matrixArray = json["matrix"] as? [[Double]] else {
-                print("❌ No 'matrix' field in response or wrong format")
-                print("Response keys: \(json.keys)")
                 if let matrixFloat = json["matrix"] as? [[Float]] {
-                    print("Note: matrix is Float not Double, converting...")
                     // Try Float conversion
                     let transform = parseTransformMatrix(from: matrixFloat.map { $0.map { Double($0) } })
                     await MainActor.run {
                         modelAnchor.transform = Transform(matrix: transform)
                         exportProgress = 1.0
                         exportStatus = "Model aligned!"
-                        print("✅ Model aligned successfully!")
-                        print("Translation: \(transform.columns.3)")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                             self.isExporting = false
                             self.alignmentScanData = false
@@ -600,16 +568,7 @@ struct ContentView : View {
                 exportProgress = 1.0
                 exportStatus = "Model aligned!"
                 
-                print("✅ Model aligned successfully!")
-                print("Model→Scan Translation: \(modelToScanTransform.columns.3)")
                 
-                // Extract and log additional info if available
-                if let translation = json["translation"] as? [Double] {
-                    print("Translation: [\(translation[0]), \(translation[1]), \(translation[2])]")
-                }
-                if let rotationAngle = json["rotation_angle_degrees"] as? Double {
-                    print("Rotation: \(rotationAngle)°")
-                }
                 
                 // Hide progress after a short delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -621,7 +580,6 @@ struct ContentView : View {
         } catch {
             await MainActor.run {
                 self.isExporting = false
-                print("❌ Alignment failed: \(error)")
                 
                 // Show error to user
                 self.exportStatus = "Alignment failed: \(error.localizedDescription)"

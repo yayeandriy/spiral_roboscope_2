@@ -303,13 +303,11 @@ struct Space3DViewer: View {
     private func performRegistration() async {
         // This will be called from the CombinedModelViewer
         // The actual registration logic needs access to the scene nodes
-        print("[3DViewer] Registration started")
     }
     
     // MARK: - Camera Control Handlers
     
     private func handleCameraAction(_ action: CameraControlButtons.CameraAction) {
-        print("[3DViewer] Camera action triggered: \(action)")
         switch action {
         case .toggleGrid:
             showGrid.toggle()
@@ -406,26 +404,19 @@ struct RealityKitModelViewer: UIViewRepresentable {
     
     private func loadModel(into anchor: AnchorEntity, arView: ARView) async {
         guard let modelURL = URL(string: url) else {
-            print("[3DViewer] Invalid URL string: \(url)")
             return
         }
         
         do {
-            print("[3DViewer] Downloading USDZ from: \(modelURL)")
+            
             
             // Download the model
             let (data, response) = try await URLSession.shared.data(from: modelURL)
             
-            print("[3DViewer] Downloaded \(data.count) bytes")
-            if let httpResponse = response as? HTTPURLResponse {
-                print("[3DViewer] Status: \(httpResponse.statusCode), Content-Type: \(httpResponse.allHeaderFields["Content-Type"] ?? "unknown")")
-            }
+            
             
             // Validate minimum file size
-            guard data.count > 100 else {
-                print("[3DViewer] File too small (\(data.count) bytes), likely invalid")
-                return
-            }
+            guard data.count > 100 else { return }
             
             // Save to temp file
             let tempURL = FileManager.default.temporaryDirectory
@@ -435,8 +426,7 @@ struct RealityKitModelViewer: UIViewRepresentable {
             
             // Verify file was written
             let fileSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
-            print("[3DViewer] Saved to temp: \(tempURL)")
-            print("[3DViewer] File size on disk: \(fileSize) bytes")
+            
             
             // Check if file is actually USDZ by reading magic bytes
             let fileHandle = try FileHandle(forReadingFrom: tempURL)
@@ -444,10 +434,9 @@ struct RealityKitModelViewer: UIViewRepresentable {
             fileHandle.closeFile()
             
             let magic = headerData.map { String(format: "%02x", $0) }.joined()
-            print("[3DViewer] File header (magic bytes): \(magic)")
             
             // Try loading with RealityKit first
-            print("[3DViewer] Attempting to load with RealityKit Entity.load...")
+            
             
             do {
                 let entity = try await Entity.load(contentsOf: tempURL)
@@ -477,39 +466,32 @@ struct RealityKitModelViewer: UIViewRepresentable {
                 
                 await MainActor.run {
                     anchor.addChild(modelEntity)
-                    print("[3DViewer] Model loaded successfully with RealityKit")
                 }
                 
                 // Clean up temp file
                 try? FileManager.default.removeItem(at: tempURL)
                 
             } catch {
-                print("[3DViewer] RealityKit failed: \(error)")
-                print("[3DViewer] Falling back to SceneKit for USDZ...")
+                
                 
                 // Fall back to SceneKit which has better USDZ support
                 do {
                     let scene = try SCNScene(url: tempURL, options: nil)
-                    print("[3DViewer] USDZ loaded with SceneKit")
                     
                     // Create a wrapper to convert SCNScene to RealityKit
                     // Since we can't easily convert, show an error
-                    await MainActor.run {
-                        print("[3DViewer] Note: This USDZ file can only be viewed with SceneKit")
-                        print("[3DViewer] Please use the scan view or provide a compatible USDZ file")
-                    }
+                    await MainActor.run {}
                     
                     try? FileManager.default.removeItem(at: tempURL)
                     
                 } catch {
-                    print("[3DViewer] SceneKit also failed: \(error)")
-                    print("[3DViewer] The USDZ file may be corrupted or incompatible")
+                    
                     try? FileManager.default.removeItem(at: tempURL)
                 }
             }
             
         } catch {
-            print("[3DViewer] Download failed: \(error)")
+            
         }
     }
     
@@ -595,20 +577,16 @@ struct SceneKitModelViewer: UIViewRepresentable {
     
     private func loadModel(into scene: SCNScene, sceneView: SCNView) async {
         guard let modelURL = URL(string: url) else {
-            print("[3DViewer] Invalid URL: \(url)")
             return
         }
         
         do {
-            print("[3DViewer] Loading \(fileExtension.uppercased()) from: \(modelURL)")
+            
             
             // Download the model file
             let (data, response) = try await URLSession.shared.data(from: modelURL)
             
-            print("[3DViewer] Downloaded \(data.count) bytes")
-            if let httpResponse = response as? HTTPURLResponse {
-                print("[3DViewer] Content-Type: \(httpResponse.allHeaderFields["Content-Type"] ?? "unknown")")
-            }
+            
             
             // Save to temp file
             let tempURL = FileManager.default.temporaryDirectory
@@ -616,13 +594,13 @@ struct SceneKitModelViewer: UIViewRepresentable {
                 .appendingPathExtension(fileExtension)
             try data.write(to: tempURL)
             
-            print("[3DViewer] Saved to temp: \(tempURL)")
+            
             
             // Verify file exists and has content
             let fileExists = FileManager.default.fileExists(atPath: tempURL.path)
             let attributes = try? FileManager.default.attributesOfItem(atPath: tempURL.path)
             let fileSize = attributes?[.size] as? Int64 ?? 0
-            print("[3DViewer] File exists: \(fileExists), size: \(fileSize) bytes")
+            
             
             // Create a container node
             let node = SCNNode()
@@ -632,59 +610,55 @@ struct SceneKitModelViewer: UIViewRepresentable {
             
             if asset.count > 0 {
                 // MDLAsset found objects
-                print("[3DViewer] MDLAsset found \(asset.count) objects")
+                
                 for index in 0..<asset.count {
                     let object = asset.object(at: index)
-                    print("[3DViewer] Object \(index) type: \(type(of: object))")
+                    
                     
                     // Try different object types
                     if let mesh = object as? MDLMesh {
                         let childNode = SCNNode(mdlObject: mesh)
                         node.addChildNode(childNode)
-                        print("[3DViewer] Added mesh object \(index)")
+                        
                     } else if let mdlObject = object as? MDLObject {
                         // Try converting any MDLObject to SCNNode
                         let childNode = SCNNode(mdlObject: mdlObject)
                         node.addChildNode(childNode)
-                        print("[3DViewer] Added MDLObject \(index)")
+                        
                     } else {
-                        print("[3DViewer] Skipping object \(index) - unsupported type")
+                        
                     }
                 }
                 
                 // If MDLAsset didn't work well, try SCNScene as fallback for USDC
                 if node.childNodes.isEmpty && (fileExtension.lowercased() == "usdc" || fileExtension.lowercased() == "usdz") {
-                    print("[3DViewer] MDLAsset didn't extract nodes, trying SCNScene for USD file")
+                    
                     if let loadedScene = try? SCNScene(url: tempURL, options: nil) {
                         for child in loadedScene.rootNode.childNodes {
                             node.addChildNode(child.clone())
                         }
-                        print("[3DViewer] Loaded \(node.childNodes.count) nodes via SCNScene")
+                        
                     }
                 }
             } else if fileExtension.lowercased() == "usdz" || fileExtension.lowercased() == "usdc" {
-                print("[3DViewer] Attempting to load \(fileExtension.uppercased()) file with SCNScene")
+                
                 
                 // Check file signature
                 let fileHandle = try FileHandle(forReadingFrom: tempURL)
                 let headerData = fileHandle.readData(ofLength: 4)
                 fileHandle.closeFile()
                 let magic = headerData.map { String(format: "%02x", $0) }.joined()
-                print("[3DViewer] File signature: \(magic)")
                 
                 // USDZ files are ZIP archives (magic: 504b), USDC files start with PXR- (50 58 52 2d)
                 let isZip = magic.hasPrefix("504b")
                 let isUSDC = magic.hasPrefix("5058522d") // PXR-
                 
                 if fileExtension.lowercased() == "usdz" && !isZip {
-                    print("[3DViewer] WARNING: .usdz file doesn't have ZIP signature, might be .usdc")
                 } else if fileExtension.lowercased() == "usdc" && !isUSDC {
-                    print("[3DViewer] WARNING: .usdc file doesn't have expected PXR signature")
                 }
                 
                 if !isZip && !isUSDC {
-                    print("[3DViewer] ERROR: File doesn't match expected USD format")
-                    print("[3DViewer] Expected ZIP (USDZ) or PXR (USDC) signature")
+                    
                     
                     await MainActor.run {
                         let errorText = SCNText(string: "Invalid USDZ file\nFile is corrupted", extrusionDepth: 0.05)
@@ -705,7 +679,7 @@ struct SceneKitModelViewer: UIViewRepresentable {
                         .checkConsistency: true,
                         .createNormalsIfAbsent: true
                     ])
-                    print("[3DViewer] USDZ scene loaded with \(loadedScene.rootNode.childNodes.count) root children")
+                    
                     
                     // Add all children from the loaded scene
                     for child in loadedScene.rootNode.childNodes {
@@ -713,7 +687,7 @@ struct SceneKitModelViewer: UIViewRepresentable {
                     }
                     
                     if node.childNodes.isEmpty {
-                        print("[3DViewer] No nodes found in USDZ root, checking deeper...")
+                        
                         // Sometimes USDZ has nested structure
                         func addAllChildren(from parent: SCNNode, to target: SCNNode) {
                             for child in parent.childNodes {
@@ -727,8 +701,7 @@ struct SceneKitModelViewer: UIViewRepresentable {
                     }
                     
                     if node.childNodes.isEmpty {
-                        print("[3DViewer] ERROR: USDZ loaded but contains no geometry")
-                        print("[3DViewer] The USDZ file may be empty or corrupted")
+                        
                         
                         await MainActor.run {
                             let errorText = SCNText(string: "Empty USDZ file\nNo geometry found", extrusionDepth: 0.05)
@@ -744,10 +717,9 @@ struct SceneKitModelViewer: UIViewRepresentable {
                         return
                     }
                     
-                    print("[3DViewer] USDZ loaded successfully with \(node.childNodes.count) nodes")
+                    
                 } catch {
-                    print("[3DViewer] Failed to load USDZ with SCNScene: \(error)")
-                    print("[3DViewer] The USDZ file appears to be corrupted or in an unsupported format")
+                    
                     
                     await MainActor.run {
                         let errorText = SCNText(string: "USDZ load failed\n\(error.localizedDescription)", extrusionDepth: 0.05)
@@ -763,7 +735,7 @@ struct SceneKitModelViewer: UIViewRepresentable {
                     return
                 }
             } else if fileExtension.lowercased() == "glb" {
-                print("[3DViewer] Attempting to load GLB file")
+                
                 
                 // Try SCNScene with all available options
                 let loadOptions: [SCNSceneSource.LoadingOption: Any] = [
@@ -775,21 +747,18 @@ struct SceneKitModelViewer: UIViewRepresentable {
                 
                 do {
                     let loadedScene = try SCNScene(url: tempURL, options: loadOptions)
-                    print("[3DViewer] GLB scene loaded, checking root node children: \(loadedScene.rootNode.childNodes.count)")
                     
                     if loadedScene.rootNode.childNodes.isEmpty {
-                        print("[3DViewer] Root node is empty, trying to extract from scene source")
+                        
                         
                         // Try using SCNSceneSource for more control
                         let sceneSource = SCNSceneSource(url: tempURL, options: nil)
                         if let sceneSource = sceneSource {
                             let entryIDs = sceneSource.identifiersOfEntries(withClass: SCNNode.self)
-                            print("[3DViewer] Found \(entryIDs.count) node entries")
                             
                             for identifier in entryIDs {
                                 if let entry = sceneSource.entryWithIdentifier(identifier, withClass: SCNNode.self) as? SCNNode {
                                     node.addChildNode(entry)
-                                    print("[3DViewer] Added node: \(identifier)")
                                 }
                             }
                         }
@@ -797,11 +766,11 @@ struct SceneKitModelViewer: UIViewRepresentable {
                         for child in loadedScene.rootNode.childNodes {
                             node.addChildNode(child.clone())
                         }
-                        print("[3DViewer] GLB loaded with \(loadedScene.rootNode.childNodes.count) children")
+                        
                     }
                     
                     if node.childNodes.isEmpty {
-                        print("[3DViewer] No geometry loaded from GLB")
+                        
                         await MainActor.run {
                             // Show a placeholder or error
                             let errorGeometry = SCNText(string: "GLB Load Failed", extrusionDepth: 0.1)
@@ -813,8 +782,7 @@ struct SceneKitModelViewer: UIViewRepresentable {
                         return
                     }
                 } catch {
-                    print("[3DViewer] Failed to load GLB: \(error.localizedDescription)")
-                    print("[3DViewer] Note: GLB format is not natively supported on iOS. Please use USDZ/USDC format instead.")
+                    
                     
                     await MainActor.run {
                         // Show a helpful error message
@@ -831,7 +799,7 @@ struct SceneKitModelViewer: UIViewRepresentable {
                     return
                 }
             } else {
-                print("[3DViewer] No objects found in \(fileExtension) file")
+                
                 try? FileManager.default.removeItem(at: tempURL)
                 return
             }
@@ -862,7 +830,6 @@ struct SceneKitModelViewer: UIViewRepresentable {
             
             // Only add node if it has actual content
             guard !node.childNodes.isEmpty else {
-                print("[3DViewer] ERROR: No geometry was loaded from the file")
                 await MainActor.run {
                     let errorText = SCNText(string: "No 3D content\nFile may be empty", extrusionDepth: 0.05)
                     errorText.font = UIFont.systemFont(ofSize: 0.3)
@@ -878,14 +845,12 @@ struct SceneKitModelViewer: UIViewRepresentable {
             
             await MainActor.run {
                 scene.rootNode.addChildNode(node)
-                print("[3DViewer] Model loaded successfully with \(node.childNodes.count) nodes")
             }
             
             // Clean up temp file
             try? FileManager.default.removeItem(at: tempURL)
             
         } catch {
-            print("[3DViewer] Failed to load model: \(error)")
         }
     }
 }
@@ -957,7 +922,6 @@ struct CombinedModelViewer: UIViewRepresentable {
         
         // Handle camera actions - only process if it's different from last action
         if let action = cameraAction, action != context.coordinator.lastCameraAction {
-            print("[CombinedViewer] Processing camera action: \(action)")
             context.coordinator.lastCameraAction = action
             handleCameraAction(action, context: context)
         }
@@ -1154,7 +1118,7 @@ struct CombinedModelViewer: UIViewRepresentable {
     }
     
     private func loadModels(into scene: SCNScene, sceneView: SCNView, coordinator: Coordinator) async {
-        print("[CombinedViewer] Loading models for space: \(space.name)")
+        
         
         // Set loading state
         await MainActor.run {
@@ -1164,11 +1128,11 @@ struct CombinedModelViewer: UIViewRepresentable {
         // Load primary model (USDC/GLB)
         if let usdcUrl = space.modelUsdcUrl {
             let fileExt = usdcUrl.hasSuffix(".usdz") ? "usdz" : "usdc"
-            print("[CombinedViewer] Loading primary model: \(fileExt.uppercased())")
+            
             let node = await loadModel(url: usdcUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: nil, nodeName: "primaryModel")
             coordinator.primaryModelNode = node
         } else if let glbUrl = space.modelGlbUrl {
-            print("[CombinedViewer] Loading primary model: GLB")
+            
             let node = await loadModel(url: glbUrl, fileExtension: "glb", into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: nil, nodeName: "primaryModel")
             coordinator.primaryModelNode = node
         }
@@ -1186,7 +1150,7 @@ struct CombinedModelViewer: UIViewRepresentable {
                 // Default to usdc for scan files (new format)
                 fileExt = "usdc"
             }
-            print("[CombinedViewer] Loading scan model: \(fileExt.uppercased())")
+            
             let node = await loadModel(url: scanUrl, fileExtension: fileExt, into: scene, offset: SCNVector3(x: 0, y: 0, z: 0), color: UIColor.cyan.withAlphaComponent(0.5), nodeName: "scanModel")
             coordinator.scanModelNode = node
         }
@@ -1259,20 +1223,18 @@ struct CombinedModelViewer: UIViewRepresentable {
         )
         camera.look(at: center)
         
-        print("[CombinedViewer] Fitted camera - Center: \(center), Distance: \(distance)")
+        
     }
     
     private func loadModel(url: String, fileExtension: String, into scene: SCNScene, offset: SCNVector3, color: UIColor?, nodeName: String) async -> SCNNode? {
         guard let modelURL = URL(string: url) else {
-            print("[CombinedViewer] Invalid URL: \(url)")
             return nil
         }
         
         do {
-            print("[CombinedViewer] Downloading \(fileExtension.uppercased()) from: \(modelURL)")
+            
             
             let (data, _) = try await URLSession.shared.data(from: modelURL)
-            print("[CombinedViewer] Downloaded \(data.count) bytes")
             
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
@@ -1283,7 +1245,6 @@ struct CombinedModelViewer: UIViewRepresentable {
             let asset = MDLAsset(url: tempURL)
             
             if asset.count > 0 {
-                print("[CombinedViewer] MDLAsset found \(asset.count) objects")
                 for index in 0..<asset.count {
                     let object = asset.object(at: index)
                     
@@ -1299,7 +1260,6 @@ struct CombinedModelViewer: UIViewRepresentable {
             
             // If MDLAsset didn't produce nodes, try loading as SCNScene (better for USDC/USDZ)
             if containerNode.childNodes.isEmpty {
-                print("[CombinedViewer] MDLAsset produced no nodes, trying SCNScene...")
                 if let loadedScene = try? SCNScene(url: tempURL, options: [
                     SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
                     SCNSceneSource.LoadingOption.flattenScene: true
@@ -1307,7 +1267,7 @@ struct CombinedModelViewer: UIViewRepresentable {
                     for child in loadedScene.rootNode.childNodes {
                         containerNode.addChildNode(child.clone())
                     }
-                    print("[CombinedViewer] SCNScene loaded \(containerNode.childNodes.count) nodes")
+                    
                 }
             }
             
@@ -1325,14 +1285,12 @@ struct CombinedModelViewer: UIViewRepresentable {
             
             await MainActor.run {
                 scene.rootNode.addChildNode(containerNode)
-                print("[CombinedViewer] Added \(fileExtension.uppercased()) model with \(containerNode.childNodes.count) nodes")
             }
             
             try? FileManager.default.removeItem(at: tempURL)
             return containerNode
             
         } catch {
-            print("[CombinedViewer] Failed to load \(fileExtension.uppercased()): \(error)")
             return nil
         }
     }
@@ -1342,7 +1300,6 @@ struct CombinedModelViewer: UIViewRepresentable {
     private func performRegistration(context: Context) async {
         guard let primaryNode = context.coordinator.primaryModelNode,
               let scanNode = context.coordinator.scanModelNode else {
-            print("[CombinedViewer] Models not loaded yet for registration")
             await MainActor.run {
                 context.coordinator.isRegistering = false
                 isRegistering = false
@@ -1352,17 +1309,7 @@ struct CombinedModelViewer: UIViewRepresentable {
         
         // Log registration settings
         let settings = AppSettings.shared
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("[Space3DViewer] REGISTRATION SETTINGS")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        print("Preset: \(settings.currentPreset.rawValue)")
-        print("Model Points: \(settings.modelPointsSampleCount)")
-        print("Scan Points: \(settings.scanPointsSampleCount)")
-        print("Max Iterations: \(settings.maxICPIterations)")
-        print("Convergence Threshold: \(settings.icpConvergenceThreshold)")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
-        print("[CombinedViewer] Starting registration...")
         
         // Extract point clouds using settings
         await updateProgress("Extracting primary model points...", context: context)
@@ -1383,17 +1330,10 @@ struct CombinedModelViewer: UIViewRepresentable {
                 }
             }
         ) {
-            print("[CombinedViewer] Registration complete!")
-            print("[CombinedViewer] RMSE: \(result.rmse)m, Inliers: \(result.inlierFraction * 100)%")
-            print("[CombinedViewer] Transform matrix: \(result.transformMatrix)")
-            
             // Apply transform to primary model with animation
             await MainActor.run {
-                // Log original position
                 let originalPos = primaryNode.position
                 let originalTransform = primaryNode.simdTransform
-                print("[CombinedViewer] Original position: (\(originalPos.x), \(originalPos.y), \(originalPos.z))")
-                print("[CombinedViewer] Original transform: \(originalTransform)")
                 
                 // The result.transformMatrix is a world-space transform computed from world-space points
                 // We need to convert this to the node's local space
@@ -1410,16 +1350,10 @@ struct CombinedModelViewer: UIViewRepresentable {
                 let composedTransform = result.transformMatrix * originalTransform
                 primaryNode.simdTransform = composedTransform
                 
-                // Log the new position for debugging
                 let newPos = primaryNode.position
                 let translation = SIMD3<Float>(newPos.x - originalPos.x, newPos.y - originalPos.y, newPos.z - originalPos.z)
-                print("[CombinedViewer] New position: (\(newPos.x), \(newPos.y), \(newPos.z))")
-                print("[CombinedViewer] Translation applied: (\(translation.x), \(translation.y), \(translation.z))")
-                print("[CombinedViewer] Distance moved: \(length(translation))")
                 
-                // Verify the transform was applied
                 let finalTransform = primaryNode.simdTransform
-                print("[CombinedViewer] Final composed transform: \(finalTransform)")
                 
                 SCNTransaction.commit()
                 
@@ -1427,7 +1361,6 @@ struct CombinedModelViewer: UIViewRepresentable {
                 onRegistrationComplete(result)
             }
         } else {
-            print("[CombinedViewer] Registration failed")
             await MainActor.run {
                 context.coordinator.isRegistering = false
                 isRegistering = false

@@ -107,7 +107,7 @@ class StorageUploadViewModel: ObservableObject {
                 spaceId: spaceId
             )
             
-            print("[Upload] Starting upload: \(fileName) -> \(destinationPath)")
+            
             
             // Upload file
             let objectUrl: String
@@ -128,11 +128,9 @@ class StorageUploadViewModel: ObservableObject {
             }
             
             uploadedURL = objectUrl
-            print("[Upload] Success: \(objectUrl)")
             
         } catch {
             errorMessage = error.localizedDescription
-            print("[Upload] Failed: \(error)")
         }
         
         isUploading = false

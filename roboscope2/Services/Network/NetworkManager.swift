@@ -141,11 +141,7 @@ final class NetworkManager {
             do {
                 request.httpBody = try encoder.encode(body)
                 
-                // Log request body for debugging
-                if configuration.enableLogging, let httpBody = request.httpBody,
-                   let bodyString = String(data: httpBody, encoding: .utf8) {
-                    print("📤 Request body: \(bodyString)")
-                }
+                // Logging disabled
             } catch {
                 throw APIError.encodingError(error)
             }
@@ -165,9 +161,7 @@ final class NetworkManager {
     // MARK: - Request Execution
     
     private func performRequest<T: Decodable>(_ request: URLRequest) async throws -> T {
-        if configuration.enableLogging {
-            logRequest(request)
-        }
+        // Logging disabled
         
         let (data, response) = try await session.data(for: request)
         
@@ -175,9 +169,7 @@ final class NetworkManager {
             throw APIError.unknown(NSError(domain: "Invalid response", code: -1))
         }
         
-        if configuration.enableLogging {
-            logResponse(httpResponse, data: data)
-        }
+        // Logging disabled
         
         try validateResponse(httpResponse, data: data)
         
@@ -189,28 +181,7 @@ final class NetworkManager {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
-            if configuration.enableLogging {
-                print("❌ Decoding error for \(T.self):")
-                print("   Error: \(error)")
-                if let decodingError = error as? DecodingError {
-                    switch decodingError {
-                    case .keyNotFound(let key, let context):
-                        print("   Missing key: \(key.stringValue) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
-                    case .typeMismatch(let type, let context):
-                        print("   Type mismatch for type \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
-                        print("   Expected \(type) but found: \(context.debugDescription)")
-                    case .valueNotFound(let type, let context):
-                        print("   Value not found for type \(type) at \(context.codingPath.map { $0.stringValue }.joined(separator: "."))")
-                    case .dataCorrupted(let context):
-                        print("   Data corrupted at \(context.codingPath.map { $0.stringValue }.joined(separator: ".")): \(context.debugDescription)")
-                    @unknown default:
-                        print("   Unknown decoding error")
-                    }
-                }
-                if let jsonString = String(data: data, encoding: .utf8) {
-                    print("   JSON: \(jsonString)")
-                }
-            }
+            
             throw APIError.decodingError(error)
         }
     }
@@ -246,18 +217,7 @@ final class NetworkManager {
     
     // MARK: - Logging
     
-    private func logRequest(_ request: URLRequest) {
-        print("📤 \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "")")
-        if let body = request.httpBody, let bodyString = String(data: body, encoding: .utf8) {
-            print("   Body: \(bodyString)")
-        }
-    }
+    private func logRequest(_ request: URLRequest) { }
     
-    private func logResponse(_ response: HTTPURLResponse, data: Data) {
-        let emoji = (200...299).contains(response.statusCode) ? "✅" : "❌"
-        print("\(emoji) \(response.statusCode) \(response.url?.absoluteString ?? "")")
-        if let bodyString = String(data: data, encoding: .utf8), !bodyString.isEmpty {
-            print("   Response: \(bodyString.prefix(200))")
-        }
-    }
+    private func logResponse(_ response: HTTPURLResponse, data: Data) { }
 }
