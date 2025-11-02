@@ -14,12 +14,30 @@ import SceneKit
 struct ARSessionView: View {
     let session: WorkSession
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var captureSession = CaptureSession()
-    @StateObject private var markerService = SpatialMarkerService()
-    @StateObject private var workSessionService = WorkSessionService.shared
-    @StateObject private var markerApi = MarkerService.shared
-    @StateObject private var spaceService = SpaceService.shared
-    @StateObject private var settings = AppSettings.shared
+    @StateObject private var captureSession: CaptureSession
+    @StateObject private var markerService: SpatialMarkerService
+    @StateObject private var workSessionService: WorkSessionService
+    @StateObject private var markerApi: MarkerService
+    @StateObject private var spaceService: SpaceService
+    @StateObject private var settings: AppSettings
+    @StateObject private var viewModel: ARSessionViewModel
+
+    init(session: WorkSession) {
+        self.session = session
+        let capture = CaptureSession()
+        let markerService = SpatialMarkerService()
+        let workService = WorkSessionService.shared
+        let markerApi = MarkerService.shared
+        let spaceService = SpaceService.shared
+        let settings = AppSettings.shared
+        _captureSession = StateObject(wrappedValue: capture)
+        _markerService = StateObject(wrappedValue: markerService)
+        _workSessionService = StateObject(wrappedValue: workService)
+        _markerApi = StateObject(wrappedValue: markerApi)
+        _spaceService = StateObject(wrappedValue: spaceService)
+        _settings = StateObject(wrappedValue: settings)
+        _viewModel = StateObject(wrappedValue: ARSessionViewModel(sessionId: session.id, markerService: markerService, markerApi: markerApi))
+    }
 
     @State private var arView: ARView?
     @State private var isSessionActive = false
@@ -62,15 +80,8 @@ struct ARSessionView: View {
     @State private var isLoadingScan = false
 
     // Match scanning interactions
-    @State private var isHoldingScreen = false
-    @State private var isTwoFingers = false
-    @State private var moveUpdateTimer: Timer?
-    @State private var markerTrackingTimer: Timer?
     @State private var autoDropTimer: Timer?
     @State private var autoDropAttempts: Int = 0
-    // Transform state (for finger-driven move/resize)
-    @State private var currentDrag: CGSize = .zero
-    @State private var currentScale: CGFloat = 1.0
     // one-finger edge move is now handled by the overlay's one-finger pan
     
     // MARK: - Computed Properties
@@ -98,17 +109,13 @@ struct ARSessionView: View {
                     // Start auto-drop with retries so it lands as soon as a plane is available
                     startAutoDropFrameOrigin()
                 }
-                // Start tracking markers continuously
-                let tracking = Timer(timeInterval: 0.1, repeats: true) { _ in
-                    // print("[Timer] Marker tracking tick")
-                    checkMarkersInTarget()
+                // Start tracking markers continuously via ViewModel
+                viewModel.startTracking(getTargetRect: { getTargetRect() }, onManualSelectionUpdate: {
                     // While holding to move a manual point, freeze selection to avoid drops
-                    if !(isHoldingScreen && manualPlacementState != .inactive) {
+                    if !(viewModel.isHoldingScreen && manualPlacementState != .inactive) {
                         updateManualPointSelection()
                     }
-                }
-                RunLoop.main.add(tracking, forMode: .common)
-                markerTrackingTimer = tracking
+                })
                 
                 // Load persisted markers for this session
                 Task {
@@ -153,17 +160,16 @@ struct ARSessionView: View {
                 }
             }
             .onDisappear {
-                markerTrackingTimer?.invalidate()
-                markerTrackingTimer = nil
+                viewModel.cancelAllTimers()
                 autoDropTimer?.invalidate()
                 autoDropTimer = nil
                 autoDropAttempts = 0
-                stopMovingMarker()
                 endManualPointMove()
                 endARSession()
             }
             .onChange(of: arView) { newValue in
                 markerService.arView = newValue
+                viewModel.bindARView(newValue)
             }
             // SwiftUI DragGesture removed; we now drive one-finger via the overlay to avoid conflicts
             // Removed LongPressGesture: selection is automatic; long-press was cancelling active movement
@@ -175,134 +181,37 @@ struct ARSessionView: View {
                         // Ignore two-finger in manual mode for now
                         return
                     }
-                    // Two-finger whole-marker move
-                    guard !isTwoFingers else { return }
-                    isTwoFingers = true
-                    isHoldingScreen = true
-                    // Cancel any active one-finger edge move
-                    if moveUpdateTimer != nil {
-                        markerService.endMoveSelectedEdge()
-                        moveUpdateTimer?.invalidate()
-                        moveUpdateTimer = nil
-                    }
-                    // Start whole-marker movement if a marker is selected
-                    if markerService.selectedMarkerID != nil {
-                        let rect = getTargetRect()
-                        let center = CGPoint(x: rect.midX, y: rect.midY)
-                        if markerService.startTransformSelectedMarker(referenceCenter: center) {
-                            let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
-                                markerService.updateTransform(dragTranslation: currentDrag, pinchScale: currentScale)
-                            }
-                            RunLoop.main.add(timer, forMode: .common)
-                            moveUpdateTimer = timer
-                        }
-                    }
+                    viewModel.twoFingerStart(getTargetRect: { getTargetRect() })
                 },
                 onOneFingerStart: {
                     if manualPlacementState != .inactive {
                         // Begin moving selected manual point (if any)
                         if selectedManualPointIndex != nil {
-                            isHoldingScreen = true
+                            viewModel.isHoldingScreen = true
                             startManualPointMove()
                         }
                         return
                     }
-                    // Start one-finger edge movement with grace already applied inside overlay
-                    if !isTwoFingers && moveUpdateTimer == nil {
-                        isHoldingScreen = true
-                        if markerService.startMoveSelectedEdge() {
-                            let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
-                                markerService.updateMoveSelectedEdge(withDrag: currentDrag)
-                            }
-                            RunLoop.main.add(timer, forMode: .common)
-                            moveUpdateTimer = timer
-                        }
-                    }
+                    viewModel.oneFingerStart()
                 },
                 onOneFingerEnd: {
                     if manualPlacementState != .inactive {
                         // End moving manual point
-                        isHoldingScreen = false
+                        viewModel.isHoldingScreen = false
                         endManualPointMove()
                         return
                     }
-                    // End one-finger edge move if not in two-finger mode
-                    if !isTwoFingers {
-                        isHoldingScreen = false
-                        if let (backendId, version, updatedNodes) = markerService.endMoveSelectedEdge() {
-                            // Transform to FrameOrigin coordinates before persisting
-                            let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
-                            
-                            // Persist updated marker to backend
-                            Task {
-                                do {
-                                    _ = try await markerApi.updateMarkerPosition(
-                                        id: backendId,
-                                        workSessionId: session.id,
-                                        points: frameOriginPoints,
-                                        version: version,
-                                        customProps: nil
-                                    )
-                                    print("[ARSession] Updated marker position in FrameOrigin coordinates")
-                                    
-                                    // Refresh marker details after position update
-                                    await markerService.updateDetailsAfterTransform(backendId: backendId)
-                                } catch {
-                                    // Silently handle error
-                                }
-                            }
-                        }
-                        moveUpdateTimer?.invalidate()
-                        moveUpdateTimer = nil
-                        currentDrag = .zero
-                        currentScale = 1.0
-                    }
+                    viewModel.oneFingerEnd(transformToFrameOrigin: { pts in transformPointsToFrameOrigin(pts) })
                 },
                 onChange: { translation, scale in
-                    if manualPlacementState != .inactive {
-                        // Drag not used for manual point; movement is by cross + hold
-                        return
-                    }
-                    // Stream pan/pinch changes
-                    currentDrag = translation
-                    currentScale = scale
+                    if manualPlacementState != .inactive { return }
+                    viewModel.gestureChanged(translation: translation, scale: scale)
                 },
                 onEnd: {
                     if manualPlacementState != .inactive {
                         // Ignore two-finger end in manual mode
                     } else {
-                        // Two-finger ended: stop whole-marker movement
-                        if isTwoFingers {
-                            isTwoFingers = false
-                            isHoldingScreen = false
-                            if let (backendId, version, updatedNodes) = markerService.endTransform() {
-                                // Transform to FrameOrigin coordinates before persisting
-                                let frameOriginPoints = transformPointsToFrameOrigin(updatedNodes)
-                                
-                                // Persist updated marker to backend
-                                Task {
-                                    do {
-                                        _ = try await markerApi.updateMarkerPosition(
-                                            id: backendId,
-                                            workSessionId: session.id,
-                                            points: frameOriginPoints,
-                                            version: version,
-                                            customProps: nil
-                                        )
-                                        print("[ARSession] Updated marker transform in FrameOrigin coordinates")
-                                        
-                                        // Refresh marker details after transform update
-                                        await markerService.updateDetailsAfterTransform(backendId: backendId)
-                                    } catch {
-                                        // Silently handle error
-                                    }
-                                }
-                            }
-                            moveUpdateTimer?.invalidate()
-                            moveUpdateTimer = nil
-                            currentScale = 1.0
-                            currentDrag = .zero
-                        }
+                        viewModel.twoFingerEnd(transformToFrameOrigin: { pts in transformPointsToFrameOrigin(pts) })
                     }
                 }
             )
@@ -528,7 +437,7 @@ struct ARSessionView: View {
                     // Center action button
                     if manualPlacementState == .inactive {
                         Button { createAndPersistMarker() } label: {
-                            Image(systemName: isTwoFingers ? "hand.tap.fill" : (isHoldingScreen ? "hand.point.up.fill" : "plus"))
+                            Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
                                 .font(.system(size: 36))
                                 .frame(width: 80, height: 80)
                         }
@@ -1155,19 +1064,7 @@ struct ARSessionView: View {
         markerService.selectMarkerInTarget(targetRect: rect)
     }
     
-    private func startMovingMarker() {
-        if markerService.startMovingSelectedMarker() {
-            moveUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { _ in
-                markerService.updateMovingMarker()
-            }
-        }
-    }
-    
-    private func stopMovingMarker() {
-        moveUpdateTimer?.invalidate()
-        moveUpdateTimer = nil
-        markerService.stopMovingMarker()
-    }
+    // Legacy single-finger move helpers replaced by ViewModel-driven movement
     
     private func clearAllMarkersPersisted() {
         // Remove visually
@@ -1993,387 +1890,9 @@ struct ARSessionView: View {
 // MARK: - Preview
 
 // Private overlay to detect two-finger contacts immediately and forward begin/end.
-private struct TwoFingerTouchOverlay: UIViewRepresentable {
-    let onStart: () -> Void
-    let onOneFingerStart: () -> Void
-    let onOneFingerEnd: () -> Void
-    let onChange: (CGSize, CGFloat) -> Void
-    let onEnd: () -> Void
+// Extracted TwoFingerTouchOverlay into Views/Components for reuse
 
-    func makeCoordinator() -> Coordinator { Coordinator(onStart: onStart, onOneFingerStart: onOneFingerStart, onOneFingerEnd: onOneFingerEnd, onChange: onChange, onEnd: onEnd) }
-
-    func makeUIView(context: Context) -> UIView {
-        let touchView = TouchPassthroughView()
-        touchView.backgroundColor = .clear
-        touchView.isUserInteractionEnabled = true
-        touchView.coordinator = context.coordinator
-        // Pinch for scale (still useful for two-finger)
-        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
-        pinch.cancelsTouchesInView = false
-        pinch.delegate = context.coordinator
-        touchView.addGestureRecognizer(pinch)
-        return touchView
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        if let touchView = uiView as? TouchPassthroughView {
-            touchView.coordinator = context.coordinator
-        }
-    }
-
-    // Custom UIView that directly handles touches and forwards to coordinator
-    class TouchPassthroughView: UIView {
-        weak var coordinator: Coordinator?
-        
-        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-            super.touchesBegan(touches, with: event)
-            coordinator?.handleTouchesBegan(touches, event: event, in: self)
-        }
-        
-        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-            super.touchesMoved(touches, with: event)
-            coordinator?.handleTouchesMoved(touches, event: event, in: self)
-        }
-        
-        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-            super.touchesEnded(touches, with: event)
-            coordinator?.handleTouchesEnded(touches, event: event, in: self)
-        }
-        
-        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-            super.touchesCancelled(touches, with: event)
-            coordinator?.handleTouchesCancelled(touches, event: event, in: self)
-        }
-    }
-
-    class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        let onStart: () -> Void
-        let onOneFingerStart: () -> Void
-        let onOneFingerEnd: () -> Void
-        let onChange: (CGSize, CGFloat) -> Void
-        let onEnd: () -> Void
-        private var twoFingerActive = false
-        private var oneFingerActive = false
-        private var oneFingerPending: Timer?
-        private var currentScale: CGFloat = 1.0
-        private var currentTranslation: CGSize = .zero
-        private var trackingTouches: Set<UITouch> = []
-        private var touchStartLocation: CGPoint = .zero
-
-        init(onStart: @escaping () -> Void, onOneFingerStart: @escaping () -> Void, onOneFingerEnd: @escaping () -> Void, onChange: @escaping (CGSize, CGFloat) -> Void, onEnd: @escaping () -> Void) {
-            self.onStart = onStart
-            self.onOneFingerStart = onOneFingerStart
-            self.onOneFingerEnd = onOneFingerEnd
-            self.onChange = onChange
-            self.onEnd = onEnd
-        }
-        
-        // Direct touch handling (bypasses gesture recognizers which ARView was blocking)
-        func handleTouchesBegan(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
-            trackingTouches.formUnion(touches)
-            let touchCount = trackingTouches.count
-            
-            if touchCount == 1, let touch = trackingTouches.first {
-                touchStartLocation = touch.location(in: view)
-                currentTranslation = .zero
-                if !twoFingerActive && !oneFingerActive && oneFingerPending == nil {
-                    oneFingerPending = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { [weak self] _ in
-                        guard let self = self else { return }
-                        if !self.twoFingerActive && !self.oneFingerActive && self.trackingTouches.count == 1 {
-                            self.oneFingerActive = true
-                            self.onOneFingerStart()
-                        }
-                    }
-                }
-            } else if touchCount >= 2 {
-                // Cancel one-finger and start two-finger immediately
-                oneFingerPending?.invalidate(); oneFingerPending = nil
-                if oneFingerActive {
-                    oneFingerActive = false
-                    onOneFingerEnd()
-                }
-                if !twoFingerActive {
-                    // Compute initial centroid for two-finger tracking
-                    if let first = trackingTouches.first, let second = trackingTouches.dropFirst().first {
-                        let loc1 = first.location(in: view)
-                        let loc2 = second.location(in: view)
-                        touchStartLocation = CGPoint(x: (loc1.x + loc2.x)/2, y: (loc1.y + loc2.y)/2)
-                    }
-                    twoFingerActive = true
-                    currentScale = 1.0
-                    currentTranslation = .zero
-                    onStart()
-                    onChange(currentTranslation, currentScale)
-                }
-            }
-        }
-        
-        func handleTouchesMoved(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
-            let touchCount = trackingTouches.count
-            if touchCount == 1, let touch = trackingTouches.first, oneFingerActive && !twoFingerActive {
-                let currentLoc = touch.location(in: view)
-                currentTranslation = CGSize(width: currentLoc.x - touchStartLocation.x, height: currentLoc.y - touchStartLocation.y)
-                onChange(currentTranslation, currentScale)
-            } else if touchCount >= 2 && twoFingerActive {
-                // Two-finger pan: compute centroid delta
-                if let first = trackingTouches.first, let second = trackingTouches.dropFirst().first {
-                    let loc1 = first.location(in: view)
-                    let loc2 = second.location(in: view)
-                    let centroid = CGPoint(x: (loc1.x + loc2.x)/2, y: (loc1.y + loc2.y)/2)
-                    currentTranslation = CGSize(width: centroid.x - touchStartLocation.x, height: centroid.y - touchStartLocation.y)
-                    onChange(currentTranslation, currentScale)
-                }
-            }
-        }
-        
-        func handleTouchesEnded(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
-            trackingTouches.subtract(touches)
-            let remaining = trackingTouches.count
-            
-            if remaining == 0 {
-                oneFingerPending?.invalidate(); oneFingerPending = nil
-                if oneFingerActive {
-                    oneFingerActive = false
-                    onOneFingerEnd()
-                }
-                if twoFingerActive {
-                    twoFingerActive = false
-                    onEnd()
-                }
-                currentTranslation = .zero
-                currentScale = 1.0
-            } else if remaining == 1 && twoFingerActive {
-                // Went from two to one: end two-finger
-                twoFingerActive = false
-                onEnd()
-            }
-        }
-        
-        func handleTouchesCancelled(_ touches: Set<UITouch>, event: UIEvent?, in view: UIView) {
-            handleTouchesEnded(touches, event: event, in: view)
-        }
-
-        @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
-            currentScale = recognizer.scale
-            if !twoFingerActive && recognizer.state == .began {
-                twoFingerActive = true
-                currentTranslation = .zero
-                onStart()
-            }
-            if twoFingerActive {
-                onChange(currentTranslation, currentScale)
-            }
-            // End handled by long press recognizer
-        }
-        // Allow pinch, pan, and long-press to recognize together without blocking ARView
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            return true
-        }
-    }
-}
-
-// MARK: - Marker Badge View
-
-struct MarkerBadgeView: View {
-    let info: SpatialMarkerService.MarkerInfo
-    var details: MarkerDetails? = nil
-    var onDelete: (() -> Void)? = nil
-    
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(spacing: 12) {
-                // Show detailed metrics if available, otherwise show basic dimensions
-                if let details = details {
-                    // Header with title
-                    Text("Marker Details")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.9))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    Divider()
-                        .background(Color.white.opacity(0.3))
-                    
-                    // Size measurements (long x cross)
-                    HStack(spacing: 20) {
-                        VStack(spacing: 4) {
-                            Text("Long Size")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(String(format: "%.2f m", details.longSize))
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
-                        
-                        Rectangle()
-                            .fill(Color.white.opacity(0.3))
-                            .frame(width: 1, height: 30)
-                        
-                        VStack(spacing: 4) {
-                            Text("Cross Size")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(String(format: "%.2f m", details.crossSize))
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
-                    }
-                    
-                    Divider()
-                        .background(Color.white.opacity(0.3))
-                    
-                    // Edge distances
-                    VStack(spacing: 8) {
-                        Text("Edge Distances")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.7))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        HStack(spacing: 12) {
-                            EdgeDistanceView(label: "Left", distance: details.leftDistance, color: .blue)
-                            EdgeDistanceView(label: "Right", distance: details.rightDistance, color: .green)
-                            EdgeDistanceView(label: "Near", distance: details.nearDistance, color: .orange)
-                            EdgeDistanceView(label: "Far", distance: details.farDistance, color: .purple)
-                        }
-                    }
-                    
-                    Divider()
-                        .background(Color.white.opacity(0.3))
-                    
-                    // Center position (long/cross axes)
-                    HStack(spacing: 20) {
-                        VStack(spacing: 4) {
-                            Text("Long (Z)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(String(format: "%.2f m", details.centerLocationLong))
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.white)
-                        }
-                        
-                        Rectangle()
-                            .fill(Color.white.opacity(0.3))
-                            .frame(width: 1, height: 30)
-                        
-                        VStack(spacing: 4) {
-                            Text("Cross (X)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(String(format: "%.2f m", details.centerLocationCross))
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.white)
-                        }
-                    }
-                } else {
-                    // Fallback to basic dimensions from MarkerInfo
-                    HStack(spacing: 20) {
-                        VStack(spacing: 4) {
-                            Text("Width")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(String(format: "%.2f m", info.width))
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
-                        
-                        Rectangle()
-                            .fill(Color.white.opacity(0.3))
-                            .frame(width: 1, height: 30)
-                        
-                        VStack(spacing: 4) {
-                            Text("Length")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(String(format: "%.2f m", info.length))
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
-                    }
-                    
-                    Divider()
-                        .background(Color.white.opacity(0.3))
-                    
-                    // Center coordinates row
-                    HStack(spacing: 20) {
-                        VStack(spacing: 4) {
-                            Text("X")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(String(format: "%.2f", info.centerX))
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.white)
-                        }
-                        
-                        Rectangle()
-                            .fill(Color.white.opacity(0.3))
-                            .frame(width: 1, height: 30)
-                        
-                        VStack(spacing: 4) {
-                            Text("Z")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(String(format: "%.2f", info.centerZ))
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.white)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [.white.opacity(0.3), .white.opacity(0.1)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-            )
-            .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
-
-            if let onDelete {
-                Button(action: onDelete) {
-                    Image(systemName: "trash.fill")
-                        .foregroundColor(.white)
-                        .font(.system(size: 12, weight: .bold))
-                        .padding(8)
-                        .background(Circle().fill(Color.red.opacity(0.9)))
-                        .overlay(
-                            Circle().stroke(Color.white.opacity(0.7), lineWidth: 1)
-                        )
-                        .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 3)
-                }
-                .offset(x: 8, y: -8)
-            }
-        }
-    }
-}
-
-// MARK: - Edge Distance View
-
-struct EdgeDistanceView: View {
-    let label: String
-    let distance: Float
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 2) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(color.opacity(0.8))
-            Text(String(format: "%.2f", distance))
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white)
-        }
-        .frame(minWidth: 40)
-    }
-}
+// Extracted MarkerBadgeView and EdgeDistanceView into Views/Components for reuse
 
 #Preview {
     ARSessionView(

@@ -1,1 +1,1 @@
-// Deprecated: replaced by inlined TwoFingerTouchOverlay in ARSessionView.swift
+// Deprecated: replaced by TwoFingerTouchOverlay in Views/Components/TwoFingerTouchOverlay.swift
