@@ -61,10 +61,16 @@ struct ARSessionView: View {
     @State private var manualPlacementState: ManualPlacementState = .inactive
     @State private var manualFirstPoint: SIMD3<Float>? = nil
     @State private var manualSecondPoint: SIMD3<Float>? = nil
+    // Persisted two-point positions (last applied) to restore on next entry into Two Point mode
+    @State private var preservedFirstPoint: SIMD3<Float>? = nil
+    @State private var preservedSecondPoint: SIMD3<Float>? = nil
     @State private var manualFirstAnchor: AnchorEntity? = nil
     @State private var manualSecondAnchor: AnchorEntity? = nil
     @State private var manualFirstPreferredAlignment: ARRaycastQuery.TargetAlignment? = nil
     @State private var manualSecondPreferredAlignment: ARRaycastQuery.TargetAlignment? = nil
+    // Persisted preferred alignments to restore editing behavior
+    @State private var preservedFirstPreferredAlignment: ARRaycastQuery.TargetAlignment? = nil
+    @State private var preservedSecondPreferredAlignment: ARRaycastQuery.TargetAlignment? = nil
     @State private var selectedManualPointIndex: Int? = nil // 1 or 2
     @State private var manualPointMoveTimer: Timer? = nil
     @State private var fixedManualMoveScreenPoint: CGPoint? = nil // Fixed screen point captured at movement start
@@ -369,10 +375,10 @@ struct ARSessionView: View {
                     .zIndex(3)
             }
 
-            // Bottom control: center plus button
+            // Bottom controls: top row (setup + clear), bottom row (center action)
             VStack {
                 Spacer()
-                
+
                 // Marker info badge (shown when a marker is selected)
                 if let info = markerService.selectedMarkerInfo {
                     MarkerBadgeView(
@@ -397,8 +403,9 @@ struct ARSessionView: View {
                     .padding(.bottom, 20)
                     .transition(.opacity.combined(with: .scale))
                 }
-                
-                HStack(spacing: 20) {
+
+                // Top row: Setup menu (left) and Clear (right, when available)
+                HStack {
                     // Setup menu (left)
                     Menu {
                         if manualPlacementState == .inactive {
@@ -424,7 +431,25 @@ struct ARSessionView: View {
 
                     Spacer()
 
-                    // Center action button
+                    // Clear (right) only in two-point mode when both points exist
+                    if manualPlacementState != .inactive && manualFirstPoint != nil && manualSecondPoint != nil {
+                        Button(role: .destructive) {
+                            clearTwoPointPlacement()
+                        } label: {
+                            Text("Clear")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(minWidth: 120, minHeight: 48)
+                        }
+                        .buttonStyle(.plain)
+                        .lgCapsule(tint: .red)
+                    }
+                }
+                .padding(.horizontal, 16) // preserve horizontal padding regardless of clear visibility
+                .padding(.bottom, 12)
+
+                // Bottom row: Centered main action (Plus or Apply)
+                HStack {
+                    Spacer()
                     if manualPlacementState == .inactive {
                         Button { createAndPersistMarker() } label: {
                             Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
@@ -444,10 +469,9 @@ struct ARSessionView: View {
                         .buttonStyle(.plain)
                         .lgCapsule(tint: .blue)
                     }
-
                     Spacer()
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 16) // keep horizontal padding consistent
                 .padding(.bottom, 50)
             }
             .animation(.easeInOut(duration: 0.2), value: markerService.selectedMarkerID)
@@ -488,13 +512,30 @@ struct ARSessionView: View {
 
     // MARK: - Manual Two-Point Placement
     private func enterManualTwoPointsMode() {
-        // Reset any previous points
+        // Clean any existing helper anchors from prior runs
         removeManualAnchors()
-        manualFirstPoint = nil
-        manualSecondPoint = nil
-        manualFirstPreferredAlignment = nil
-        manualSecondPreferredAlignment = nil
-        manualPlacementState = .placeFirst
+
+        // If we have preserved points from an earlier two-point setup, restore them
+        if let p1 = preservedFirstPoint, let p2 = preservedSecondPoint {
+            // Restore positions into current editing state
+            manualFirstPoint = p1
+            manualSecondPoint = p2
+            manualFirstPreferredAlignment = preservedFirstPreferredAlignment ?? .horizontal
+            manualSecondPreferredAlignment = preservedSecondPreferredAlignment ?? .horizontal
+
+            // Recreate spheres at preserved positions for editing
+            placeManualPoint(p1, color: .red, isFirst: true)
+            placeManualPoint(p2, color: .blue, isFirst: false)
+            manualPlacementState = .readyToApply
+            print(String(format: "[ManualOrigin][Restore] Restored two points: p1=(%.3f, %.3f, %.3f) p2=(%.3f, %.3f, %.3f)", p1.x, p1.y, p1.z, p2.x, p2.y, p2.z))
+        } else {
+            // No preserved points: start fresh placement flow
+            manualFirstPoint = nil
+            manualSecondPoint = nil
+            manualFirstPreferredAlignment = nil
+            manualSecondPreferredAlignment = nil
+            manualPlacementState = .placeFirst
+        }
         // Hide markers and gizmo
         markerService.setMarkersVisible(false)
         frameOriginAnchor?.isEnabled = false
@@ -707,6 +748,34 @@ struct ARSessionView: View {
         
         // Exit manual mode and restore UI
         cancelManualTwoPointsMode()
+
+        // Persist the two points and their alignments for future edits
+        preservedFirstPoint = p1
+        preservedSecondPoint = p2
+        preservedFirstPreferredAlignment = manualFirstPreferredAlignment
+        preservedSecondPreferredAlignment = manualSecondPreferredAlignment
+        print(String(format: "[ManualOrigin][Persist] Saved two points for future edit: p1=(%.3f, %.3f, %.3f) p2=(%.3f, %.3f, %.3f)", p1.x, p1.y, p1.z, p2.x, p2.y, p2.z))
+    }
+
+    /// Clear both points and restart Two Point placement from the first point
+    private func clearTwoPointPlacement() {
+        // Stop any movement
+        endManualPointMove()
+        selectedManualPointIndex = nil
+        // Remove helper anchors (and spheres)
+        removeManualAnchors()
+        // Reset current and preserved state so re-entry starts fresh
+        manualFirstPoint = nil
+        manualSecondPoint = nil
+        manualFirstPreferredAlignment = nil
+        manualSecondPreferredAlignment = nil
+        preservedFirstPoint = nil
+        preservedSecondPoint = nil
+        preservedFirstPreferredAlignment = nil
+        preservedSecondPreferredAlignment = nil
+        // Go back to placing the first point
+        manualPlacementState = .placeFirst
+        print("[ManualOrigin][Clear] Cleared two points; restarting placement at first point")
     }
 
     // MARK: - Manual point selection + moving
@@ -778,18 +847,21 @@ struct ARSessionView: View {
 
     private func startManualPointMove() {
         guard manualPointMoveTimer == nil else { return }
-        // Capture FIXED screen point of the selected sphere to avoid feedback loops (like v1)
+        // Capture FIXED screen point of the selected SPHERE (child), not the anchor
+        // Anchor may still hold the original placement; the sphere is what we actually move
         if let arView, let frame = arView.session.currentFrame, let idx = selectedManualPointIndex {
             let anchor = (idx == 1) ? manualFirstAnchor : manualSecondAnchor
-            if let a = anchor {
-                let wp = a.position(relativeTo: nil)
+            let sphereName = (idx == 1) ? "manual_point_1" : "manual_point_2"
+            if let a = anchor,
+               let sphere = a.children.first(where: { $0.name == sphereName }) {
+                let wp = sphere.position(relativeTo: nil)
                 if let sp = projectWorldToScreen(worldPosition: SIMD3<Float>(wp.x, wp.y, wp.z), frame: frame, arView: arView) {
                     fixedManualMoveScreenPoint = sp
-                    print("[ManualOrigin][Move] Fixed screen point set to: \(sp)")
+                    print("[ManualOrigin][Move] Fixed screen point set from sphere to: \(sp)")
                 } else {
                     // Fallback to screen center
                     fixedManualMoveScreenPoint = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
-                    print("[ManualOrigin][Move] Projection failed, using screen center as fixed point")
+                    print("[ManualOrigin][Move] Projection failed from sphere, using screen center as fixed point")
                 }
             }
         }
