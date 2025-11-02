@@ -272,6 +272,23 @@ struct ARSessionView: View {
                         }
                         
                         Divider()
+
+                        // Move Two Point setup command into the main (ellipsis) menu
+                        if manualPlacementState == .inactive {
+                            Button {
+                                enterManualTwoPointsMode()
+                            } label: {
+                                Label("Manual Two Points", systemImage: "point.2.connected.trianglepath.filled")
+                            }
+                        } else {
+                            Button(role: .destructive) {
+                                cancelManualTwoPointsMode()
+                            } label: {
+                                Label("Cancel Manual Placement", systemImage: "xmark.circle")
+                            }
+                        }
+
+                        Divider()
                         
                         Button(role: .destructive) {
                             clearAllMarkersPersisted()
@@ -375,7 +392,7 @@ struct ARSessionView: View {
                     .zIndex(3)
             }
 
-            // Bottom controls: top row (setup + clear), bottom row (center action)
+            // Bottom controls: Center action row; optional Clear below Apply; no separate setup row
             VStack {
                 Spacer()
 
@@ -404,49 +421,6 @@ struct ARSessionView: View {
                     .transition(.opacity.combined(with: .scale))
                 }
 
-                // Top row: Setup menu (left) and Clear (right, when available)
-                HStack {
-                    // Setup menu (left)
-                    Menu {
-                        if manualPlacementState == .inactive {
-                            Button {
-                                enterManualTwoPointsMode()
-                            } label: {
-                                Label("Manual Two Points", systemImage: "point.2.connected.trianglepath.filled")
-                            }
-                        } else {
-                            Button(role: .destructive) {
-                                cancelManualTwoPointsMode()
-                            } label: {
-                                Label("Cancel Manual Placement", systemImage: "xmark.circle")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 24))
-                            .frame(width: 60, height: 60)
-                    }
-                    .buttonStyle(.plain)
-                    .lgCircle(tint: .blue)
-
-                    Spacer()
-
-                    // Clear (right) only in two-point mode when both points exist
-                    if manualPlacementState != .inactive && manualFirstPoint != nil && manualSecondPoint != nil {
-                        Button(role: .destructive) {
-                            clearTwoPointPlacement()
-                        } label: {
-                            Text("Clear")
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(minWidth: 120, minHeight: 48)
-                        }
-                        .buttonStyle(.plain)
-                        .lgCapsule(tint: .red)
-                    }
-                }
-                .padding(.horizontal, 16) // preserve horizontal padding regardless of clear visibility
-                .padding(.bottom, 12)
-
                 // Bottom row: Centered main action (Plus or Apply)
                 HStack {
                     Spacer()
@@ -459,15 +433,29 @@ struct ARSessionView: View {
                         .buttonStyle(.plain)
                         .lgCircle(tint: .white)
                     } else {
-                        Button {
-                            manualPlacementPrimaryAction()
-                        } label: {
-                            Text(manualPlacementButtonTitle())
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(minWidth: 200, minHeight: 54)
+                        VStack(spacing: 10) {
+                            Button {
+                                manualPlacementPrimaryAction()
+                            } label: {
+                                Text(manualPlacementButtonTitle())
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .frame(minWidth: 200, minHeight: 54)
+                            }
+                            .buttonStyle(.plain)
+                            .lgCapsule(tint: .blue)
+
+                            if manualFirstPoint != nil && manualSecondPoint != nil {
+                                Button(role: .destructive) {
+                                    clearTwoPointPlacement()
+                                } label: {
+                                    Text("Clear")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .frame(minWidth: 160, minHeight: 48)
+                                }
+                                .buttonStyle(.plain)
+                                .lgCapsule(tint: .red)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .lgCapsule(tint: .blue)
                     }
                     Spacer()
                 }
