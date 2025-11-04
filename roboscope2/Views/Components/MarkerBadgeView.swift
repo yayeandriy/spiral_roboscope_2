@@ -39,10 +39,10 @@ struct MarkerBadgeView: View {
                             .foregroundColor(.white.opacity(0.7))
                             .frame(maxWidth: .infinity, alignment: .leading)
                         HStack(spacing: 12) {
-                            EdgeDistanceView(label: "Left", distance: details.leftDistance, color: .blue)
-                            EdgeDistanceView(label: "Right", distance: details.rightDistance, color: .green)
-                            EdgeDistanceView(label: "Near", distance: details.nearDistance, color: .orange)
-                            EdgeDistanceView(label: "Far", distance: details.farDistance, color: .purple)
+                            EdgeDistanceView(label: "X- (Left)", distance: details.xNegative, color: .blue)
+                            EdgeDistanceView(label: "X+ (Right)", distance: details.xPositive, color: .green)
+                            EdgeDistanceView(label: "Z- (Near)", distance: details.zNegative, color: .orange)
+                            EdgeDistanceView(label: "Z+ (Far)", distance: details.zPositive, color: .purple)
                         }
                     }
                     Divider().background(Color.white.opacity(0.3))

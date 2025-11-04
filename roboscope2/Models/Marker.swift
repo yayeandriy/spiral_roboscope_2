@@ -16,10 +16,10 @@ struct MarkerDetails: Codable, Sendable, Hashable {
     let markerId: UUID
     let centerLocationLong: Float
     let centerLocationCross: Float
-    let leftDistance: Float
-    let rightDistance: Float
-    let farDistance: Float
-    let nearDistance: Float
+    let xNegative: Float
+    let xPositive: Float
+    let zPositive: Float
+    let zNegative: Float
     let longSize: Float
     let crossSize: Float
     let customProps: [String: AnyCodable]
@@ -30,10 +30,10 @@ struct MarkerDetails: Codable, Sendable, Hashable {
         case markerId = "marker_id"
         case centerLocationLong = "center_location_long"
         case centerLocationCross = "center_location_cross"
-        case leftDistance = "left_distance"
-        case rightDistance = "right_distance"
-        case farDistance = "far_distance"
-        case nearDistance = "near_distance"
+        case xNegative = "x_negative"
+        case xPositive = "x_positive"
+        case zPositive = "z_positive"
+        case zNegative = "z_negative"
         case longSize = "long_size"
         case crossSize = "cross_size"
         case customProps = "custom_props"
