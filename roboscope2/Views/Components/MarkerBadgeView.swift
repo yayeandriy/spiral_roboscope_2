@@ -33,16 +33,16 @@ struct MarkerBadgeView: View {
                         }
                     }
                     Divider().background(Color.white.opacity(0.3))
-                    VStack(spacing: 8) {
+                    VStack(spacing: 10) {
                         Text("Edge Distances")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.7))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.9))
                             .frame(maxWidth: .infinity, alignment: .leading)
                         HStack(spacing: 12) {
-                            EdgeDistanceView(label: "X- (Left)", distance: details.xNegative, color: .blue)
-                            EdgeDistanceView(label: "X+ (Right)", distance: details.xPositive, color: .green)
-                            EdgeDistanceView(label: "Z- (Near)", distance: details.zNegative, color: .orange)
-                            EdgeDistanceView(label: "Z+ (Far)", distance: details.zPositive, color: .purple)
+                            EdgeDistanceView(label: "X-", distance: details.xNegative, color: .blue)
+                            EdgeDistanceView(label: "X+", distance: details.xPositive, color: .green)
+                            EdgeDistanceView(label: "Z-", distance: details.zNegative, color: .orange)
+                            EdgeDistanceView(label: "Z+", distance: details.zPositive, color: .purple)
                         }
                     }
                     Divider().background(Color.white.opacity(0.3))
