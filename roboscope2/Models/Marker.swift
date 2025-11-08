@@ -154,16 +154,16 @@ struct CalibratedData: Codable, Hashable, Sendable {
     var centerPoint: SIMD3<Float> { SIMD3<Float>(Float(center[0]), Float(center[1]), Float(center[2])) }
     var points: [SIMD3<Float>] { [point1, point2, point3, point4] }
     
-    /// Width (X) and Length (Z) estimated like raw: average of opposite edges
+    /// Width (X) and Length (Z) calculated as axis-aligned extents
     var width: Float {
-        let e01 = simd_distance(point1, point2)
-        let e23 = simd_distance(point3, point4)
-        return (e01 + e23) / 2.0
+        let xs = [point1.x, point2.x, point3.x, point4.x]
+        guard let minX = xs.min(), let maxX = xs.max() else { return 0 }
+        return maxX - minX
     }
     var length: Float {
-        let e12 = simd_distance(point2, point3)
-        let e30 = simd_distance(point4, point1)
-        return (e12 + e30) / 2.0
+        let zs = [point1.z, point2.z, point3.z, point4.z]
+        guard let minZ = zs.min(), let maxZ = zs.max() else { return 0 }
+        return maxZ - minZ
     }
 }
 
