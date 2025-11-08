@@ -51,6 +51,8 @@ struct Marker: Codable, Identifiable, Hashable {
     let p2: [Double]
     let p3: [Double]
     let p4: [Double]
+    /// Optional server-provided calibrated coordinates for the marker
+    let calibratedData: CalibratedData?
     let color: String?
     let version: Int64
     let meta: [String: AnyCodable]
@@ -63,6 +65,7 @@ struct Marker: Codable, Identifiable, Hashable {
         case id, label, p1, p2, p3, p4, color, version, meta, details
         case workSessionId = "work_session_id"
         case customProps = "custom_props"
+        case calibratedData = "calibrated_data"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -130,6 +133,38 @@ struct Marker: Codable, Identifiable, Hashable {
     
     /// Key for mesh-based frame dimensions in customProps
     static let meshFrameDimsKey = "frame_dims_mesh"
+}
+
+// MARK: - Calibrated Data
+
+/// Server-provided calibrated coordinate set for a marker
+/// Matches docs: JSON object with p1..p4 and center, each [x,y,z] in meters
+struct CalibratedData: Codable, Hashable, Sendable {
+    let p1: [Double]
+    let p2: [Double]
+    let p3: [Double]
+    let p4: [Double]
+    let center: [Double]
+    
+    // Convenience: SIMD conversions
+    var point1: SIMD3<Float> { SIMD3<Float>(Float(p1[0]), Float(p1[1]), Float(p1[2])) }
+    var point2: SIMD3<Float> { SIMD3<Float>(Float(p2[0]), Float(p2[1]), Float(p2[2])) }
+    var point3: SIMD3<Float> { SIMD3<Float>(Float(p3[0]), Float(p3[1]), Float(p3[2])) }
+    var point4: SIMD3<Float> { SIMD3<Float>(Float(p4[0]), Float(p4[1]), Float(p4[2])) }
+    var centerPoint: SIMD3<Float> { SIMD3<Float>(Float(center[0]), Float(center[1]), Float(center[2])) }
+    var points: [SIMD3<Float>] { [point1, point2, point3, point4] }
+    
+    /// Width (X) and Length (Z) estimated like raw: average of opposite edges
+    var width: Float {
+        let e01 = simd_distance(point1, point2)
+        let e23 = simd_distance(point3, point4)
+        return (e01 + e23) / 2.0
+    }
+    var length: Float {
+        let e12 = simd_distance(point2, point3)
+        let e30 = simd_distance(point4, point1)
+        return (e12 + e30) / 2.0
+    }
 }
 
 // MARK: - Marker DTOs

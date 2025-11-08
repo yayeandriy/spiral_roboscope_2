@@ -57,6 +57,7 @@ extension ARSessionView {
                         p2: [Double(worldPoints[1].x), Double(worldPoints[1].y), Double(worldPoints[1].z)],
                         p3: [Double(worldPoints[2].x), Double(worldPoints[2].y), Double(worldPoints[2].z)],
                         p4: [Double(worldPoints[3].x), Double(worldPoints[3].y), Double(worldPoints[3].z)],
+                        calibratedData: marker.calibratedData,
                         color: marker.color,
                         version: marker.version,
                         meta: marker.meta,

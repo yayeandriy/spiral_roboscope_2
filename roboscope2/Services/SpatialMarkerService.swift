@@ -41,11 +41,12 @@ final class SpatialMarkerService: ObservableObject {
         let anchorEntity: AnchorEntity
         var isSelected: Bool = false
         var details: MarkerDetails? = nil // Server-computed marker details
+        var calibratedData: CalibratedData? = nil // Server-provided calibrated coordinates
     }
     
     /// Create and add a marker from world-space points (used when loading from server)
     @discardableResult
-    func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil, version: Int64 = 0, details: MarkerDetails? = nil) -> SpatialMarker {
+    func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil, version: Int64 = 0, details: MarkerDetails? = nil, calibratedData: CalibratedData? = nil) -> SpatialMarker {
         guard let arView = arView else {
             return SpatialMarker(version: version, nodes: points, anchorEntity: AnchorEntity(world: .zero), details: details)
         }
@@ -84,7 +85,7 @@ final class SpatialMarkerService: ObservableObject {
         }
         
         arView.scene.addAnchor(anchorEntity)
-        let marker = SpatialMarker(backendId: backendId, version: version, nodes: points, anchorEntity: anchorEntity, isSelected: false, details: details)
+        let marker = SpatialMarker(backendId: backendId, version: version, nodes: points, anchorEntity: anchorEntity, isSelected: false, details: details, calibratedData: calibratedData)
         markers.append(marker)
         return marker
     }
@@ -130,10 +131,11 @@ final class SpatialMarkerService: ObservableObject {
                 // Update existing visual marker to match backend
                 markers[idx].version = m.version
                 markers[idx].details = m.details
+                markers[idx].calibratedData = m.calibratedData
                 applyNodePositions(markerIndex: idx, newNodePositions: m.points)
             } else {
                 // Add new marker from backend
-                addMarker(points: m.points, backendId: m.id, version: m.version, details: m.details)
+                addMarker(points: m.points, backendId: m.id, version: m.version, details: m.details, calibratedData: m.calibratedData)
             }
         }
         
