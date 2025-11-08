@@ -20,17 +20,10 @@ struct MarkerBadgeView: View {
                 metricGroup(title: "Raw center") {
                     axisRow(axis1: ("x", info.centerX, Color.red), axis2: ("z", info.centerZ, Color.blue))
                 }
-                // Calibrated center row
-                metricGroup(title: "Calibrated center") {
-                    if let c = info.calibratedCenter {
+                // Calibrated center row (only show if different from raw)
+                if let c = info.calibratedCenter, calibratedDiffersFromRaw(calibrated: c, rawX: info.centerX, rawZ: info.centerZ) {
+                    metricGroup(title: "Calibrated center") {
                         axisRow(axis1: ("x", c.x, Color.red), axis2: ("z", c.z, Color.blue))
-                    } else {
-                        HStack(spacing: 24) {
-                            axisLabel("x")
-                            placeholderChip("—")
-                            axisLabel("z")
-                            placeholderChip("—")
-                        }
                     }
                 }
                 // Collapsible: Raw nodes
@@ -216,4 +209,13 @@ private struct MetricChip: View {
             )
             .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 3)
     }
+}
+
+// MARK: - Helper to detect calibrated difference
+
+private func calibratedDiffersFromRaw(calibrated: SIMD3<Float>, rawX: Float, rawZ: Float) -> Bool {
+    let epsilon: Float = 1e-6
+    let xDiffers = abs(calibrated.x - rawX) > epsilon
+    let zDiffers = abs(calibrated.z - rawZ) > epsilon
+    return xDiffers || zDiffers
 }
