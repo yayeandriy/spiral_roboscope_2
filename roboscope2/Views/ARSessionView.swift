@@ -151,7 +151,8 @@ struct ARSessionView: View {
                                 details: marker.details
                             )
                         }
-                        markerService.loadPersistedMarkers(transformedMarkers)
+                        // Pass both world and frame-origin coordinates
+                        markerService.loadPersistedMarkers(transformedMarkers, originalFrameOriginMarkers: persisted)
                         // Calculate details for any markers that don't have them yet
                         for marker in transformedMarkers {
                             if marker.details == nil {

@@ -94,16 +94,19 @@ final class ARSessionViewModel: ObservableObject {
         isHoldingScreen = false
         if let (backendId, version, updatedNodes) = markerService.endTransform() {
             let frameOriginPoints = transformToFrameOrigin(updatedNodes)
-            Task { [sessionId, markerApi] in
+            // Update local frame-origin coordinates
+            markerService.updateFrameOriginNodesByBackendId(backendId: backendId, frameOriginNodes: frameOriginPoints)
+            Task { [sessionId, markerApi, markerService] in
                 do {
-                    _ = try await markerApi.updateMarkerPosition(
+                    let updatedMarker = try await markerApi.updateMarkerPosition(
                         id: backendId,
                         workSessionId: sessionId,
                         points: frameOriginPoints,
                         version: version,
                         customProps: nil
                     )
-                    await markerService.updateDetailsAfterTransform(backendId: backendId)
+                    // Update calibrated data and details from server response
+                    await markerService.updateCalibratedData(backendId: backendId, calibratedData: updatedMarker.calibratedData, details: updatedMarker.details)
                 } catch {
                     // Silently ignore for now
                 }
@@ -139,16 +142,19 @@ final class ARSessionViewModel: ObservableObject {
         isHoldingScreen = false
         if let (backendId, version, updatedNodes) = markerService.endMoveSelectedEdge() {
             let frameOriginPoints = transformToFrameOrigin(updatedNodes)
-            Task { [sessionId, markerApi] in
+            // Update local frame-origin coordinates
+            markerService.updateFrameOriginNodesByBackendId(backendId: backendId, frameOriginNodes: frameOriginPoints)
+            Task { [sessionId, markerApi, markerService] in
                 do {
-                    _ = try await markerApi.updateMarkerPosition(
+                    let updatedMarker = try await markerApi.updateMarkerPosition(
                         id: backendId,
                         workSessionId: sessionId,
                         points: frameOriginPoints,
                         version: version,
                         customProps: nil
                     )
-                    await markerService.updateDetailsAfterTransform(backendId: backendId)
+                    // Update calibrated data and details from server response
+                    await markerService.updateCalibratedData(backendId: backendId, calibratedData: updatedMarker.calibratedData, details: updatedMarker.details)
                 } catch {
                     // Silently ignore for now
                 }

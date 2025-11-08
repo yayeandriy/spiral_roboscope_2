@@ -70,7 +70,7 @@ extension ARSessionView {
                 
                 // Reload markers with new positions
                 await MainActor.run {
-                    markerService.loadPersistedMarkers(transformedMarkers)
+                    markerService.loadPersistedMarkers(transformedMarkers, originalFrameOriginMarkers: persisted)
                 }
             } catch {
                 // Silent
@@ -112,6 +112,9 @@ extension ARSessionView {
         if let spatial = markerService.placeMarkerReturningSpatial(targetCorners: corners) {
             // Transform marker points to FrameOrigin coordinate system
             let frameOriginPoints = transformPointsToFrameOrigin(spatial.nodes)
+            
+            // Store frame-origin coordinates in the spatial marker
+            markerService.setFrameOriginNodes(localId: spatial.id, frameOriginNodes: frameOriginPoints)
             
             // Save to backend with FrameOrigin coordinates
             Task {

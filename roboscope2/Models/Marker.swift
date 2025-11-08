@@ -471,6 +471,14 @@ extension Marker {
     }
 }
 
+// MARK: - Array Extensions
+
+extension Array {
+    subscript(safe index: Int) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
+}
+
 // MARK: - Array Extensions for Filtering
 
 extension Array where Element == Marker {

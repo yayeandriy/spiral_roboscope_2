@@ -11,6 +11,7 @@ struct MarkerBadgeView: View {
     let info: SpatialMarkerService.MarkerInfo
     var details: MarkerDetails? = nil
     var onDelete: (() -> Void)? = nil
+    @State private var showNodes: Bool = false
     
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -30,6 +31,41 @@ struct MarkerBadgeView: View {
                             axisLabel("z")
                             placeholderChip("—")
                         }
+                    }
+                }
+                // Collapsible: Raw nodes
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { showNodes.toggle() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: showNodes ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.85))
+                            Text("Nodes")
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.95))
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    if showNodes {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(info.nodes.enumerated()), id: \.0) { idx, p in
+                                HStack(spacing: 10) {
+                                    Text("p\(idx+1)")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .frame(width: 22, alignment: .leading)
+                                    coordChip(label: "x", value: p.x, tint: .red)
+                                    coordChip(label: "y", value: p.y, tint: .green)
+                                    coordChip(label: "z", value: p.z, tint: .blue)
+                                    Spacer()
+                                }
+                            }
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
                 // Size row
@@ -131,6 +167,14 @@ private func axisRow(axis1: (String, Float, Color), axis2: (String, Float, Color
         MetricChip(value: shortValueString(axis1.1), tint: axis1.2)
         axisLabel(axis2.0)
         MetricChip(value: shortValueString(axis2.1), tint: axis2.2)
+    }
+}
+
+@ViewBuilder
+private func coordChip(label: String, value: Float, tint: Color) -> some View {
+    HStack(spacing: 6) {
+        axisLabel(label)
+        MetricChip(value: shortValueString(value), tint: tint)
     }
 }
 

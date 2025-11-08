@@ -37,7 +37,8 @@ final class SpatialMarkerService: ObservableObject {
         let id = UUID()
         var backendId: UUID? = nil // Link to server-side marker
         var version: Int64 = 0 // Track marker version for optimistic locking
-        var nodes: [SIMD3<Float>] // 4 corner positions (mutable for moving)
+        var nodes: [SIMD3<Float>] // 4 corner positions in AR world space (mutable for moving)
+        var frameOriginNodes: [SIMD3<Float>]? // Original frame-origin coordinates from server
         let anchorEntity: AnchorEntity
         var isSelected: Bool = false
         var details: MarkerDetails? = nil // Server-computed marker details
@@ -46,9 +47,9 @@ final class SpatialMarkerService: ObservableObject {
     
     /// Create and add a marker from world-space points (used when loading from server)
     @discardableResult
-    func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil, version: Int64 = 0, details: MarkerDetails? = nil, calibratedData: CalibratedData? = nil) -> SpatialMarker {
+    func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil, version: Int64 = 0, details: MarkerDetails? = nil, calibratedData: CalibratedData? = nil, frameOriginNodes: [SIMD3<Float>]? = nil) -> SpatialMarker {
         guard let arView = arView else {
-            return SpatialMarker(version: version, nodes: points, anchorEntity: AnchorEntity(world: .zero), details: details)
+            return SpatialMarker(version: version, nodes: points, frameOriginNodes: frameOriginNodes, anchorEntity: AnchorEntity(world: .zero), details: details)
         }
         // Create anchor and geometry similar to placeMarker()
         let anchorEntity = AnchorEntity(world: .zero)
@@ -85,7 +86,7 @@ final class SpatialMarkerService: ObservableObject {
         }
         
         arView.scene.addAnchor(anchorEntity)
-        let marker = SpatialMarker(backendId: backendId, version: version, nodes: points, anchorEntity: anchorEntity, isSelected: false, details: details, calibratedData: calibratedData)
+        let marker = SpatialMarker(backendId: backendId, version: version, nodes: points, frameOriginNodes: frameOriginNodes, anchorEntity: anchorEntity, isSelected: false, details: details, calibratedData: calibratedData)
         markers.append(marker)
         return marker
     }
@@ -94,6 +95,30 @@ final class SpatialMarkerService: ObservableObject {
     func linkSpatialMarker(localId: UUID, backendId: UUID) {
         if let idx = markers.firstIndex(where: { $0.id == localId }) {
             markers[idx].backendId = backendId
+        }
+    }
+    
+    /// Set frame-origin coordinates for a local marker
+    func setFrameOriginNodes(localId: UUID, frameOriginNodes: [SIMD3<Float>]) {
+        if let idx = markers.firstIndex(where: { $0.id == localId }) {
+            markers[idx].frameOriginNodes = frameOriginNodes
+        }
+    }
+    
+    /// Update frame-origin coordinates for a marker by backend ID
+    func updateFrameOriginNodesByBackendId(backendId: UUID, frameOriginNodes: [SIMD3<Float>]) {
+        if let idx = markers.firstIndex(where: { $0.backendId == backendId }) {
+            markers[idx].frameOriginNodes = frameOriginNodes
+        }
+    }
+    
+    /// Update calibrated data and details from server response
+    @MainActor
+    func updateCalibratedData(backendId: UUID, calibratedData: CalibratedData?, details: MarkerDetails?) {
+        if let idx = markers.firstIndex(where: { $0.backendId == backendId }) {
+            markers[idx].calibratedData = calibratedData
+            markers[idx].details = details
+            objectWillChange.send()
         }
     }
     
@@ -125,17 +150,19 @@ final class SpatialMarkerService: ObservableObject {
     }
     
     /// Load persisted markers from API models
-    func loadPersistedMarkers(_ apiMarkers: [Marker]) {
-        for m in apiMarkers {
+    func loadPersistedMarkers(_ apiMarkers: [Marker], originalFrameOriginMarkers: [Marker]? = nil) {
+        for (index, m) in apiMarkers.enumerated() {
+            let frameOriginNodes = originalFrameOriginMarkers?[safe: index]?.points
             if let idx = markers.firstIndex(where: { $0.backendId == m.id }) {
                 // Update existing visual marker to match backend
                 markers[idx].version = m.version
                 markers[idx].details = m.details
                 markers[idx].calibratedData = m.calibratedData
+                markers[idx].frameOriginNodes = frameOriginNodes
                 applyNodePositions(markerIndex: idx, newNodePositions: m.points)
             } else {
                 // Add new marker from backend
-                addMarker(points: m.points, backendId: m.id, version: m.version, details: m.details, calibratedData: m.calibratedData)
+                addMarker(points: m.points, backendId: m.id, version: m.version, details: m.details, calibratedData: m.calibratedData, frameOriginNodes: frameOriginNodes)
             }
         }
         
