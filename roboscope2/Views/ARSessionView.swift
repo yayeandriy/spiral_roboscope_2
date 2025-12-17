@@ -100,6 +100,12 @@ struct ARSessionView: View {
         }
         return space.name
     }
+
+    private var isLaserGuideSession: Bool {
+        let result = session.isLaserGuide
+        print("🎯 isLaserGuideSession computed: \(result)")
+        return result
+    }
     
     var body: some View {
         ZStack {
@@ -111,6 +117,7 @@ struct ARSessionView: View {
             .edgesIgnoringSafeArea(.all)
             .onAppear {
                 startARSession()
+                print("📱 ARSessionView appeared with session: id=\(session.id), meta=\(session.meta ?? [:]), isLaserGuide=\(session.isLaserGuide)")
                 // Place initial frame origin at AR session origin
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     placeFrameOriginGizmo(at: frameOriginTransform)
@@ -410,16 +417,18 @@ struct ARSessionView: View {
             if let errorMessage = errorMessage { Text(errorMessage) }
         }
         .confirmationDialog("Actions", isPresented: $showActionsDialog, titleVisibility: .visible) {
-            // Show/Hide Reference Model
-            Button(showReferenceModel ? "Hide Reference Model" : "Show Reference Model") {
-                showReferenceModel.toggle()
-                if showReferenceModel { placeModelAtFrameOrigin() } else { removeReferenceModel() }
-            }
+            if !isLaserGuideSession {
+                // Show/Hide Reference Model
+                Button(showReferenceModel ? "Hide Reference Model" : "Show Reference Model") {
+                    showReferenceModel.toggle()
+                    if showReferenceModel { placeModelAtFrameOrigin() } else { removeReferenceModel() }
+                }
 
-            // Show/Hide Scanned Model
-            Button(showScanModel ? "Hide Scanned Model" : "Show Scanned Model") {
-                showScanModel.toggle()
-                if showScanModel { placeScanModelAtFrameOrigin() } else { removeScanModel() }
+                // Show/Hide Scanned Model
+                Button(showScanModel ? "Hide Scanned Model" : "Show Scanned Model") {
+                    showScanModel.toggle()
+                    if showScanModel { placeScanModelAtFrameOrigin() } else { removeScanModel() }
+                }
             }
 
             // Drop FrameOrigin on floor
@@ -427,9 +436,11 @@ struct ARSessionView: View {
                 dropFrameOriginOnFloor()
             }
 
-            // Use saved scan
-            Button("Use saved scan", role: .none) {
-                Task { await useSavedScan() }
+            if !isLaserGuideSession {
+                // Use saved scan
+                Button("Use saved scan", role: .none) {
+                    Task { await useSavedScan() }
+                }
             }
 
             // Two Point setup

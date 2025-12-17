@@ -7,6 +7,17 @@
 
 import Foundation
 
+// MARK: - WorkSession Meta Keys / Spatial Environment
+
+enum WorkSessionMetaKeys {
+    static let spatialEnvironment = "spatial_environment"
+}
+
+enum WorkSessionSpatialEnvironment: String, Codable, Hashable {
+    case standard = "standard"
+    case laserGuide = "laserGuide"
+}
+
 // MARK: - Enums
 
 /// Status of a work session
@@ -105,6 +116,22 @@ struct WorkSession: Codable, Identifiable, Hashable {
     /// Human-readable status display
     var statusDisplay: String {
         status.displayName
+    }
+
+    var spatialEnvironment: WorkSessionSpatialEnvironment {
+        // Check local storage first
+        if SessionSettingsStore.shared.isLaserGuide(sessionId: id) {
+            return .laserGuide
+        }
+        // Fallback to meta field for backwards compatibility
+        guard let value = meta?[WorkSessionMetaKeys.spatialEnvironment] else { return .standard }
+        if let raw = value.stringValue, let env = WorkSessionSpatialEnvironment(rawValue: raw) { return env }
+        if let enabled = value.boolValue, enabled { return .laserGuide }
+        return .standard
+    }
+
+    var isLaserGuide: Bool {
+        spatialEnvironment == .laserGuide
     }
 }
 

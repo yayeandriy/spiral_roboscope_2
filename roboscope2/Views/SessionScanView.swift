@@ -147,6 +147,7 @@ struct SessionScanView: View {
             }
         }
     }
+
     
     // MARK: - Bottom Controls
     

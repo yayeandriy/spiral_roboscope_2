@@ -141,7 +141,10 @@ final class NetworkManager {
             do {
                 request.httpBody = try encoder.encode(body)
                 
-                // Logging disabled
+                // Debug logging for meta fields
+                if let jsonString = String(data: request.httpBody!, encoding: .utf8) {
+                    print("📤 API Request to \(method) \(endpoint): \(jsonString)")
+                }
             } catch {
                 throw APIError.encodingError(error)
             }
@@ -161,7 +164,8 @@ final class NetworkManager {
     // MARK: - Request Execution
     
     private func performRequest<T: Decodable>(_ request: URLRequest) async throws -> T {
-        // Logging disabled
+        // Debug logging
+        print("🌐 Performing request: \(request.httpMethod ?? "?") \(request.url?.absoluteString ?? "?")")
         
         let (data, response) = try await session.data(for: request)
         
@@ -169,7 +173,10 @@ final class NetworkManager {
             throw APIError.unknown(NSError(domain: "Invalid response", code: -1))
         }
         
-        // Logging disabled
+        // Debug logging
+        if let responseString = String(data: data, encoding: .utf8) {
+            print("📥 API Response (\(httpResponse.statusCode)): \(responseString)")
+        }
         
         try validateResponse(httpResponse, data: data)
         

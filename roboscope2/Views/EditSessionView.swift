@@ -18,6 +18,7 @@ struct EditSessionView: View {
     @State private var selectedSpace: Space?
     @State private var sessionType: WorkSessionType
     @State private var sessionStatus: WorkSessionStatus
+    @State private var laserGuide: Bool
     @State private var showingSpacePicker = false
     @State private var isUpdating = false
     @State private var errorMessage: String?
@@ -27,6 +28,7 @@ struct EditSessionView: View {
         self.onSessionUpdated = onSessionUpdated
         self._sessionType = State(initialValue: session.sessionType)
         self._sessionStatus = State(initialValue: session.status)
+        self._laserGuide = State(initialValue: session.isLaserGuide)
     }
     
     var body: some View {
@@ -128,6 +130,13 @@ struct EditSessionView: View {
                     Text("Status")
                 } footer: {
                     Text(statusDescription)
+                }
+
+                // Options
+                Section {
+                    Toggle("LaserGuide", isOn: $laserGuide)
+                } header: {
+                    Text("Options")
                 }
                 
                 // Timestamps
@@ -256,7 +265,8 @@ struct EditSessionView: View {
         
         return selectedSpace.id == session.spaceId &&
                sessionType == session.sessionType &&
-               sessionStatus == session.status
+               sessionStatus == session.status &&
+               laserGuide == session.isLaserGuide
     }
     
     private var statusDescription: String {
@@ -316,13 +326,20 @@ struct EditSessionView: View {
                 status: sessionStatus != session.status ? sessionStatus : nil,
                 startedAt: startedAt != session.startedAt ? startedAt : nil,
                 completedAt: completedAt != session.completedAt ? completedAt : nil,
-                version: session.version
+                version: session.version,
+                meta: nil
             )
             
             let updatedSession = try await workSessionService.updateWorkSession(
                 id: session.id,
                 update: updateRequest
             )
+            
+            // Save LaserGuide mode locally if changed
+            if laserGuide != session.isLaserGuide {
+                SessionSettingsStore.shared.setLaserGuide(sessionId: session.id, enabled: laserGuide)
+                print("✅ Updated LaserGuide mode locally for session: \(session.id) to \(laserGuide)")
+            }
             
             await MainActor.run {
                 onSessionUpdated(updatedSession)

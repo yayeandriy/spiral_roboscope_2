@@ -18,6 +18,7 @@ struct CreateSessionView: View {
     @State private var sessionType: WorkSessionType = .inspection
     @State private var sessionStatus: WorkSessionStatus = .draft
     @State private var startImmediately = false
+    @State private var laserGuide = false
     @State private var showingSpacePicker = false
     @State private var isCreating = false
     @State private var errorMessage: String?
@@ -80,6 +81,8 @@ struct CreateSessionView: View {
                         .onChange(of: startImmediately) { newValue in
                             sessionStatus = newValue ? .active : .draft
                         }
+
+                    Toggle("LaserGuide", isOn: $laserGuide)
                 } header: {
                     Text("Options")
                 } footer: {
@@ -184,10 +187,19 @@ struct CreateSessionView: View {
                 sessionType: sessionType,
                 status: sessionStatus,
                 startedAt: startImmediately ? Date() : nil,
-                completedAt: nil
+                completedAt: nil,
+                meta: nil
             )
             
             let createdSession = try await workSessionService.createWorkSession(createRequest)
+            
+            // Save LaserGuide mode locally
+            if laserGuide {
+                SessionSettingsStore.shared.setLaserGuide(sessionId: createdSession.id, enabled: true)
+                print("✅ Saved LaserGuide mode locally for session: \(createdSession.id)")
+            }
+            
+            print("✅ Session created: id=\(createdSession.id), isLaserGuide=\(createdSession.isLaserGuide)")
             
             await MainActor.run {
                 onSessionCreated(createdSession)
