@@ -355,10 +355,117 @@ class LaserDetectionService: ObservableObject {
             ))
         }
         
+        // Merge nearby line detections
+        points = mergeNearbyLines(points)
+        
         // Sort by brightness
         points.sort { $0.brightness > $1.brightness }
         
         return points
+    }
+    
+    /// Merge nearby line segments into single detections
+    private func mergeNearbyLines(_ points: [LaserPoint]) -> [LaserPoint] {
+        var result: [LaserPoint] = []
+        var processed: Set<Int> = []
+        
+        for i in 0..<points.count {
+            if processed.contains(i) { continue }
+            
+            let point = points[i]
+            
+            // Only merge line segments, not dots
+            if point.shape != .lineSegment {
+                result.append(point)
+                processed.insert(i)
+                continue
+            }
+            
+            // Find nearby lines to merge
+            var toMerge: [LaserPoint] = [point]
+            processed.insert(i)
+            
+            for j in (i+1)..<points.count {
+                if processed.contains(j) { continue }
+                
+                let other = points[j]
+                if other.shape != .lineSegment { continue }
+                
+                // Check if lines are close enough to merge
+                let distance = distanceBetweenRects(point.boundingBox, other.boundingBox)
+                let avgSize = (max(point.boundingBox.width, point.boundingBox.height) + 
+                              max(other.boundingBox.width, other.boundingBox.height)) / 2
+                
+                // Merge if distance is less than 2x the average size
+                if distance < avgSize * 2.0 {
+                    toMerge.append(other)
+                    processed.insert(j)
+                }
+            }
+            
+            // If multiple lines found, merge them
+            if toMerge.count > 1 {
+                let merged = mergeLaserPoints(toMerge)
+                result.append(merged)
+            } else {
+                result.append(point)
+            }
+        }
+        
+        return result
+    }
+    
+    /// Calculate distance between two rectangles
+    private func distanceBetweenRects(_ rect1: CGRect, _ rect2: CGRect) -> CGFloat {
+        let center1 = CGPoint(x: rect1.midX, y: rect1.midY)
+        let center2 = CGPoint(x: rect2.midX, y: rect2.midY)
+        let dx = center1.x - center2.x
+        let dy = center1.y - center2.y
+        return sqrt(dx * dx + dy * dy)
+    }
+    
+    /// Merge multiple laser points into one
+    private func mergeLaserPoints(_ points: [LaserPoint]) -> LaserPoint {
+        guard !points.isEmpty else {
+            fatalError("Cannot merge empty array")
+        }
+        
+        // Find bounding box that encompasses all points
+        var minX = points[0].boundingBox.minX
+        var minY = points[0].boundingBox.minY
+        var maxX = points[0].boundingBox.maxX
+        var maxY = points[0].boundingBox.maxY
+        var totalBrightness: Float = 0
+        
+        for point in points {
+            minX = min(minX, point.boundingBox.minX)
+            minY = min(minY, point.boundingBox.minY)
+            maxX = max(maxX, point.boundingBox.maxX)
+            maxY = max(maxY, point.boundingBox.maxY)
+            totalBrightness += point.brightness
+        }
+        
+        let mergedRect = CGRect(
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY
+        )
+        
+        // Average brightness
+        let avgBrightness = totalBrightness / Float(points.count)
+        
+        // Reclassify shape based on merged box
+        let aspectRatio = max(mergedRect.width, mergedRect.height) / min(mergedRect.width, mergedRect.height)
+        let shape: LaserSpotShape = aspectRatio > 1.5 ? .lineSegment : .rounded
+        
+        return LaserPoint(
+            boundingBox: mergedRect,
+            brightness: avgBrightness,
+            timestamp: Date(),
+            imageSize: points[0].imageSize,
+            shape: shape
+        )
     }
     
     /// Start detecting laser points
