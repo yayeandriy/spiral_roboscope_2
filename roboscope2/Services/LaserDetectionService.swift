@@ -13,9 +13,10 @@ import Combine
 /// Detected laser point in camera frame
 struct LaserPoint: Identifiable {
     let id = UUID()
-    let boundingBox: CGRect  // Normalized coordinates (0-1)
+    let boundingBox: CGRect  // Normalized coordinates (0-1) in camera image space
     let brightness: Float
     let timestamp: Date
+    let imageSize: CGSize  // Camera image dimensions for coordinate mapping
 }
 
 /// Service for detecting laser points from camera frames
@@ -269,7 +270,8 @@ class LaserDetectionService: ObservableObject {
         return LaserPoint(
             boundingBox: rectNorm,
             brightness: Float(bestLuma) / 255.0,
-            timestamp: Date()
+            timestamp: Date(),
+            imageSize: CGSize(width: width, height: height)
         )
     }
     

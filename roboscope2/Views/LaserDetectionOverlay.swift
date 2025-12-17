@@ -94,27 +94,42 @@ struct LaserBoundingBox: View {
     let imageToViewTransform: CGAffineTransform
     
     private var frameRect: CGRect {
-        // point.boundingBox is in normalized *image* coordinates.
-        // Convert to normalized *view* coordinates using ARFrame.displayTransform.
+        // point.boundingBox is in normalized image coordinates (0-1).
+        // Use displayTransform to map center point correctly (handles rotation/aspect).
         let rect = point.boundingBox
-        let corners = [
-            CGPoint(x: rect.minX, y: rect.minY),
-            CGPoint(x: rect.maxX, y: rect.minY),
-            CGPoint(x: rect.minX, y: rect.maxY),
-            CGPoint(x: rect.maxX, y: rect.maxY)
-        ].map { $0.applying(imageToViewTransform) }
-
-        let minX = corners.map { $0.x }.min() ?? 0
-        let maxX = corners.map { $0.x }.max() ?? 0
-        let minY = corners.map { $0.y }.min() ?? 0
-        let maxY = corners.map { $0.y }.max() ?? 0
-
-        let viewNorm = CGRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY))
+        
+        // Transform center from normalized image space to normalized view space
+        let centerNormImg = CGPoint(x: rect.midX, y: rect.midY)
+        let centerNormView = centerNormImg.applying(imageToViewTransform)
+        
+        // For size, we need to account for potential 90° rotation.
+        // Extract the scale components from the transform.
+        let a = imageToViewTransform.a
+        let b = imageToViewTransform.b
+        let c = imageToViewTransform.c
+        let d = imageToViewTransform.d
+        
+        // Calculate effective scale factors
+        let scaleX = sqrt(a * a + c * c)
+        let scaleY = sqrt(b * b + d * d)
+        
+        // Apply scale to size (in normalized coordinates)
+        let widthNormView = abs(rect.width * scaleX)
+        let heightNormView = abs(rect.height * scaleY)
+        
+        // Convert to pixel coordinates
+        let centerPx = CGPoint(
+            x: centerNormView.x * viewSize.width,
+            y: centerNormView.y * viewSize.height
+        )
+        let widthPx = widthNormView * viewSize.width
+        let heightPx = heightNormView * viewSize.height
+        
         return CGRect(
-            x: viewNorm.minX * viewSize.width,
-            y: viewNorm.minY * viewSize.height,
-            width: viewNorm.width * viewSize.width,
-            height: viewNorm.height * viewSize.height
+            x: centerPx.x - widthPx / 2,
+            y: centerPx.y - heightPx / 2,
+            width: widthPx,
+            height: heightPx
         )
     }
     
@@ -143,12 +158,14 @@ struct LaserBoundingBox: View {
             LaserPoint(
                 boundingBox: CGRect(x: 0.4, y: 0.3, width: 0.1, height: 0.08),
                 brightness: 0.92,
-                timestamp: Date()
+                timestamp: Date(),
+                imageSize: CGSize(width: 1920, height: 1440)
             ),
             LaserPoint(
                 boundingBox: CGRect(x: 0.6, y: 0.5, width: 0.05, height: 0.05),
                 brightness: 0.87,
-                timestamp: Date()
+                timestamp: Date(),
+                imageSize: CGSize(width: 1920, height: 1440)
             )
         ],
         viewSize: CGSize(width: 400, height: 600),

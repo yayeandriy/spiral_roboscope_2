@@ -94,6 +94,7 @@ struct ARSessionView: View {
     @State var autoDropAttempts: Int = 0
     @State var cancellables = Set<AnyCancellable>()
     @State private var imageToViewTransform: CGAffineTransform = .identity
+    @State private var viewportSize: CGSize = .zero
     // one-finger edge move is now handled by the overlay's one-finger pan
     
     // MARK: - Computed Properties
@@ -117,7 +118,6 @@ struct ARSessionView: View {
                     session: captureSession.session,
                     arView: $arView
                 )
-                .edgesIgnoringSafeArea(.all)
                 .onAppear {
                     startARSession()
 
@@ -201,12 +201,18 @@ struct ARSessionView: View {
                             self.laserDetection.processFrame(frame)
 
                             // Map normalized image coordinates -> normalized view coordinates.
-                            // Update every frame so boxes stay glued while moving.
+                            // Use the same viewport size that the overlay will use for pixel conversion.
                             // We assume portrait UI; if you support rotation, this should track device orientation.
-                            self.imageToViewTransform = frame.displayTransform(for: .portrait, viewportSize: geometry.size)
+                            if self.viewportSize.width > 0 && self.viewportSize.height > 0 {
+                                self.imageToViewTransform = frame.displayTransform(for: .portrait, viewportSize: self.viewportSize)
+                            }
                         }
                     }.store(in: &cancellables)
                 }
+            }
+            .onAppear {
+                // Initialize viewport size to full screen (ignoring safe areas)
+                self.viewportSize = UIScreen.main.bounds.size
             }
             // SwiftUI DragGesture removed; we now drive one-finger via the overlay to avoid conflicts
             // Removed LongPressGesture: selection is automatic; long-press was cancelling active movement
@@ -438,14 +444,19 @@ struct ARSessionView: View {
             if isLaserGuideSession {
                 LaserDetectionOverlay(
                     detectedPoints: laserDetection.detectedPoints,
-                    viewSize: geometry.size,
+                    viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
                     laserService: laserDetection,
                     imageToViewTransform: imageToViewTransform
                 )
                 .zIndex(2)
+                .onAppear {
+                    // Use full screen size (ignoring safe areas) for coordinate mapping
+                    viewportSize = UIScreen.main.bounds.size
+                }
             }
             }  // Close GeometryReader
         }
+        .ignoresSafeArea(.all)
         .alert("Error", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
         } message: {
