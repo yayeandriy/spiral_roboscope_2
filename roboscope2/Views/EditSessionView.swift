@@ -338,7 +338,6 @@ struct EditSessionView: View {
             // Save LaserGuide mode locally if changed
             if laserGuide != session.isLaserGuide {
                 SessionSettingsStore.shared.setLaserGuide(sessionId: session.id, enabled: laserGuide)
-                print("✅ Updated LaserGuide mode locally for session: \(session.id) to \(laserGuide)")
             }
             
             await MainActor.run {

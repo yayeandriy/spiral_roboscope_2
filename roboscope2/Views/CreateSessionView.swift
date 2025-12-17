@@ -196,10 +196,7 @@ struct CreateSessionView: View {
             // Save LaserGuide mode locally
             if laserGuide {
                 SessionSettingsStore.shared.setLaserGuide(sessionId: createdSession.id, enabled: true)
-                print("✅ Saved LaserGuide mode locally for session: \(createdSession.id)")
             }
-            
-            print("✅ Session created: id=\(createdSession.id), isLaserGuide=\(createdSession.isLaserGuide)")
             
             await MainActor.run {
                 onSessionCreated(createdSession)

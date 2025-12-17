@@ -10,6 +10,7 @@ import RealityKit
 import ARKit
 import UIKit
 import SceneKit
+import Combine
 
 struct ARSessionView: View {
     let session: WorkSession
@@ -21,6 +22,7 @@ struct ARSessionView: View {
     @StateObject var spaceService: SpaceService
     @StateObject var settings: AppSettings
     @StateObject var viewModel: ARSessionViewModel
+    @StateObject var laserDetection = LaserDetectionService()
 
     init(session: WorkSession) {
         self.session = session
@@ -90,6 +92,8 @@ struct ARSessionView: View {
     // Match scanning interactions
     @State var autoDropTimer: Timer?
     @State var autoDropAttempts: Int = 0
+    @State var cancellables = Set<AnyCancellable>()
+    @State private var imageToViewTransform: CGAffineTransform = .identity
     // one-finger edge move is now handled by the overlay's one-finger pan
     
     // MARK: - Computed Properties
@@ -102,23 +106,26 @@ struct ARSessionView: View {
     }
 
     private var isLaserGuideSession: Bool {
-        let result = session.isLaserGuide
-        print("🎯 isLaserGuideSession computed: \(result)")
-        return result
+        session.isLaserGuide
     }
     
     var body: some View {
-        ZStack {
-            // AR View
-            ARViewContainer(
-                session: captureSession.session,
-                arView: $arView
-            )
-            .edgesIgnoringSafeArea(.all)
-            .onAppear {
-                startARSession()
-                print("📱 ARSessionView appeared with session: id=\(session.id), meta=\(session.meta ?? [:]), isLaserGuide=\(session.isLaserGuide)")
-                // Place initial frame origin at AR session origin
+        GeometryReader { geometry in
+            ZStack {
+                // AR View
+                ARViewContainer(
+                    session: captureSession.session,
+                    arView: $arView
+                )
+                .edgesIgnoringSafeArea(.all)
+                .onAppear {
+                    startARSession()
+
+                    if isLaserGuideSession {
+                        laserDetection.startDetection()
+                    }
+                    
+                    // Place initial frame origin at AR session origin
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     placeFrameOriginGizmo(at: frameOriginTransform)
                     // Start auto-drop with retries so it lands as soon as a plane is available
@@ -174,16 +181,32 @@ struct ARSessionView: View {
                 }
             }
             .onDisappear {
+                laserDetection.stopDetection()
                 viewModel.cancelAllTimers()
                 autoDropTimer?.invalidate()
                 autoDropTimer = nil
                 autoDropAttempts = 0
                 endManualPointMove()
                 endARSession()
+                cancellables.removeAll()
             }
             .onChange(of: arView) { newValue in
                 markerService.arView = newValue
                 viewModel.bindARView(newValue)
+                
+                // Set up frame callback for laser detection
+                if isLaserGuideSession, let arView = newValue {
+                    arView.scene.subscribe(to: SceneEvents.Update.self) { event in
+                        if let frame = arView.session.currentFrame {
+                            self.laserDetection.processFrame(frame)
+
+                            // Map normalized image coordinates -> normalized view coordinates.
+                            // Update every frame so boxes stay glued while moving.
+                            // We assume portrait UI; if you support rotation, this should track device orientation.
+                            self.imageToViewTransform = frame.displayTransform(for: .portrait, viewportSize: geometry.size)
+                        }
+                    }.store(in: &cancellables)
+                }
             }
             // SwiftUI DragGesture removed; we now drive one-finger via the overlay to avoid conflicts
             // Removed LongPressGesture: selection is automatic; long-press was cancelling active movement
@@ -410,6 +433,18 @@ struct ARSessionView: View {
                 .padding(.bottom, 50)
             }
             .animation(.easeInOut(duration: 0.2), value: markerService.selectedMarkerID)
+            
+            // Laser detection overlay (only in LaserGuide mode)
+            if isLaserGuideSession {
+                LaserDetectionOverlay(
+                    detectedPoints: laserDetection.detectedPoints,
+                    viewSize: geometry.size,
+                    laserService: laserDetection,
+                    imageToViewTransform: imageToViewTransform
+                )
+                .zIndex(2)
+            }
+            }  // Close GeometryReader
         }
         .alert("Error", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
