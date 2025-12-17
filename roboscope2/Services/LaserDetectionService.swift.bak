@@ -134,9 +134,6 @@ class LaserDetectionService: ObservableObject {
               let yBaseAddress = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) else {
             // Unsupported format for now.
             return []
-        }
-        
-        let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
         let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
         let yBytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
         let yBuffer = yBaseAddress.assumingMemoryBound(to: UInt8.self)
@@ -390,3 +387,4 @@ class LaserDetectionService: ObservableObject {
     }
 }
 
+}

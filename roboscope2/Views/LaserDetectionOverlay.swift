@@ -139,14 +139,14 @@ struct LaserBoundingBox: View {
             .frame(width: frameRect.width, height: frameRect.height)
             .position(x: frameRect.midX, y: frameRect.midY)
             .overlay(alignment: .topLeading) {
-                // Brightness indicator
-                Text(String(format: "%.0f%%", point.brightness * 100))
+                // Brightness and shape indicator
+                Text("\(point.shape.displayName) \(String(format: "%.0f%%", point.brightness * 100))")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(.red)
-                    .padding(2)
+                    .padding(4)
                     .background(Color.black.opacity(0.6))
                     .cornerRadius(4)
-                    .position(x: frameRect.minX + 20, y: frameRect.minY - 10)
+                    .position(x: frameRect.minX + 30, y: frameRect.minY - 10)
             }
             .animation(.easeOut(duration: 0.1), value: point.boundingBox)
     }
@@ -159,13 +159,15 @@ struct LaserBoundingBox: View {
                 boundingBox: CGRect(x: 0.4, y: 0.3, width: 0.1, height: 0.08),
                 brightness: 0.92,
                 timestamp: Date(),
-                imageSize: CGSize(width: 1920, height: 1440)
+                imageSize: CGSize(width: 1920, height: 1440),
+                shape: .rounded
             ),
             LaserPoint(
                 boundingBox: CGRect(x: 0.6, y: 0.5, width: 0.05, height: 0.05),
                 brightness: 0.87,
                 timestamp: Date(),
-                imageSize: CGSize(width: 1920, height: 1440)
+                imageSize: CGSize(width: 1920, height: 1440),
+                shape: .lineSegment
             )
         ],
         viewSize: CGSize(width: 400, height: 600),
