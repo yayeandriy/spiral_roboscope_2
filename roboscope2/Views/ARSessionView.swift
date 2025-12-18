@@ -446,7 +446,8 @@ struct ARSessionView: View {
                     detectedPoints: laserDetection.detectedPoints,
                     viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
                     laserService: laserDetection,
-                    imageToViewTransform: imageToViewTransform
+                    imageToViewTransform: imageToViewTransform,
+                    arView: arView
                 )
                 .zIndex(2)
                 .onAppear {

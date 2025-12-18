@@ -6,6 +6,8 @@
 //
 
 import SwiftUI
+import RealityKit
+import ARKit
 
 struct LaserDetectionOverlay: View {
     let detectedPoints: [LaserPoint]
@@ -13,7 +15,9 @@ struct LaserDetectionOverlay: View {
     @ObservedObject var laserService: LaserDetectionService
     /// Maps normalized image coordinates to normalized view coordinates.
     let imageToViewTransform: CGAffineTransform
+    let arView: ARView?
     @State private var showControls = false
+    @State private var measuredDistance: Float?
     
     var body: some View {
         GeometryReader { geometry in
@@ -82,9 +86,77 @@ struct LaserDetectionOverlay: View {
                         , imageToViewTransform: imageToViewTransform
                     )
                 }
+                
+                // Distance measurement display
+                if let distance = measuredDistance {
+                    VStack {
+                        Spacer()
+                        Text(String(format: "%.2f m", distance))
+                            .font(.system(size: 56, weight: .bold, design: .rounded))
+                            .foregroundColor(.yellow)
+                            .shadow(color: .black.opacity(0.8), radius: 4, x: 0, y: 2)
+                            .padding(.bottom, 40)
+                    }
+                }
             }
             .allowsHitTesting(showControls) // Only intercept touches when controls are visible
+            .onChange(of: detectedPoints) { _, newPoints in
+                measureDistanceBetweenPoints(newPoints, viewSize: geometry.size)
+            }
         }
+    }
+    
+    /// Measure real-world distance between detected laser points using raycasts
+    private func measureDistanceBetweenPoints(_ points: [LaserPoint], viewSize: CGSize) {
+        guard let arView = arView, points.count >= 2 else {
+            measuredDistance = nil
+            return
+        }
+        
+        // Get screen positions of the two brightest points
+        let sortedPoints = points.sorted { $0.brightness > $1.brightness }
+        let point1 = sortedPoints[0]
+        let point2 = sortedPoints[1]
+        
+        // Get center positions in normalized image coordinates
+        let center1NormImg = CGPoint(x: point1.boundingBox.midX, y: point1.boundingBox.midY)
+        let center2NormImg = CGPoint(x: point2.boundingBox.midX, y: point2.boundingBox.midY)
+        
+        // Transform to normalized view coordinates
+        let center1NormView = center1NormImg.applying(imageToViewTransform)
+        let center2NormView = center2NormImg.applying(imageToViewTransform)
+        
+        // Convert to pixel coordinates
+        let center1Px = CGPoint(
+            x: center1NormView.x * viewSize.width,
+            y: center1NormView.y * viewSize.height
+        )
+        let center2Px = CGPoint(
+            x: center2NormView.x * viewSize.width,
+            y: center2NormView.y * viewSize.height
+        )
+        
+        // Perform raycasts from these screen positions
+        let results1 = arView.raycast(from: center1Px, allowing: .existingPlaneGeometry, alignment: .any)
+        let results2 = arView.raycast(from: center2Px, allowing: .existingPlaneGeometry, alignment: .any)
+        
+        // If no plane hits, try estimatedPlane
+        let hit1 = results1.first ?? arView.raycast(from: center1Px, allowing: .estimatedPlane, alignment: .any).first
+        let hit2 = results2.first ?? arView.raycast(from: center2Px, allowing: .estimatedPlane, alignment: .any).first
+        
+        guard let worldPos1 = hit1?.worldTransform.columns.3,
+              let worldPos2 = hit2?.worldTransform.columns.3 else {
+            measuredDistance = nil
+            return
+        }
+        
+        // Calculate 3D distance
+        let dx = worldPos1.x - worldPos2.x
+        let dy = worldPos1.y - worldPos2.y
+        let dz = worldPos1.z - worldPos2.z
+        let distance = sqrt(dx * dx + dy * dy + dz * dz)
+        
+        measuredDistance = distance
     }
 }
 
@@ -172,7 +244,8 @@ struct LaserBoundingBox: View {
         ],
         viewSize: CGSize(width: 400, height: 600),
         laserService: LaserDetectionService(),
-        imageToViewTransform: .identity
+        imageToViewTransform: .identity,
+        arView: nil
     )
     .background(Color.gray.opacity(0.3))
 }

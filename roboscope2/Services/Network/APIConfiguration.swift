@@ -15,8 +15,8 @@ enum APIEnvironment {
         switch self {
         case .development:
             // Use 127.0.0.1 instead of localhost for iOS simulator compatibility
-//            return "http://192.168.0.113:8080/api/v1"
-             return "https://spiralroboscope2backend-production.up.railway.app/api/v1"
+            return "http://192.168.0.113:8080/api/v1"
+//             return "https://spiralroboscope2backend-production.up.railway.app/api/v1"
         case .production:
             return "https://spiralroboscope2backend-production.up.railway.app/api/v1"
         }

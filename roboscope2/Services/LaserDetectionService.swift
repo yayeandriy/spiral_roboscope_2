@@ -24,13 +24,17 @@ enum LaserSpotShape {
 }
 
 /// Detected laser point in camera frame
-struct LaserPoint: Identifiable {
+struct LaserPoint: Identifiable, Equatable {
     let id = UUID()
     let boundingBox: CGRect  // Normalized coordinates (0-1) in camera image space
     let brightness: Float
     let timestamp: Date
     let imageSize: CGSize  // Camera image dimensions for coordinate mapping
     let shape: LaserSpotShape  // Shape classification
+    
+    static func == (lhs: LaserPoint, rhs: LaserPoint) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 /// Service for detecting laser points from camera frames
