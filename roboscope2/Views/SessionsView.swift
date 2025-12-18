@@ -17,6 +17,7 @@ struct SessionsView: View {
     @State private var sessionToDelete: WorkSession?
     // Search and filters removed for a simpler UI
     @State private var arSession: WorkSession?
+    @State private var dashboardSession: WorkSession?
     @State private var isLaunchingAR: Bool = false
     @State private var refreshTrigger: Bool = false  // Force row refresh
     
@@ -69,8 +70,23 @@ struct SessionsView: View {
                     }
                 }
             }
+            .fullScreenCover(item: $dashboardSession) { session in
+                SessionDashboardView(session: session)
+            }
+            .onChange(of: dashboardSession) { oldValue, newValue in
+                // As soon as navigation triggers, hide the local overlay
+                if newValue != nil { isLaunchingAR = false }
+
+                // When returning from Dashboard (which may have added markers), refresh the data
+                if oldValue != nil && newValue == nil {
+                    refreshTrigger.toggle()
+                    Task {
+                        await refreshData()
+                    }
+                }
+            }
             .fullScreenCover(item: $arSession) { session in
-                ARSessionView(session: session)
+                LaserGuideARSessionView(session: session)
             }
             .onChange(of: arSession) { oldValue, newValue in
                 // As soon as navigation triggers, hide the local overlay
@@ -242,8 +258,14 @@ struct SessionsView: View {
         // Immediate haptic + overlay to confirm tap even if navigation takes a moment
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         isLaunchingAR = true
-        // Trigger navigation
-        arSession = session
+
+        // LaserGuide sessions open a dashboard first; AR starts only on "Add marker"
+        if session.isLaserGuide {
+            dashboardSession = session
+        } else {
+            // Trigger navigation
+            arSession = session
+        }
     }
     
     private func deleteSession(_ session: WorkSession) async {
@@ -262,4 +284,107 @@ struct SessionsView: View {
 
 #Preview {
     SessionsView()
+}
+
+// MARK: - Session Dashboard (LaserGuide)
+
+private struct SessionDashboardView: View {
+    let session: WorkSession
+
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var markerService = MarkerService.shared
+
+    @State private var markers: [Marker] = []
+    @State private var isLoading: Bool = false
+    @State private var errorMessage: String?
+    @State private var arSession: WorkSession?
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section {
+                    Button {
+                        arSession = session
+                    } label: {
+                        Label("Add marker", systemImage: "plus")
+                    }
+                }
+
+                Section {
+                    ForEach(markers) { marker in
+                        HStack {
+                            Text(markerTitle(marker))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text(markerRelativeDate(marker))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Session Dashboard")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .overlay {
+                if isLoading {
+                    ProgressView()
+                }
+            }
+            .alert("Error", isPresented: .constant(errorMessage != nil)) {
+                Button("OK") { errorMessage = nil }
+            } message: {
+                if let errorMessage {
+                    Text(errorMessage)
+                }
+            }
+            .task {
+                await loadMarkers()
+            }
+            .fullScreenCover(item: $arSession) { session in
+                ARSessionView(session: session)
+            }
+            .onChange(of: arSession) { oldValue, newValue in
+                // When returning from AR, refresh markers list
+                if oldValue != nil && newValue == nil {
+                    Task {
+                        await loadMarkers()
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadMarkers() async {
+        await MainActor.run {
+            isLoading = true
+        }
+        do {
+            let loaded = try await markerService.getMarkersForSession(session.id)
+            await MainActor.run {
+                markers = loaded.sorted { $0.createdAt > $1.createdAt }
+                isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                isLoading = false
+                errorMessage = "Failed to load markers: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func markerTitle(_ marker: Marker) -> String {
+        if let label = marker.label, !label.isEmpty { return label }
+        return "Marker \(marker.id.uuidString.prefix(8))"
+    }
+
+    private func markerRelativeDate(_ marker: Marker) -> String {
+        let fmt = RelativeDateTimeFormatter()
+        fmt.unitsStyle = .abbreviated
+        return fmt.localizedString(for: marker.createdAt, relativeTo: Date())
+    }
 }
