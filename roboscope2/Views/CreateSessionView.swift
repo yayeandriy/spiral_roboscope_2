@@ -18,7 +18,7 @@ struct CreateSessionView: View {
     @State private var sessionType: WorkSessionType = .inspection
     @State private var sessionStatus: WorkSessionStatus = .draft
     @State private var startImmediately = false
-    @State private var laserGuide = false
+    @State private var laserGuide = true
     @State private var showingSpacePicker = false
     @State private var isCreating = false
     @State private var errorMessage: String?

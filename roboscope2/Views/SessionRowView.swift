@@ -50,10 +50,15 @@ struct SessionRowView: View {
                 .foregroundColor(.primary)
 
             // Bottom row: session type + markers badge
-            HStack {
+            HStack(spacing: 8) {
                 Text(session.sessionType.displayName.capitalized)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
+
+                if session.isLaserGuide {
+                    laserGuideBadge
+                }
+
                 Spacer()
                 markersBadge
             }
@@ -155,6 +160,19 @@ struct SessionRowView: View {
                     .background(Capsule().fill(Color(.systemBackground)))
             )
     }
+
+    private var laserGuideBadge: some View {
+        Text("Laser Guided")
+            .font(.caption)
+            .foregroundColor(.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
+                    .background(Capsule().fill(Color(.systemBackground)))
+            )
+    }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
         let totalSeconds = Int(duration)
@@ -227,7 +245,7 @@ struct StatusBadge: View {
                 startedAt: Date().addingTimeInterval(-3600), // 1 hour ago
                 completedAt: nil,
                 version: 1,
-                meta: [:],
+                meta: [WorkSessionMetaKeys.spatialEnvironment: AnyCodable("laserGuide")],
                 createdAt: Date().addingTimeInterval(-7200), // 2 hours ago
                 updatedAt: Date()
             ),
