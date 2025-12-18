@@ -5,3 +5,6 @@ Todo:
   ☐ Marker placement
   ☐ Marker location solving againt Laser Guide Table
   
+
+Distance match tolerance: laserGuideDistanceToleranceMeters (currently 0.03)
+Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)

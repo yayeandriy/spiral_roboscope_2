@@ -346,7 +346,7 @@ private struct SessionDashboardView: View {
                 await loadMarkers()
             }
             .fullScreenCover(item: $arSession) { session in
-                ARSessionView(session: session)
+                LaserGuideARSessionView(session: session)
             }
             .onChange(of: arSession) { oldValue, newValue in
                 // When returning from AR, refresh markers list

@@ -11,6 +11,7 @@ import ARKit
 import UIKit
 import SceneKit
 import Combine
+import QuartzCore
 
 struct ARSessionView: View {
     let session: WorkSession
@@ -448,7 +449,8 @@ struct ARSessionView: View {
                     viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
                     laserService: laserDetection,
                     imageToViewTransform: imageToViewTransform,
-                    arView: arView
+                    arView: arView,
+                    onDotLineMeasurement: nil
                 )
                 .zIndex(2)
                 .onAppear {
@@ -574,6 +576,15 @@ struct LaserGuideARSessionView: View {
     @StateObject var settings: AppSettings
     @StateObject var viewModel: ARSessionViewModel
     @StateObject var laserDetection = LaserDetectionService()
+    @State private var laserGuide: LaserGuide? = nil
+    @State private var laserGuideFetchError: String? = nil
+    @State private var lastLaserGuideSnapTime: TimeInterval = 0
+    @State private var latestLaserMeasurement: LaserDotLineMeasurement? = nil
+    @State private var debugDotAnchor: AnchorEntity? = nil
+    @State private var debugLineAnchor: AnchorEntity? = nil
+
+    private let laserGuideDistanceToleranceMeters: Float = 0.03
+    private let laserGuideSnapCooldownSeconds: TimeInterval = 0.6
 
     init(session: WorkSession) {
         self.session = session
@@ -668,8 +679,14 @@ struct LaserGuideARSessionView: View {
                     arView: $arView
                 )
                 .onAppear {
+                    print("[LaserGuideSnap] ARViewContainer appeared, starting session")
                     startARSession()
                     laserDetection.startDetection()
+
+                    Task {
+                        print("[LaserGuideSnap] Launching fetchLaserGuideIfNeeded task")
+                        await fetchLaserGuideIfNeeded()
+                    }
 
                     // Place initial frame origin at AR session origin
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -934,13 +951,28 @@ struct LaserGuideARSessionView: View {
                     HStack {
                         Spacer()
                         if manualPlacementState == .inactive {
-                            Button { createAndPersistMarker() } label: {
-                                Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
-                                    .font(.system(size: 36))
-                                    .frame(width: 80, height: 80)
+                            HStack(spacing: 20) {
+                                // Manual snap button
+                                Button {
+                                    applyLaserGuideIfPossible(latestLaserMeasurement)
+                                } label: {
+                                    Image(systemName: "scope")
+                                        .font(.system(size: 24))
+                                        .frame(width: 60, height: 60)
+                                }
+                                .buttonStyle(.plain)
+                                .lgCircle(tint: latestLaserMeasurement != nil ? .orange : .gray)
+                                .disabled(latestLaserMeasurement == nil)
+                                
+                                // Add marker button
+                                Button { createAndPersistMarker() } label: {
+                                    Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
+                                        .font(.system(size: 36))
+                                        .frame(width: 80, height: 80)
+                                }
+                                .buttonStyle(.plain)
+                                .lgCircle(tint: .white)
                             }
-                            .buttonStyle(.plain)
-                            .lgCircle(tint: .white)
                         } else {
                             VStack(spacing: 10) {
                                 Button {
@@ -978,7 +1010,10 @@ struct LaserGuideARSessionView: View {
                     viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
                     laserService: laserDetection,
                     imageToViewTransform: imageToViewTransform,
-                    arView: arView
+                    arView: arView,
+                    onDotLineMeasurement: { measurement in
+                        latestLaserMeasurement = measurement
+                    }
                 )
                 .zIndex(2)
                 .onAppear {
@@ -1023,6 +1058,160 @@ struct LaserGuideARSessionView: View {
     private func startARSession() {
         captureSession.start()
         isSessionActive = true
+    }
+
+    @MainActor
+    private func fetchLaserGuideIfNeeded() async {
+        guard laserGuide == nil else { return }
+        do {
+            laserGuideFetchError = nil
+            laserGuide = try await LaserGuideService.shared.fetchLaserGuide(spaceId: session.spaceId)
+            print("[LaserGuideSnap] Fetched guide with \(laserGuide?.grid.count ?? 0) segments")
+            laserGuide?.grid.forEach { seg in
+                print("[LaserGuideSnap]   Segment: x=\(seg.x), z=\(seg.z), length=\(seg.segmentLength)")
+            }
+        } catch {
+            print("[LaserGuideSnap] Fetch failed: \(error)")
+            laserGuideFetchError = error.localizedDescription
+            laserGuide = nil
+        }
+    }
+
+    private func applyLaserGuideIfPossible(_ measurement: LaserDotLineMeasurement?) {
+        guard let measurement else {
+            print("[LaserGuideSnap] No measurement")
+            return
+        }
+        guard let laserGuide else {
+            print("[LaserGuideSnap] No laser guide loaded")
+            return
+        }
+        guard !laserGuide.grid.isEmpty else {
+            print("[LaserGuideSnap] Grid is empty")
+            return
+        }
+
+        let now = CACurrentMediaTime()
+        guard now - lastLaserGuideSnapTime >= laserGuideSnapCooldownSeconds else {
+            print("[LaserGuideSnap] Cooldown active (last snap \(now - lastLaserGuideSnapTime)s ago)")
+            return
+        }
+
+        print("[LaserGuideSnap] Measurement: dot=\(measurement.dotWorld), line=\(measurement.lineWorld), dist=\(measurement.distanceMeters)m")
+
+        // Match distance to any segment length.
+        if let best = laserGuide.grid.min(by: {
+            abs(Float($0.segmentLength) - measurement.distanceMeters) < abs(Float($1.segmentLength) - measurement.distanceMeters)
+        }) {
+            let delta = abs(Float(best.segmentLength) - measurement.distanceMeters)
+            print("[LaserGuideSnap] Best match: segment(x=\(best.x), z=\(best.z), len=\(best.segmentLength)), delta=\(delta)m, tolerance=\(laserGuideDistanceToleranceMeters)m")
+            
+            guard delta <= laserGuideDistanceToleranceMeters else {
+                print("[LaserGuideSnap] Delta exceeds tolerance, skipping snap")
+                return
+            }
+
+            print("[LaserGuideSnap] ✓ Snapping origin to align dot at segment (x=\(best.x), z=\(best.z))")
+            snapFrameOriginToAlignDot(dotWorld: measurement.dotWorld, lineWorld: measurement.lineWorld, segment: best)
+            lastLaserGuideSnapTime = now
+        } else {
+            print("[LaserGuideSnap] No segments to match")
+        }
+    }
+
+    private func snapFrameOriginToAlignDot(dotWorld: SIMD3<Float>, lineWorld: SIMD3<Float>, segment: LaserGuideGridSegment) {
+        print("[LaserGuideSnap] snapFrameOriginToAlignDot called")
+        print("[LaserGuideSnap]   dotWorld: \(dotWorld)")
+        print("[LaserGuideSnap]   lineWorld: \(lineWorld)")
+        print("[LaserGuideSnap]   segment: x=\(segment.x), z=\(segment.z)")
+
+        // Place debug spheres at raycast hit positions
+        placeDebugSphere(at: dotWorld, color: .red, anchorState: $debugDotAnchor)
+        placeDebugSphere(at: lineWorld, color: .green, anchorState: $debugLineAnchor)
+
+        // 1. Direction vector R = N - D (from dot to line)
+        let R = lineWorld - dotWorld
+        let R_xz = SIMD2<Float>(R.x, R.z)
+        let r = normalize(R_xz)  // normalized direction in XZ plane
+        
+        print("[LaserGuideSnap]   R (dot→line): \(R)")
+        print("[LaserGuideSnap]   r (normalized XZ): \(r)")
+
+        // 2. Distance d = |S| = magnitude of segment position
+        let S = SIMD2<Float>(Float(segment.x), Float(segment.z))
+        let d = length(S)
+        
+        print("[LaserGuideSnap]   S (segment XZ): \(S)")
+        print("[LaserGuideSnap]   d (|S|): \(d)")
+
+        // 3. Origin position: O = D - r*d (origin is behind the dot, so dot is at +Z in local)
+        let offset_xz = r * d
+        let O = SIMD3<Float>(dotWorld.x - offset_xz.x, dotWorld.y, dotWorld.z - offset_xz.y)
+        
+        print("[LaserGuideSnap]   offset (r*d): \(offset_xz)")
+        print("[LaserGuideSnap]   O (origin pos): \(O)")
+
+        // 4. Rotation: Z-axis aligned with R (dot→line direction)
+        let newZ = SIMD3<Float>(r.x, 0, r.y)  // direction from dot to line
+        let newX = SIMD3<Float>(r.y, 0, -r.x)  // perpendicular in XZ plane
+        let newY = SIMD3<Float>(0, 1, 0)  // Y is up
+        
+        print("[LaserGuideSnap]   rotation: X=\(newX), Y=\(newY), Z=\(newZ)")
+
+        // 5. Build transform
+        var newTransform = matrix_identity_float4x4
+        newTransform.columns.0 = SIMD4<Float>(newX.x, newX.y, newX.z, 0)
+        newTransform.columns.1 = SIMD4<Float>(newY.x, newY.y, newY.z, 0)
+        newTransform.columns.2 = SIMD4<Float>(newZ.x, newZ.y, newZ.z, 0)
+        newTransform.columns.3 = SIMD4<Float>(O.x, O.y, O.z, 1)
+
+        // Apply
+        frameOriginTransform = newTransform
+        print("[LaserGuideSnap]   ✓ frameOriginTransform updated")
+        
+        // Verification: transform dot back to local coords and check if it matches segment
+        let inverseTransform = newTransform.inverse
+        let dotHomogeneous = SIMD4<Float>(dotWorld.x, dotWorld.y, dotWorld.z, 1)
+        let dotLocal = inverseTransform * dotHomogeneous
+        let dotLocalXZ = SIMD2<Float>(dotLocal.x, dotLocal.z)
+        let segmentXZ = SIMD2<Float>(Float(segment.x), Float(segment.z))
+        let error = length(dotLocalXZ - segmentXZ)
+        
+        print("[LaserGuideSnap]   VERIFICATION:")
+        print("[LaserGuideSnap]     dotLocal: x=\(dotLocal.x), z=\(dotLocal.z)")
+        print("[LaserGuideSnap]     segment:  x=\(segment.x), z=\(segment.z)")
+        print("[LaserGuideSnap]     error (XZ distance): \(error)m")
+        
+        if frameOriginAnchor == nil {
+            print("[LaserGuideSnap]   placing gizmo (was nil)")
+            placeFrameOriginGizmo(at: frameOriginTransform)
+        } else {
+            print("[LaserGuideSnap]   recreating gizmo at new position")
+            placeFrameOriginGizmo(at: frameOriginTransform)
+        }
+        updateMarkersForNewFrameOrigin()
+        print("[LaserGuideSnap]   snap complete")
+    }
+
+    private func placeDebugSphere(at position: SIMD3<Float>, color: UIColor, anchorState: Binding<AnchorEntity?>) {
+        guard let arView = arView else { return }
+        
+        // Remove existing debug sphere
+        if let existing = anchorState.wrappedValue {
+            arView.scene.removeAnchor(existing)
+        }
+        
+        // Create new sphere at position
+        let anchor = AnchorEntity(world: position)
+        let sphere = ModelEntity(
+            mesh: .generateSphere(radius: 0.03),
+            materials: [SimpleMaterial(color: color, isMetallic: false)]
+        )
+        anchor.addChild(sphere)
+        arView.scene.addAnchor(anchor)
+        anchorState.wrappedValue = anchor
+        
+        print("[LaserGuideSnap] Debug sphere (\(color == .red ? "RED/dot" : "GREEN/line")) placed at \(position)")
     }
 
     private func endARSession() {

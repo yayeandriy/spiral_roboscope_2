@@ -220,8 +220,14 @@ extension LaserGuideARSessionView {
             arView.scene.removeAnchor(existingAnchor)
         }
 
-        // Create anchor at the transformed origin
-        let anchor = AnchorEntity(world: transform)
+        // Create anchor at world origin
+        let anchor = AnchorEntity(world: .zero)
+        
+        // Set the full transform (position + rotation)
+        anchor.transform = Transform(matrix: transform)
+        
+        let pos = anchor.position(relativeTo: nil)
+        print("[LaserGuideSnap] placeFrameOriginGizmo: worldPosition=\(pos)")
 
         // Create coordinate axes (RealityKit version)
         let axisLength: Float = 0.5  // 50cm axes
@@ -394,7 +400,17 @@ extension LaserGuideARSessionView {
     /// Update the FrameOrigin gizmo to match where the model is positioned
     /// Called automatically via frameOriginTransform didSet observer
     func updateFrameOriginGizmoPosition() {
-        guard let anchor = frameOriginAnchor else { return }
+        guard let anchor = frameOriginAnchor else {
+            print("[LaserGuideSnap] updateFrameOriginGizmoPosition: NO ANCHOR!")
+            return
+        }
+        let before = anchor.transform.matrix.columns.3
         anchor.transform = Transform(matrix: frameOriginTransform)
+        let after = anchor.transform.matrix.columns.3
+        print("[LaserGuideSnap] updateFrameOriginGizmoPosition:")
+        print("[LaserGuideSnap]   BEFORE: \(before)")
+        print("[LaserGuideSnap]   AFTER:  \(after)")
+        print("[LaserGuideSnap]   anchor.isAnchored: \(anchor.isAnchored)")
+        print("[LaserGuideSnap]   anchor.isEnabled: \(anchor.isEnabled)")
     }
 }

@@ -9,6 +9,12 @@ import SwiftUI
 import RealityKit
 import ARKit
 
+struct LaserDotLineMeasurement: Equatable {
+    let dotWorld: SIMD3<Float>
+    let lineWorld: SIMD3<Float>
+    let distanceMeters: Float
+}
+
 struct LaserDetectionOverlay: View {
     let detectedPoints: [LaserPoint]
     let viewSize: CGSize
@@ -16,6 +22,7 @@ struct LaserDetectionOverlay: View {
     /// Maps normalized image coordinates to normalized view coordinates.
     let imageToViewTransform: CGAffineTransform
     let arView: ARView?
+    let onDotLineMeasurement: ((LaserDotLineMeasurement?) -> Void)?
     @State private var showControls = false
     @State private var measuredDistance: Float?
 
@@ -153,17 +160,20 @@ struct LaserDetectionOverlay: View {
     private func measureDistanceBetweenDotAndLine(_ points: [LaserPoint], viewSize: CGSize) {
         guard let arView = arView else {
             measuredDistance = nil
+            onDotLineMeasurement?(nil)
             return
         }
         // Pick best dot by brightness.
         guard let dot = points.filter({ $0.shape == .rounded }).max(by: { $0.brightness < $1.brightness }) else {
             measuredDistance = nil
+            onDotLineMeasurement?(nil)
             return
         }
 
         // Raycast dot to world.
         guard let dotWorld = raycastWorldPosition(for: dot, arView: arView, viewSize: viewSize) else {
             measuredDistance = nil
+            onDotLineMeasurement?(nil)
             return
         }
 
@@ -187,6 +197,7 @@ struct LaserDetectionOverlay: View {
 
         guard let lineWorld = chosenLineWorld, chosenLine != nil else {
             measuredDistance = nil
+            onDotLineMeasurement?(nil)
             return
         }
 
@@ -194,7 +205,14 @@ struct LaserDetectionOverlay: View {
         let dx = dotWorld.x - lineWorld.x
         let dy = dotWorld.y - lineWorld.y
         let dz = dotWorld.z - lineWorld.z
-        measuredDistance = sqrt(dx * dx + dy * dy + dz * dz)
+        let distance = sqrt(dx * dx + dy * dy + dz * dz)
+        measuredDistance = distance
+
+        onDotLineMeasurement?(LaserDotLineMeasurement(
+            dotWorld: SIMD3<Float>(dotWorld.x, dotWorld.y, dotWorld.z),
+            lineWorld: SIMD3<Float>(lineWorld.x, lineWorld.y, lineWorld.z),
+            distanceMeters: distance
+        ))
     }
 
     private func raycastWorldPosition(for point: LaserPoint, arView: ARView, viewSize: CGSize) -> simd_float4? {
@@ -386,7 +404,8 @@ struct LaserBoundingBox: View {
         viewSize: CGSize(width: 400, height: 600),
         laserService: LaserDetectionService(),
         imageToViewTransform: .identity,
-        arView: nil
+        arView: nil,
+        onDotLineMeasurement: nil
     )
     .background(Color.gray.opacity(0.3))
 }
