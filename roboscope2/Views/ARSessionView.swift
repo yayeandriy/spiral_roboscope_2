@@ -263,6 +263,7 @@ struct ARSessionView: View {
 
             // Target overlay (switch to crosshair in manual placement mode)
             TargetOverlayView(style: manualPlacementState == .inactive ? .brackets : .cross)
+                .padding(.top, 40)
                 .allowsHitTesting(false)
                 .zIndex(1)
 
@@ -345,7 +346,7 @@ struct ARSessionView: View {
                         .lgCapsule(tint: .white)
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 16)
+                .padding(.top, 56)
                 Spacer()
             }
             .zIndex(2)
@@ -805,6 +806,7 @@ struct LaserGuideARSessionView: View {
 
                 // Target overlay (switch to crosshair in manual placement mode)
                 TargetOverlayView(style: manualPlacementState == .inactive ? .brackets : .cross)
+                    .padding(.top, 40)
                     .allowsHitTesting(false)
                     .zIndex(1)
 
@@ -884,7 +886,7 @@ struct LaserGuideARSessionView: View {
                             .lgCapsule(tint: .white)
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, 16)
+                    .padding(.top, 56)
                     Spacer()
                 }
                 .zIndex(2)

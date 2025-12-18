@@ -22,7 +22,7 @@ struct TargetOverlayView: View {
         GeometryReader { geometry in
             let centerX = geometry.size.width / 2
             let centerY = geometry.size.height / 2
-            let targetY: CGFloat = 80 + targetSize / 2
+            let targetY: CGFloat = 120 + targetSize / 2
             let halfSize = targetSize / 2
             
             ZStack {
