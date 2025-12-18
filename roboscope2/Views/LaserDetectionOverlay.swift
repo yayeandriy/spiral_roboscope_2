@@ -18,6 +18,21 @@ struct LaserDetectionOverlay: View {
     let arView: ARView?
     @State private var showControls = false
     @State private var measuredDistance: Float?
+
+    private var filteredForDisplay: [LaserPoint] {
+        // Display max one dot and max one line.
+        // We do not apply Y filtering here because it requires raycasting; that is handled
+        // inside measureDistanceBetweenDotAndLine(_:viewSize:).
+        let dot = detectedPoints
+            .filter { $0.shape == .rounded }
+            .max(by: { $0.brightness < $1.brightness })
+
+        let line = detectedPoints
+            .filter { $0.shape == .lineSegment }
+            .max(by: { $0.brightness < $1.brightness })
+
+        return [dot, line].compactMap { $0 }
+    }
     
     var body: some View {
         GeometryReader { geometry in
@@ -62,10 +77,33 @@ struct LaserDetectionOverlay: View {
                                 Slider(value: $laserService.brightnessThreshold, in: 0.5...0.99)
                                     .tint(.yellow)
                                 
-                                Text("Points: \(detectedPoints.count)")
+                                Text("Boxes: \(filteredForDisplay.count)")
                                     .font(.system(size: 12, weight: .bold))
                                     .foregroundColor(.yellow)
                                     .frame(width: 70)
+                            }
+
+                            Divider()
+                                .background(Color.white.opacity(0.3))
+
+                            Text("Dot/Line Y Tolerance")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+
+                            HStack {
+                                Text(String(format: "%.0f cm", laserService.maxDotLineYDeltaMeters * 100))
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.yellow)
+                                    .frame(width: 60)
+
+                                Slider(
+                                    value: Binding(
+                                        get: { Double(laserService.maxDotLineYDeltaMeters) },
+                                        set: { laserService.maxDotLineYDeltaMeters = Float($0) }
+                                    ),
+                                    in: 0.0...0.5
+                                )
+                                .tint(.yellow)
                             }
                         }
                         .padding(16)
@@ -79,7 +117,7 @@ struct LaserDetectionOverlay: View {
                 }
                 
                 // Bounding boxes
-                ForEach(detectedPoints) { point in
+                ForEach(filteredForDisplay) { point in
                     LaserBoundingBox(
                         point: point,
                         viewSize: geometry.size
@@ -101,62 +139,81 @@ struct LaserDetectionOverlay: View {
             }
             .allowsHitTesting(showControls) // Only intercept touches when controls are visible
             .onChange(of: detectedPoints) { _, newPoints in
-                measureDistanceBetweenPoints(newPoints, viewSize: geometry.size)
+                measureDistanceBetweenDotAndLine(newPoints, viewSize: geometry.size)
+            }
+            .onChange(of: laserService.maxDotLineYDeltaMeters) { _, _ in
+                measureDistanceBetweenDotAndLine(detectedPoints, viewSize: geometry.size)
             }
         }
     }
     
-    /// Measure real-world distance between detected laser points using raycasts
-    private func measureDistanceBetweenPoints(_ points: [LaserPoint], viewSize: CGSize) {
-        guard let arView = arView, points.count >= 2 else {
+    /// Measure real-world distance between the chosen dot and line using raycasts.
+    /// Filters to max one dot + one line, and only accepts lines whose world-space Y
+    /// is within `laserService.maxDotLineYDeltaMeters` of the dot's Y.
+    private func measureDistanceBetweenDotAndLine(_ points: [LaserPoint], viewSize: CGSize) {
+        guard let arView = arView else {
             measuredDistance = nil
             return
         }
-        
-        // Get screen positions of the two brightest points
-        let sortedPoints = points.sorted { $0.brightness > $1.brightness }
-        let point1 = sortedPoints[0]
-        let point2 = sortedPoints[1]
-        
+        // Pick best dot by brightness.
+        guard let dot = points.filter({ $0.shape == .rounded }).max(by: { $0.brightness < $1.brightness }) else {
+            measuredDistance = nil
+            return
+        }
+
+        // Raycast dot to world.
+        guard let dotWorld = raycastWorldPosition(for: dot, arView: arView, viewSize: viewSize) else {
+            measuredDistance = nil
+            return
+        }
+
+        // Consider line candidates, but only accept those within Y tolerance.
+        let tolerance = laserService.maxDotLineYDeltaMeters
+        let lineCandidates = points.filter { $0.shape == .lineSegment }.sorted { $0.brightness > $1.brightness }
+
+        var chosenLine: LaserPoint?
+        var chosenLineWorld: simd_float4?
+
+        for candidate in lineCandidates {
+            guard let lineWorld = raycastWorldPosition(for: candidate, arView: arView, viewSize: viewSize) else {
+                continue
+            }
+            if abs(lineWorld.y - dotWorld.y) <= tolerance {
+                chosenLine = candidate
+                chosenLineWorld = lineWorld
+                break
+            }
+        }
+
+        guard let lineWorld = chosenLineWorld, chosenLine != nil else {
+            measuredDistance = nil
+            return
+        }
+
+        // Calculate 3D distance between dot and line hit points.
+        let dx = dotWorld.x - lineWorld.x
+        let dy = dotWorld.y - lineWorld.y
+        let dz = dotWorld.z - lineWorld.z
+        measuredDistance = sqrt(dx * dx + dy * dy + dz * dz)
+    }
+
+    private func raycastWorldPosition(for point: LaserPoint, arView: ARView, viewSize: CGSize) -> simd_float4? {
         // Get center positions in normalized image coordinates
-        let center1NormImg = CGPoint(x: point1.boundingBox.midX, y: point1.boundingBox.midY)
-        let center2NormImg = CGPoint(x: point2.boundingBox.midX, y: point2.boundingBox.midY)
-        
+        let centerNormImg = CGPoint(x: point.boundingBox.midX, y: point.boundingBox.midY)
+
         // Transform to normalized view coordinates
-        let center1NormView = center1NormImg.applying(imageToViewTransform)
-        let center2NormView = center2NormImg.applying(imageToViewTransform)
-        
+        let centerNormView = centerNormImg.applying(imageToViewTransform)
+
         // Convert to pixel coordinates
-        let center1Px = CGPoint(
-            x: center1NormView.x * viewSize.width,
-            y: center1NormView.y * viewSize.height
+        let centerPx = CGPoint(
+            x: centerNormView.x * viewSize.width,
+            y: centerNormView.y * viewSize.height
         )
-        let center2Px = CGPoint(
-            x: center2NormView.x * viewSize.width,
-            y: center2NormView.y * viewSize.height
-        )
-        
-        // Perform raycasts from these screen positions
-        let results1 = arView.raycast(from: center1Px, allowing: .existingPlaneGeometry, alignment: .any)
-        let results2 = arView.raycast(from: center2Px, allowing: .existingPlaneGeometry, alignment: .any)
-        
-        // If no plane hits, try estimatedPlane
-        let hit1 = results1.first ?? arView.raycast(from: center1Px, allowing: .estimatedPlane, alignment: .any).first
-        let hit2 = results2.first ?? arView.raycast(from: center2Px, allowing: .estimatedPlane, alignment: .any).first
-        
-        guard let worldPos1 = hit1?.worldTransform.columns.3,
-              let worldPos2 = hit2?.worldTransform.columns.3 else {
-            measuredDistance = nil
-            return
-        }
-        
-        // Calculate 3D distance
-        let dx = worldPos1.x - worldPos2.x
-        let dy = worldPos1.y - worldPos2.y
-        let dz = worldPos1.z - worldPos2.z
-        let distance = sqrt(dx * dx + dy * dy + dz * dz)
-        
-        measuredDistance = distance
+
+        // Perform raycasts from this screen position
+        let results = arView.raycast(from: centerPx, allowing: .existingPlaneGeometry, alignment: .any)
+        let hit = results.first ?? arView.raycast(from: centerPx, allowing: .estimatedPlane, alignment: .any).first
+        return hit?.worldTransform.columns.3
     }
 }
 
@@ -164,6 +221,14 @@ struct LaserBoundingBox: View {
     let point: LaserPoint
     let viewSize: CGSize
     let imageToViewTransform: CGAffineTransform
+
+    private struct RenderBox {
+        let centerPx: CGPoint
+        let widthPx: CGFloat
+        let heightPx: CGFloat
+        let rotationRadians: CGFloat
+        let labelAnchor: CGPoint
+    }
     
     private var frameRect: CGRect {
         // point.boundingBox is in normalized image coordinates (0-1).
@@ -204,23 +269,92 @@ struct LaserBoundingBox: View {
             height: heightPx
         )
     }
+
+    private var orientedRenderBox: RenderBox? {
+        guard point.shape == .lineSegment, let obb = point.orientedLineBox else { return nil }
+        let imageW = max(1.0, point.imageSize.width)
+        let imageH = max(1.0, point.imageSize.height)
+
+        // Center in normalized image coordinates.
+        let centerNormImg = obb.centerNorm
+        let centerNormView = centerNormImg.applying(imageToViewTransform)
+        let centerPx = CGPoint(x: centerNormView.x * viewSize.width, y: centerNormView.y * viewSize.height)
+
+        // Build 1-pixel step vectors in normalized image coords, then map through transform.
+        let cosA = cos(obb.angleRadians)
+        let sinA = sin(obb.angleRadians)
+
+        let dirDeltaNorm = CGPoint(x: CGFloat(cosA) / imageW, y: CGFloat(sinA) / imageH)
+        let perpDeltaNorm = CGPoint(x: CGFloat(-sinA) / imageW, y: CGFloat(cosA) / imageH)
+
+        let dirEndNormView = CGPoint(x: centerNormImg.x + dirDeltaNorm.x, y: centerNormImg.y + dirDeltaNorm.y)
+            .applying(imageToViewTransform)
+        let perpEndNormView = CGPoint(x: centerNormImg.x + perpDeltaNorm.x, y: centerNormImg.y + perpDeltaNorm.y)
+            .applying(imageToViewTransform)
+
+        let dirVecPx = CGVector(
+            dx: (dirEndNormView.x - centerNormView.x) * viewSize.width,
+            dy: (dirEndNormView.y - centerNormView.y) * viewSize.height
+        )
+        let perpVecPx = CGVector(
+            dx: (perpEndNormView.x - centerNormView.x) * viewSize.width,
+            dy: (perpEndNormView.y - centerNormView.y) * viewSize.height
+        )
+
+        let dirPerPixel = max(1e-6, hypot(dirVecPx.dx, dirVecPx.dy))
+        let perpPerPixel = max(1e-6, hypot(perpVecPx.dx, perpVecPx.dy))
+
+        let widthPx = dirPerPixel * obb.lengthPx
+        let heightPx = perpPerPixel * obb.thicknessPx
+
+        let rotation = CGFloat(atan2(dirVecPx.dy, dirVecPx.dx))
+
+        let labelAnchor = CGPoint(x: centerPx.x, y: centerPx.y - heightPx / 2 - 14)
+
+        return RenderBox(
+            centerPx: centerPx,
+            widthPx: widthPx,
+            heightPx: heightPx,
+            rotationRadians: rotation,
+            labelAnchor: labelAnchor
+        )
+    }
     
     var body: some View {
-        Rectangle()
-            .stroke(Color.red, lineWidth: 2)
-            .frame(width: frameRect.width, height: frameRect.height)
-            .position(x: frameRect.midX, y: frameRect.midY)
-            .overlay(alignment: .topLeading) {
-                // Brightness and shape indicator
-                Text("\(point.shape.displayName) \(String(format: "%.0f%%", point.brightness * 100))")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.red)
-                    .padding(4)
-                    .background(Color.black.opacity(0.6))
-                    .cornerRadius(4)
-                    .position(x: frameRect.minX + 30, y: frameRect.minY - 10)
+        Group {
+            if let obb = orientedRenderBox {
+                Rectangle()
+                    .stroke(Color.red, lineWidth: 2)
+                    .frame(width: obb.widthPx, height: obb.heightPx)
+                    .rotationEffect(.radians(obb.rotationRadians))
+                    .position(x: obb.centerPx.x, y: obb.centerPx.y)
+                    .overlay {
+                        Text("\(point.shape.displayName) \(String(format: "%.0f%%", point.brightness * 100))")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.red)
+                            .padding(4)
+                            .background(Color.black.opacity(0.6))
+                            .cornerRadius(4)
+                            .position(x: obb.labelAnchor.x, y: obb.labelAnchor.y)
+                    }
+            } else {
+                Rectangle()
+                    .stroke(Color.red, lineWidth: 2)
+                    .frame(width: frameRect.width, height: frameRect.height)
+                    .position(x: frameRect.midX, y: frameRect.midY)
+                    .overlay(alignment: .topLeading) {
+                        // Brightness and shape indicator
+                        Text("\(point.shape.displayName) \(String(format: "%.0f%%", point.brightness * 100))")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.red)
+                            .padding(4)
+                            .background(Color.black.opacity(0.6))
+                            .cornerRadius(4)
+                            .position(x: frameRect.minX + 30, y: frameRect.minY - 10)
+                    }
             }
-            .animation(.easeOut(duration: 0.1), value: point.boundingBox)
+        }
+        .animation(.easeOut(duration: 0.1), value: point.boundingBox)
     }
 }
 
@@ -232,14 +366,21 @@ struct LaserBoundingBox: View {
                 brightness: 0.92,
                 timestamp: Date(),
                 imageSize: CGSize(width: 1920, height: 1440),
-                shape: .rounded
+                shape: .rounded,
+                orientedLineBox: nil
             ),
             LaserPoint(
                 boundingBox: CGRect(x: 0.6, y: 0.5, width: 0.05, height: 0.05),
                 brightness: 0.87,
                 timestamp: Date(),
                 imageSize: CGSize(width: 1920, height: 1440),
-                shape: .lineSegment
+                shape: .lineSegment,
+                orientedLineBox: LaserOrientedLineBox(
+                    centerNorm: CGPoint(x: 0.625, y: 0.525),
+                    angleRadians: .pi / 4,
+                    lengthPx: 400,
+                    thicknessPx: 18
+                )
             )
         ],
         viewSize: CGSize(width: 400, height: 600),

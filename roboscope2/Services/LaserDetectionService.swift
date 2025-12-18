@@ -9,6 +9,7 @@ import Foundation
 import ARKit
 import UIKit
 import Combine
+import QuartzCore
 
 /// Shape classification for detected spots
 enum LaserSpotShape {
@@ -24,6 +25,17 @@ enum LaserSpotShape {
 }
 
 /// Detected laser point in camera frame
+struct LaserOrientedLineBox: Equatable {
+    /// Center in normalized image coordinates (0..1).
+    let centerNorm: CGPoint
+    /// Line direction angle in image pixel coordinate space (radians).
+    let angleRadians: CGFloat
+    /// Length of the line in image pixels (major axis).
+    let lengthPx: CGFloat
+    /// Thickness of the line in image pixels (minor axis).
+    let thicknessPx: CGFloat
+}
+
 struct LaserPoint: Identifiable, Equatable {
     let id = UUID()
     let boundingBox: CGRect  // Normalized coordinates (0-1) in camera image space
@@ -31,6 +43,9 @@ struct LaserPoint: Identifiable, Equatable {
     let timestamp: Date
     let imageSize: CGSize  // Camera image dimensions for coordinate mapping
     let shape: LaserSpotShape  // Shape classification
+    /// Optional oriented geometry for line segments.
+    /// When present, overlay can render an object-aligned (rotated) box.
+    let orientedLineBox: LaserOrientedLineBox?
     
     static func == (lhs: LaserPoint, rhs: LaserPoint) -> Bool {
         lhs.id == rhs.id
@@ -41,6 +56,9 @@ struct LaserPoint: Identifiable, Equatable {
 class LaserDetectionService: ObservableObject {
     @Published var detectedPoints: [LaserPoint] = []
     @Published var isDetecting = false
+    /// Max allowed world-space Y delta (meters) between the chosen dot and line.
+    /// Used by UI overlay filtering (default 0.20m = 20cm).
+    @Published var maxDotLineYDeltaMeters: Float = 0.20
     
     // Detection parameters
     /// Normalized luma threshold (0..1). Higher = fewer detections.
@@ -49,19 +67,29 @@ class LaserDetectionService: ObservableObject {
     var minBlobSize: CGFloat = 0.002
     var maxBlobSize: CGFloat = 0.15
     /// Max number of boxes to display.
-    var maxDetections: Int = 3
+    /// Note: overlay further filters to max one dot + one line.
+    var maxDetections: Int = 6
     private var lastProcessTime: TimeInterval = 0
     private let processingInterval: TimeInterval = 1.0 / 30.0  // Up to ~30Hz
     private let processingQueue = DispatchQueue(label: "LaserGuide.LaserDetection", qos: .userInitiated)
     private let stateLock = NSLock()
     private var isProcessingFrame = false
     private var lastTrackedCenterNorm: CGPoint? = nil
+
+    private struct Peak {
+        let x: Int
+        let y: Int
+        let luma: UInt8
+    }
     
     /// Process AR frame to detect laser points
     func processFrame(_ frame: ARFrame) {
         guard isDetecting else { return }
-        
-        let currentTime = frame.timestamp
+
+        // Use a stable wall-clock timer here rather than ARFrame.timestamp.
+        // Some SDK/toolchain combinations expose `timestamp` as `Duration`, which can cause
+        // type-mismatch errors when compared to `TimeInterval`.
+        let currentTime = CACurrentMediaTime()
         guard currentTime - lastProcessTime >= processingInterval else { return }
         lastProcessTime = currentTime
         
@@ -154,6 +182,11 @@ class LaserDetectionService: ObservableObject {
         let thresholdByte = UInt8(max(0, min(255, Int(brightnessThreshold * 255.0))))
         let step = 4
 
+        // Line detectability tweaks:
+        // The line often fails the local "peakiness" check because nearby samples can still fall on the line.
+        // We'll run a separate coarse scan for line candidates when the peak-based method yields no line.
+        let lineThresholdByte = UInt8(max(0, Int(thresholdByte) - 18)) // slightly more permissive than dot
+
         // ROI around last detection to keep tracking responsive while moving.
         let roiHalfSizeNorm: CGFloat = 0.18
         var roiMinX = 0
@@ -238,12 +271,6 @@ class LaserDetectionService: ObservableObject {
         guard bestX >= 0, bestY >= 0 else { return [] }
         
         // Collect multiple peaks with minimum separation
-        struct Peak {
-            let x: Int
-            let y: Int
-            let luma: UInt8
-        }
-        
         var peaks: [Peak] = [Peak(x: bestX, y: bestY, luma: bestLuma)]
         let minSeparation = 80  // Min pixel distance between peaks
         
@@ -285,17 +312,51 @@ class LaserDetectionService: ObservableObject {
                     if Int(center) - neighborMean < minPeakDelta { continue }
                     
                     peaks.append(Peak(x: x, y: y, luma: center))
-                    if peaks.count >= 5 { break }  // Limit search
+                    if peaks.count >= 8 { break }  // Limit search
                 }
-                if peaks.count >= 5 { break }
+                if peaks.count >= 8 { break }
             }
-            if peaks.count >= 5 { break }
+            if peaks.count >= 8 { break }
+        }
+
+        // If ROI tracking is enabled, the peak scan may never look outside the ROI.
+        // Add a coarse full-frame line scan to keep line detection reliable.
+        if let linePeak = findBestLinePeak(
+            width: width,
+            height: height,
+            lumaAt: lumaAt,
+            thresholdByte: lineThresholdByte
+        ) {
+            // Only add if it's not too close to an existing peak.
+            var tooClose = false
+            for peak in peaks {
+                let dx = linePeak.x - peak.x
+                let dy = linePeak.y - peak.y
+                if dx * dx + dy * dy < minSeparation * minSeparation {
+                    tooClose = true
+                    break
+                }
+            }
+            if !tooClose {
+                peaks.append(linePeak)
+            }
         }
 
         // Convert peaks to LaserPoints
         var points: [LaserPoint] = []
-        let windowRadius = 28
-        let pad = 6
+        let baseWindowRadius = 28
+        let basePad = 6
+
+        // Line fitting parameters.
+        // Note: the laser line has a consistent physical length; in image space it still varies
+        // with distance/perspective, but this minimum prevents the detector from returning tiny
+        // sub-segments when thresholding only captures part of the line.
+        let lineFitWindowRadius = 140
+        let lineFitStep = 2
+        let lineMinLengthNorm: CGFloat = 0.12
+        let lineMinThicknessNorm: CGFloat = 0.006
+        let lineMaxSizeNorm: CGFloat = 0.35
+        let lineAnisotropyThreshold: Double = 6.0
         
         for peak in peaks {
             // Refine bounding box around this peak
@@ -306,11 +367,19 @@ class LaserDetectionService: ObservableObject {
             var minY = peak.y
             var maxY = peak.y
             
-            let wMinX = max(0, peak.x - windowRadius)
-            let wMaxX = min(width - 1, peak.x + windowRadius)
-            let wMinY = max(0, peak.y - windowRadius)
-            let wMaxY = min(height - 1, peak.y + windowRadius)
-            
+            let wMinX = max(0, peak.x - baseWindowRadius)
+            let wMaxX = min(width - 1, peak.x + baseWindowRadius)
+            let wMinY = max(0, peak.y - baseWindowRadius)
+            let wMaxY = min(height - 1, peak.y + baseWindowRadius)
+
+            // Track simple second-order moments in the base window for robust line-vs-dot classification.
+            var count = 0
+            var sumX: Double = 0
+            var sumY: Double = 0
+            var sumXX: Double = 0
+            var sumYY: Double = 0
+            var sumXY: Double = 0
+
             for y in wMinY...wMaxY {
                 for x in wMinX...wMaxX {
                     if Int(lumaAt(x, y)) >= localThreshold {
@@ -318,15 +387,24 @@ class LaserDetectionService: ObservableObject {
                         if x > maxX { maxX = x }
                         if y < minY { minY = y }
                         if y > maxY { maxY = y }
+
+                        count += 1
+                        let xd = Double(x)
+                        let yd = Double(y)
+                        sumX += xd
+                        sumY += yd
+                        sumXX += xd * xd
+                        sumYY += yd * yd
+                        sumXY += xd * yd
                     }
                 }
             }
-            
+
             // Pad slightly, and clamp.
-            minX = max(0, minX - pad)
-            maxX = min(width - 1, maxX + pad)
-            minY = max(0, minY - pad)
-            maxY = min(height - 1, maxY + pad)
+            minX = max(0, minX - basePad)
+            maxX = min(width - 1, maxX + basePad)
+            minY = max(0, minY - basePad)
+            maxY = min(height - 1, maxY + basePad)
             
             let rectPx = CGRect(
                 x: CGFloat(minX),
@@ -341,21 +419,77 @@ class LaserDetectionService: ObservableObject {
                 width: rectPx.width / CGFloat(width),
                 height: rectPx.height / CGFloat(height)
             )
-            
+
+            // Classify using anisotropy of the pixel cloud (robust to diagonal lines).
+            var isLineCandidate = false
+            if count >= 20 {
+                let invN = 1.0 / Double(count)
+                let meanX = sumX * invN
+                let meanY = sumY * invN
+                let sxx = max(0.0, (sumXX * invN) - (meanX * meanX))
+                let syy = max(0.0, (sumYY * invN) - (meanY * meanY))
+                let sxy = (sumXY * invN) - (meanX * meanY)
+
+                let trace = sxx + syy
+                let det = (sxx * syy) - (sxy * sxy)
+                let disc = max(0.0, (trace * trace) / 4.0 - det)
+                let root = sqrt(disc)
+                let lambda1 = (trace / 2.0) + root
+                let lambda2 = max(1e-6, (trace / 2.0) - root)
+
+                let anisotropy = lambda1 / lambda2
+                isLineCandidate = anisotropy >= lineAnisotropyThreshold
+            }
+
             // Reject boxes that are too big (broad bright areas) or too tiny.
+            // Allow larger size for lines (since line length can be substantial in image space).
             let size = max(rectNorm.width, rectNorm.height)
-            if size < minBlobSize || size > min(maxBlobSize, 0.08) { continue }
-            
-            // Classify shape based on aspect ratio
-            let aspectRatio = max(rectNorm.width, rectNorm.height) / min(rectNorm.width, rectNorm.height)
-            let shape: LaserSpotShape = aspectRatio > 1.5 ? .lineSegment : .rounded
+            let maxAllowedSize = isLineCandidate ? min(maxBlobSize, lineMaxSizeNorm) : min(maxBlobSize, 0.08)
+            if size < minBlobSize || size > maxAllowedSize { continue }
+
+            var finalRectNorm = rectNorm
+            var shape: LaserSpotShape = isLineCandidate ? .lineSegment : .rounded
+            var orientedLineBox: LaserOrientedLineBox? = nil
+
+            // For line candidates, refit in a larger window and enforce a minimum length.
+            if isLineCandidate {
+                if let fitted = fitLineBoundingBox(
+                    peakX: peak.x,
+                    peakY: peak.y,
+                    width: width,
+                    height: height,
+                    lumaAt: lumaAt,
+                    thresholdByte: thresholdByte,
+                    peakLuma: peak.luma,
+                    windowRadius: lineFitWindowRadius,
+                    step: lineFitStep,
+                    minLengthNorm: lineMinLengthNorm,
+                    minThicknessNorm: lineMinThicknessNorm
+                ) {
+                    let fittedSize = max(fitted.rectNorm.width, fitted.rectNorm.height)
+                    if fittedSize >= minBlobSize && fittedSize <= min(maxBlobSize, lineMaxSizeNorm) {
+                        finalRectNorm = fitted.rectNorm
+                        orientedLineBox = LaserOrientedLineBox(
+                            centerNorm: fitted.centerNorm,
+                            angleRadians: fitted.angleRadians,
+                            lengthPx: fitted.lengthPx,
+                            thicknessPx: fitted.thicknessPx
+                        )
+                    }
+                }
+
+                // Re-evaluate: diagonal lines can become near-square in axis-aligned bbox; keep as line
+                // as long as the refit succeeded (or base anisotropy said "line").
+                shape = .lineSegment
+            }
             
             points.append(LaserPoint(
-                boundingBox: rectNorm,
+                boundingBox: finalRectNorm,
                 brightness: Float(peak.luma) / 255.0,
                 timestamp: Date(),
                 imageSize: CGSize(width: width, height: height),
-                shape: shape
+                shape: shape,
+                orientedLineBox: orientedLineBox
             ))
         }
         
@@ -366,6 +500,221 @@ class LaserDetectionService: ObservableObject {
         points.sort { $0.brightness > $1.brightness }
         
         return points
+    }
+
+    /// Coarse scan for a laser line candidate.
+    /// Looks for elongated bright pixel clouds (high anisotropy) without requiring a local maximum.
+    private func findBestLinePeak(
+        width: Int,
+        height: Int,
+        lumaAt: (Int, Int) -> UInt8,
+        thresholdByte: UInt8
+    ) -> Peak? {
+        // Coarse sampling for performance.
+        let scanStep = 18
+        let windowRadius = 24
+        let windowStep = 6
+        let minCount = 14
+        let anisotropyThreshold: Double = 4.0
+
+        var best: Peak? = nil
+        var bestScore: Double = 0
+
+        for y in stride(from: 0, to: height, by: scanStep) {
+            for x in stride(from: 0, to: width, by: scanStep) {
+                let center = lumaAt(x, y)
+                if center < thresholdByte { continue }
+
+                let minX = max(0, x - windowRadius)
+                let maxX = min(width - 1, x + windowRadius)
+                let minY = max(0, y - windowRadius)
+                let maxY = min(height - 1, y + windowRadius)
+
+                var count = 0
+                var sumX: Double = 0
+                var sumY: Double = 0
+                var sumXX: Double = 0
+                var sumYY: Double = 0
+                var sumXY: Double = 0
+
+                for yy in stride(from: minY, through: maxY, by: windowStep) {
+                    for xx in stride(from: minX, through: maxX, by: windowStep) {
+                        if lumaAt(xx, yy) >= thresholdByte {
+                            count += 1
+                            let xd = Double(xx)
+                            let yd = Double(yy)
+                            sumX += xd
+                            sumY += yd
+                            sumXX += xd * xd
+                            sumYY += yd * yd
+                            sumXY += xd * yd
+                        }
+                    }
+                }
+
+                if count < minCount { continue }
+
+                let invN = 1.0 / Double(count)
+                let meanX = sumX * invN
+                let meanY = sumY * invN
+                let sxx = max(0.0, (sumXX * invN) - (meanX * meanX))
+                let syy = max(0.0, (sumYY * invN) - (meanY * meanY))
+                let sxy = (sumXY * invN) - (meanX * meanY)
+
+                let trace = sxx + syy
+                let det = (sxx * syy) - (sxy * sxy)
+                let disc = max(0.0, (trace * trace) / 4.0 - det)
+                let root = sqrt(disc)
+                let lambda1 = (trace / 2.0) + root
+                let lambda2 = max(1e-6, (trace / 2.0) - root)
+                let anisotropy = lambda1 / lambda2
+
+                if anisotropy < anisotropyThreshold { continue }
+
+                let score = Double(center) * anisotropy
+                if score > bestScore {
+                    bestScore = score
+                    best = Peak(x: Int(meanX.rounded()), y: Int(meanY.rounded()), luma: center)
+                }
+            }
+        }
+
+        return best
+    }
+
+    private struct LineFitResult {
+        let rectNorm: CGRect
+        let centerNorm: CGPoint
+        let angleRadians: CGFloat
+        let lengthPx: CGFloat
+        let thicknessPx: CGFloat
+    }
+
+    private func fitLineBoundingBox(
+        peakX: Int,
+        peakY: Int,
+        width: Int,
+        height: Int,
+        lumaAt: (Int, Int) -> UInt8,
+        thresholdByte: UInt8,
+        peakLuma: UInt8,
+        windowRadius: Int,
+        step: Int,
+        minLengthNorm: CGFloat,
+        minThicknessNorm: CGFloat
+    ) -> LineFitResult? {
+        // Use a slightly more permissive threshold to include dimmer parts of the line.
+        let localThreshold = max(Int(thresholdByte), Int(peakLuma) - 40)
+
+        let minX = max(0, peakX - windowRadius)
+        let maxX = min(width - 1, peakX + windowRadius)
+        let minY = max(0, peakY - windowRadius)
+        let maxY = min(height - 1, peakY + windowRadius)
+
+        var count = 0
+        var sumX: Double = 0
+        var sumY: Double = 0
+        var sumXX: Double = 0
+        var sumYY: Double = 0
+        var sumXY: Double = 0
+
+        for y in stride(from: minY, through: maxY, by: step) {
+            for x in stride(from: minX, through: maxX, by: step) {
+                if Int(lumaAt(x, y)) >= localThreshold {
+                    count += 1
+                    let xd = Double(x)
+                    let yd = Double(y)
+                    sumX += xd
+                    sumY += yd
+                    sumXX += xd * xd
+                    sumYY += yd * yd
+                    sumXY += xd * yd
+                }
+            }
+        }
+
+        guard count >= 30 else { return nil }
+
+        let invN = 1.0 / Double(count)
+        let meanX = sumX * invN
+        let meanY = sumY * invN
+        let sxx = max(0.0, (sumXX * invN) - (meanX * meanX))
+        let syy = max(0.0, (sumYY * invN) - (meanY * meanY))
+        let sxy = (sumXY * invN) - (meanX * meanY)
+
+        // Principal direction angle.
+        let angle = 0.5 * atan2(2.0 * sxy, sxx - syy)
+        let dirX = cos(angle)
+        let dirY = sin(angle)
+        let perpX = -dirY
+        let perpY = dirX
+
+        var minAlong = Double.greatestFiniteMagnitude
+        var maxAlong = -Double.greatestFiniteMagnitude
+        var minPerp = Double.greatestFiniteMagnitude
+        var maxPerp = -Double.greatestFiniteMagnitude
+
+        for y in stride(from: minY, through: maxY, by: step) {
+            for x in stride(from: minX, through: maxX, by: step) {
+                if Int(lumaAt(x, y)) >= localThreshold {
+                    let dx = Double(x) - meanX
+                    let dy = Double(y) - meanY
+                    let along = dx * dirX + dy * dirY
+                    let perp = dx * perpX + dy * perpY
+                    if along < minAlong { minAlong = along }
+                    if along > maxAlong { maxAlong = along }
+                    if perp < minPerp { minPerp = perp }
+                    if perp > maxPerp { maxPerp = perp }
+                }
+            }
+        }
+
+        let observedLengthPx = max(0.0, maxAlong - minAlong)
+        let observedThicknessPx = max(0.0, maxPerp - minPerp)
+
+        let minLenPx = Double(minLengthNorm) * Double(min(width, height))
+        let minThickPx = Double(minThicknessNorm) * Double(min(width, height))
+
+        let lengthPx = max(observedLengthPx, minLenPx)
+        let thicknessPx = max(observedThicknessPx, minThickPx)
+
+        let absDirX = abs(dirX)
+        let absDirY = abs(dirY)
+        let absPerpX = abs(perpX)
+        let absPerpY = abs(perpY)
+
+        let boxWidthPx = absDirX * lengthPx + absPerpX * thicknessPx
+        let boxHeightPx = absDirY * lengthPx + absPerpY * thicknessPx
+
+        // Add a little padding.
+        let padPx = 6.0
+        let halfW = (boxWidthPx / 2.0) + padPx
+        let halfH = (boxHeightPx / 2.0) + padPx
+
+        let cx = meanX
+        let cy = meanY
+
+        let x0 = max(0.0, cx - halfW)
+        let y0 = max(0.0, cy - halfH)
+        let x1 = min(Double(width - 1), cx + halfW)
+        let y1 = min(Double(height - 1), cy + halfH)
+
+        guard x1 > x0, y1 > y0 else { return nil }
+
+        let rectNorm = CGRect(
+            x: CGFloat(x0) / CGFloat(width),
+            y: CGFloat(y0) / CGFloat(height),
+            width: CGFloat(x1 - x0) / CGFloat(width),
+            height: CGFloat(y1 - y0) / CGFloat(height)
+        )
+
+        return LineFitResult(
+            rectNorm: rectNorm,
+            centerNorm: CGPoint(x: CGFloat(cx) / CGFloat(width), y: CGFloat(cy) / CGFloat(height)),
+            angleRadians: CGFloat(angle),
+            lengthPx: CGFloat(lengthPx),
+            thicknessPx: CGFloat(thicknessPx)
+        )
     }
     
     /// Merge nearby line segments into single detections
@@ -459,16 +808,20 @@ class LaserDetectionService: ObservableObject {
         // Average brightness
         let avgBrightness = totalBrightness / Float(points.count)
         
-        // Reclassify shape based on merged box
-        let aspectRatio = max(mergedRect.width, mergedRect.height) / min(mergedRect.width, mergedRect.height)
-        let shape: LaserSpotShape = aspectRatio > 1.5 ? .lineSegment : .rounded
+        let hasAnyLine = points.contains(where: { $0.shape == .lineSegment })
+        let shape: LaserSpotShape = hasAnyLine ? .lineSegment : .rounded
+
+        let bestOrientedLine = points
+            .filter { $0.shape == .lineSegment }
+            .max(by: { $0.brightness < $1.brightness })?.orientedLineBox
         
         return LaserPoint(
             boundingBox: mergedRect,
             brightness: avgBrightness,
             timestamp: Date(),
             imageSize: points[0].imageSize,
-            shape: shape
+            shape: shape,
+            orientedLineBox: bestOrientedLine
         )
     }
     
