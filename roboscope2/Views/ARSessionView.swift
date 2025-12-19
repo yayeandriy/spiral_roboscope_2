@@ -1218,6 +1218,9 @@ struct LaserGuideARSessionView: View {
     }
 
     private func enterDetectionMode() {
+        // Restart AR tracking so detection restarts in a fresh AR world.
+        captureSession.restart()
+
         hasAutoScoped = false
         latestLaserMeasurement = nil
         lastLaserGuideSnapTime = 0

@@ -4,9 +4,9 @@ Todo:
   ✔ Improve detections @done(25-12-19 13:35)
   ✔ Marker placement @done(25-12-19 13:35)
   ✔ Marker location solving againt Laser Guide Table @done(25-12-19 13:35)
-  ☐ Hide markers until autoscope
-  ☐ Hide origin in detection mode
-  ☐ Restart AR when we restart detection
+  ✔ Hide markers until autoscope @done(25-12-19 15:01)
+  ✔ Hide origin in detection mode @done(25-12-19 15:01)
+  ✔ Restart AR when we restart detection @done(25-12-19 15:05)
 
 
 Distance match tolerance: laserGuideDistanceToleranceMeters (currently 0.03)

@@ -41,6 +41,19 @@ final class CaptureSession: NSObject, ObservableObject {
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
         isRunning = true
     }
+
+    /// Restarts world tracking (useful when returning to detection mode).
+    /// Unlike `start()`, this will re-run even if the session is already running.
+    func restart() {
+        let config = ARWorldTrackingConfiguration()
+        config.planeDetection = [.horizontal, .vertical]
+        config.worldAlignment = .gravity
+
+        session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        isRunning = true
+        isScanning = false
+        meshAnchors.removeAll()
+    }
     
     func stop() {
         session.pause()
