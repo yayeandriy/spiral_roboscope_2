@@ -580,7 +580,7 @@ struct LaserGuideARSessionView: View {
     @State private var laserGuideFetchError: String? = nil
     @State private var lastLaserGuideSnapTime: TimeInterval = 0
     @State private var latestLaserMeasurement: LaserDotLineMeasurement? = nil
-    @State private var hasAutoScoped: Bool = false
+    @State var hasAutoScoped: Bool = false
     @State private var autoScopeCandidateKey: String? = nil
     @State private var autoScopeSamples: [(t: TimeInterval, d: Float)] = []
     @State private var autoScopeLastSeenTime: TimeInterval = 0
@@ -780,6 +780,16 @@ struct LaserGuideARSessionView: View {
                     markerService.arView = newValue
                     viewModel.bindARView(newValue)
 
+                    // Keep marker visibility consistent with the current mode.
+                    Task { @MainActor in
+                        markerService.setMarkersVisible(hasAutoScoped)
+                    }
+
+                    // Hide origin + debug detections while locating.
+                    frameOriginAnchor?.isEnabled = hasAutoScoped
+                    debugDotAnchor?.isEnabled = hasAutoScoped
+                    debugLineAnchor?.isEnabled = hasAutoScoped
+
                     // Set up frame callback for laser detection
                     if let arView = newValue {
                         arView.scene.subscribe(to: SceneEvents.Update.self) { _ in
@@ -949,7 +959,7 @@ struct LaserGuideARSessionView: View {
                 VStack {
                     Spacer()
 
-                    if let info = markerService.selectedMarkerInfo {
+                    if hasAutoScoped, let info = markerService.selectedMarkerInfo {
                         MarkerBadgeView(
                             info: info,
                             details: markerService.selectedMarkerDetails,
@@ -1038,11 +1048,7 @@ struct LaserGuideARSessionView: View {
                         Spacer()
                         HStack {
                             Button {
-                                hasAutoScoped = false
-                                latestLaserMeasurement = nil
-                                lastLaserGuideSnapTime = 0
-                                resetAutoScopeStability()
-                                laserDetection.startDetection()
+                                enterDetectionMode()
                             } label: {
                                 Image(systemName: "arrow.counterclockwise")
                                     .font(.system(size: 18, weight: .semibold))
@@ -1195,6 +1201,16 @@ struct LaserGuideARSessionView: View {
         autoScopedDotLocalZ = nil
         autoScopeRestartThresholdZMeters = nil
         resetAutoScopeStability()
+
+        // In detection mode we hide the origin gizmo + any debug detection spheres.
+        frameOriginAnchor?.isEnabled = false
+        debugDotAnchor?.isEnabled = false
+        debugLineAnchor?.isEnabled = false
+
+        Task { @MainActor in
+            markerService.setMarkersVisible(false)
+        }
+
         laserDetection.startDetection()
     }
 
@@ -1283,6 +1299,14 @@ struct LaserGuideARSessionView: View {
             autoScopeRestartThresholdZMeters = computeAutoRestartThresholdZ(for: snappedSegment)
 
             hasAutoScoped = true
+
+            // After auto-scope, show origin gizmo again.
+            frameOriginAnchor?.isEnabled = true
+
+            Task { @MainActor in
+                markerService.setMarkersVisible(true)
+            }
+
             laserDetection.stopDetection()
             resetAutoScopeStability()
         }
@@ -1390,6 +1414,8 @@ struct LaserGuideARSessionView: View {
     }
 
     private func placeDebugSphere(at position: SIMD3<Float>, color: UIColor, anchorState: Binding<AnchorEntity?>) {
+        // These spheres are only useful for debugging the snap; hide them during detection mode.
+        guard hasAutoScoped else { return }
         guard let arView = arView else { return }
         
         // Remove existing debug sphere

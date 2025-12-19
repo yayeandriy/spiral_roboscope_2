@@ -222,6 +222,8 @@ extension LaserGuideARSessionView {
 
         // Create anchor at world origin
         let anchor = AnchorEntity(world: .zero)
+        // Hide the origin gizmo while in detection mode
+        anchor.isEnabled = hasAutoScoped
         
         // Set the full transform (position + rotation)
         anchor.transform = Transform(matrix: transform)
@@ -404,6 +406,8 @@ extension LaserGuideARSessionView {
             print("[LaserGuideSnap] updateFrameOriginGizmoPosition: NO ANCHOR!")
             return
         }
+        // Keep visibility in sync with mode
+        anchor.isEnabled = hasAutoScoped
         let before = anchor.transform.matrix.columns.3
         anchor.transform = Transform(matrix: frameOriginTransform)
         let after = anchor.transform.matrix.columns.3

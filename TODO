@@ -5,6 +5,9 @@ Todo:
   ✔ Marker placement @done(25-12-19 13:35)
   ✔ Marker location solving againt Laser Guide Table @done(25-12-19 13:35)
   ☐ Hide markers until autoscope
+  ☐ Hide origin in detection mode
+  ☐ Restart AR when we restart detection
+
 
 Distance match tolerance: laserGuideDistanceToleranceMeters (currently 0.03)
 Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)

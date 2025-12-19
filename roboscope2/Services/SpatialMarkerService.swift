@@ -14,6 +14,8 @@ import Foundation
 /// Manages spatial markers placed in AR
 final class SpatialMarkerService: ObservableObject {
     weak var arView: ARView?
+
+    private var markersVisible: Bool = true
     
     @Published var markers: [SpatialMarker] = []
     
@@ -44,15 +46,37 @@ final class SpatialMarkerService: ObservableObject {
         var details: MarkerDetails? = nil // Server-computed marker details
         var calibratedData: CalibratedData? = nil // Server-provided calibrated coordinates
     }
+
+    /// Show/hide marker visuals without deleting them.
+    /// When hidden, selection state is cleared to avoid showing marker UI while markers are invisible.
+    @MainActor
+    func setMarkersVisible(_ visible: Bool) {
+        markersVisible = visible
+        for marker in markers {
+            marker.anchorEntity.isEnabled = visible
+        }
+
+        if !visible {
+            selectedMarkerID = nil
+            markersInTarget.removeAll()
+            markerEdgesInTarget.removeAll()
+            selectedEdgeIndex = nil
+        }
+
+        objectWillChange.send()
+    }
     
     /// Create and add a marker from world-space points (used when loading from server)
     @discardableResult
     func addMarker(points: [SIMD3<Float>], backendId: UUID? = nil, version: Int64 = 0, details: MarkerDetails? = nil, calibratedData: CalibratedData? = nil, frameOriginNodes: [SIMD3<Float>]? = nil) -> SpatialMarker {
         guard let arView = arView else {
-            return SpatialMarker(version: version, nodes: points, frameOriginNodes: frameOriginNodes, anchorEntity: AnchorEntity(world: .zero), details: details)
+            let anchor = AnchorEntity(world: .zero)
+            anchor.isEnabled = markersVisible
+            return SpatialMarker(version: version, nodes: points, frameOriginNodes: frameOriginNodes, anchorEntity: anchor, details: details)
         }
         // Create anchor and geometry similar to placeMarker()
         let anchorEntity = AnchorEntity(world: .zero)
+        anchorEntity.isEnabled = markersVisible
         
         // Nodes
         for (index, position) in points.enumerated() {
@@ -278,14 +302,6 @@ final class SpatialMarkerService: ObservableObject {
         markers.removeAll()
     }
 
-    /// Show or hide all markers visually without removing them from the scene
-    func setMarkersVisible(_ visible: Bool) {
-        for marker in markers {
-            marker.anchorEntity.isEnabled = visible
-        }
-    }
-    
-    
     /// Project a world position to screen coordinates
     func projectWorldToScreen(worldPosition: SIMD3<Float>, frame: ARFrame, arView: ARView) -> CGPoint? {
         let camera = frame.camera
