@@ -65,6 +65,10 @@ struct LaserDetectionOverlay: View {
     /// Filters to max one dot + one line, and only accepts lines whose world-space Y
     /// is within `laserService.maxDotLineYDeltaMeters` of the dot's Y.
     private func measureDistanceBetweenDotAndLine(_ points: [LaserPoint], viewSize: CGSize) {
+        guard laserService.isDetecting else {
+            onDotLineMeasurement?(nil)
+            return
+        }
         guard let arView = arView else {
             onDotLineMeasurement?(nil)
             return

@@ -75,6 +75,7 @@ class LaserDetectionService: ObservableObject {
     private let stateLock = NSLock()
     private var isProcessingFrame = false
     private var lastTrackedCenterNorm: CGPoint? = nil
+    private var detectionGeneration: UInt64 = 0
 
     private struct Peak {
         let x: Int
@@ -110,6 +111,7 @@ class LaserDetectionService: ObservableObject {
         let pixelBufferOpaque = Unmanaged.passRetained(pixelBuffer).toOpaque()
 
         // Snapshot parameters to avoid races while the slider changes.
+        let generation = detectionGeneration
         let brightnessThreshold = self.brightnessThreshold
         let maxDetections = self.maxDetections
         let trackedCenter = self.lastTrackedCenterNorm
@@ -132,6 +134,10 @@ class LaserDetectionService: ObservableObject {
             )
 
             DispatchQueue.main.async {
+                // Drop stale results after stop/restart.
+                guard self.isDetecting, self.detectionGeneration == generation else {
+                    return
+                }
                 if !points.isEmpty {
                     self.detectedPoints = Array(points.prefix(maxDetections))
                     // Track the brightest one for ROI
@@ -827,22 +833,19 @@ class LaserDetectionService: ObservableObject {
     
     /// Start detecting laser points
     func startDetection() {
+        detectionGeneration &+= 1
         isDetecting = true
         detectedPoints = []
-        stateLock.lock()
-        isProcessingFrame = false
-        stateLock.unlock()
+        lastProcessTime = 0
         lastTrackedCenterNorm = nil
         print("[LaserGuide] Detection started")
     }
     
     /// Stop detecting laser points
     func stopDetection() {
+        detectionGeneration &+= 1
         isDetecting = false
         detectedPoints = []
-        stateLock.lock()
-        isProcessingFrame = false
-        stateLock.unlock()
         lastTrackedCenterNorm = nil
         print("[LaserGuide] Detection stopped")
     }

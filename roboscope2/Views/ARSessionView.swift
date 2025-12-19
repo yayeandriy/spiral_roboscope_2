@@ -533,6 +533,7 @@ struct ARSessionView: View {
     
     private func endARSession() {
         // Realtime features disabled: no presence leave / lock release
+        captureSession.stop()
         isSessionActive = false
     }
     
@@ -1473,6 +1474,7 @@ struct LaserGuideARSessionView: View {
     }
 
     private func endARSession() {
+        captureSession.stop()
         isSessionActive = false
     }
 
