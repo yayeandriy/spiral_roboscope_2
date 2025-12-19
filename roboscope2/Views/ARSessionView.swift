@@ -588,6 +588,7 @@ struct LaserGuideARSessionView: View {
     @State private var autoScopedAtTime: TimeInterval = 0
     @State private var autoScopedDotLocalZ: Float? = nil
     @State private var autoScopeRestartThresholdZMeters: Float? = nil
+    @State private var autoScopedSegment: LaserGuideGridSegment? = nil
     @State private var debugDotAnchor: AnchorEntity? = nil
     @State private var debugLineAnchor: AnchorEntity? = nil
 
@@ -1066,6 +1067,30 @@ struct LaserGuideARSessionView: View {
                     .zIndex(3)
                 }
 
+                // Snapped segment (x/z) display (bottom-right, only after auto-scope)
+                if hasAutoScoped, let seg = autoScopedSegment {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("x: \(String(format: "%.2f", seg.x))")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white)
+                                Text("z: \(String(format: "%.2f", seg.z))")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .lgCapsule(tint: .white)
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 50)
+                    }
+                    .zIndex(3)
+                }
+
                 LaserDetectionOverlay(
                     detectedPoints: laserDetection.detectedPoints,
                     viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
@@ -1200,6 +1225,7 @@ struct LaserGuideARSessionView: View {
         autoScopedAtTime = 0
         autoScopedDotLocalZ = nil
         autoScopeRestartThresholdZMeters = nil
+        autoScopedSegment = nil
         resetAutoScopeStability()
 
         // In detection mode we hide the origin gizmo + any debug detection spheres.
@@ -1289,6 +1315,7 @@ struct LaserGuideARSessionView: View {
         if let snappedSegment = applyLaserGuideIfPossible(measurement) {
             autoScopedDotWorld = measurement.dotWorld
             autoScopedAtTime = now
+            autoScopedSegment = snappedSegment
 
             // Store dot Z in FrameOrigin coordinates (after snap).
             let inv = frameOriginTransform.inverse
@@ -1302,6 +1329,10 @@ struct LaserGuideARSessionView: View {
 
             // After auto-scope, show origin gizmo again.
             frameOriginAnchor?.isEnabled = true
+
+            // After auto-scope, show debug spheres again.
+            debugDotAnchor?.isEnabled = true
+            debugLineAnchor?.isEnabled = true
 
             Task { @MainActor in
                 markerService.setMarkersVisible(true)
@@ -1415,7 +1446,6 @@ struct LaserGuideARSessionView: View {
 
     private func placeDebugSphere(at position: SIMD3<Float>, color: UIColor, anchorState: Binding<AnchorEntity?>) {
         // These spheres are only useful for debugging the snap; hide them during detection mode.
-        guard hasAutoScoped else { return }
         guard let arView = arView else { return }
         
         // Remove existing debug sphere
@@ -1432,6 +1462,9 @@ struct LaserGuideARSessionView: View {
         anchor.addChild(sphere)
         arView.scene.addAnchor(anchor)
         anchorState.wrappedValue = anchor
+
+        // Only show debug spheres once we have auto-scoped.
+        anchor.isEnabled = hasAutoScoped
         
         print("[LaserGuideSnap] Debug sphere (\(color == .red ? "RED/dot" : "GREEN/line")) placed at \(position)")
     }
