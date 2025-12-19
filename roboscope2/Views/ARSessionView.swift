@@ -586,6 +586,8 @@ struct LaserGuideARSessionView: View {
     @State private var autoScopeLastSeenTime: TimeInterval = 0
     @State private var autoScopedDotWorld: SIMD3<Float>? = nil
     @State private var autoScopedAtTime: TimeInterval = 0
+    @State private var autoScopedDotLocalZ: Float? = nil
+    @State private var autoScopeRestartThresholdZMeters: Float? = nil
     @State private var debugDotAnchor: AnchorEntity? = nil
     @State private var debugLineAnchor: AnchorEntity? = nil
 
@@ -1134,24 +1136,24 @@ struct LaserGuideARSessionView: View {
     }
 
     @discardableResult
-    private func applyLaserGuideIfPossible(_ measurement: LaserDotLineMeasurement?) -> Bool {
+    private func applyLaserGuideIfPossible(_ measurement: LaserDotLineMeasurement?) -> LaserGuideGridSegment? {
         guard let measurement else {
             print("[LaserGuideSnap] No measurement")
-            return false
+            return nil
         }
         guard let laserGuide else {
             print("[LaserGuideSnap] No laser guide loaded")
-            return false
+            return nil
         }
         guard !laserGuide.grid.isEmpty else {
             print("[LaserGuideSnap] Grid is empty")
-            return false
+            return nil
         }
 
         let now = CACurrentMediaTime()
         guard now - lastLaserGuideSnapTime >= laserGuideSnapCooldownSeconds else {
             print("[LaserGuideSnap] Cooldown active (last snap \(now - lastLaserGuideSnapTime)s ago)")
-            return false
+            return nil
         }
 
         print("[LaserGuideSnap] Measurement: dot=\(measurement.dotWorld), line=\(measurement.lineWorld), dist=\(measurement.distanceMeters)m")
@@ -1165,16 +1167,16 @@ struct LaserGuideARSessionView: View {
             
             guard delta <= laserGuideDistanceToleranceMeters else {
                 print("[LaserGuideSnap] Delta exceeds tolerance, skipping snap")
-                return false
+                return nil
             }
 
             print("[LaserGuideSnap] ✓ Snapping origin to align dot at segment (x=\(best.x), z=\(best.z))")
             snapFrameOriginToAlignDot(dotWorld: measurement.dotWorld, lineWorld: measurement.lineWorld, segment: best)
             lastLaserGuideSnapTime = now
-            return true
+            return best
         } else {
             print("[LaserGuideSnap] No segments to match")
-            return false
+            return nil
         }
     }
 
@@ -1190,8 +1192,27 @@ struct LaserGuideARSessionView: View {
         lastLaserGuideSnapTime = 0
         autoScopedDotWorld = nil
         autoScopedAtTime = 0
+        autoScopedDotLocalZ = nil
+        autoScopeRestartThresholdZMeters = nil
         resetAutoScopeStability()
         laserDetection.startDetection()
+    }
+
+    private func computeAutoRestartThresholdZ(for segment: LaserGuideGridSegment) -> Float? {
+        guard let laserGuide, laserGuide.grid.count >= 2 else { return nil }
+
+        // Prefer neighbors with the same X (typical “column” alignment), but fall back to any segment.
+        let xEpsilon: Double = 1e-4
+        let sameX = laserGuide.grid.filter { abs($0.x - segment.x) <= xEpsilon }
+        let pool = (sameX.count >= 2) ? sameX : laserGuide.grid
+
+        let z0 = segment.z
+        let deltas = pool
+            .map { abs($0.z - z0) }
+            .filter { $0 > 1e-6 }
+
+        guard let minDelta = deltas.min() else { return nil }
+        return 0.5 * Float(minDelta)
     }
 
     private func candidateSegment(for distanceMeters: Float) -> (key: String, segment: LaserGuideGridSegment, delta: Float)? {
@@ -1249,9 +1270,18 @@ struct LaserGuideARSessionView: View {
         guard (maxD - minD) <= (autoScopeAllowedJitterMeters * 2) else { return }
 
         // If stable, snap (subject to cooldown) and stop detection.
-        if applyLaserGuideIfPossible(measurement) {
+        if let snappedSegment = applyLaserGuideIfPossible(measurement) {
             autoScopedDotWorld = measurement.dotWorld
             autoScopedAtTime = now
+
+            // Store dot Z in FrameOrigin coordinates (after snap).
+            let inv = frameOriginTransform.inverse
+            let dotLocal = inv * SIMD4<Float>(measurement.dotWorld.x, measurement.dotWorld.y, measurement.dotWorld.z, 1)
+            autoScopedDotLocalZ = dotLocal.z
+
+            // Dynamic restart threshold: half of the Z spacing to the nearest neighbor segment.
+            autoScopeRestartThresholdZMeters = computeAutoRestartThresholdZ(for: snappedSegment)
+
             hasAutoScoped = true
             laserDetection.stopDetection()
             resetAutoScopeStability()
@@ -1259,20 +1289,27 @@ struct LaserGuideARSessionView: View {
     }
 
     private func maybeReturnToDetectionIfUserMovedAway(_ frame: ARFrame) {
-        guard hasAutoScoped, let dotWorld = autoScopedDotWorld else { return }
+        guard hasAutoScoped, let dotLocalZ = autoScopedDotLocalZ else { return }
 
+        // Compute camera Z in FrameOrigin coordinates.
         let cameraTransform = frame.camera.transform
-        let cameraPosition = SIMD3<Float>(cameraTransform.columns.3.x, cameraTransform.columns.3.y, cameraTransform.columns.3.z)
-        let distanceMeters = simd_distance(cameraPosition, dotWorld)
-        let threshold = Float(settings.laserGuideAutoRestartDistanceMeters)
+        let cameraWorld = SIMD4<Float>(
+            cameraTransform.columns.3.x,
+            cameraTransform.columns.3.y,
+            cameraTransform.columns.3.z,
+            1
+        )
+        let inv = frameOriginTransform.inverse
+        let cameraLocal = inv * cameraWorld
 
-        guard distanceMeters > threshold else { return }
+        let dz = abs(cameraLocal.z - dotLocalZ)
+        let thresholdZ = autoScopeRestartThresholdZMeters ?? Float(settings.laserGuideAutoRestartDistanceMeters)
+        guard dz > thresholdZ else { return }
 
         let now = CACurrentMediaTime()
         let secondsSinceScope = autoScopedAtTime > 0 ? (now - autoScopedAtTime) : 0
-        print("[LaserGuideSnap] Auto-return to detection: moved \(String(format: "%.2f", distanceMeters))m from dot after \(String(format: "%.2f", secondsSinceScope))s (threshold \(String(format: "%.2f", threshold))m)")
+        print("[LaserGuideSnap] Auto-return to detection: |ΔZ|=\(String(format: "%.2f", dz))m after \(String(format: "%.2f", secondsSinceScope))s (thresholdZ \(String(format: "%.2f", thresholdZ))m)")
 
-        // Switch back to detection mode.
         DispatchQueue.main.async {
             self.enterDetectionMode()
         }
