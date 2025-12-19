@@ -23,7 +23,6 @@ struct LaserDetectionOverlay: View {
     let imageToViewTransform: CGAffineTransform
     let arView: ARView?
     let onDotLineMeasurement: ((LaserDotLineMeasurement?) -> Void)?
-    @State private var showControls = false
     @State private var measuredDistance: Float?
 
     private var filteredForDisplay: [LaserPoint] {
@@ -44,85 +43,6 @@ struct LaserDetectionOverlay: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // Toggle controls button
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button {
-                            showControls.toggle()
-                        } label: {
-                            Image(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 36)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(.ultraThinMaterial)
-                                )
-                        }
-                        .padding(.top, 100)
-                        .padding(.trailing, 16)
-                    }
-                    Spacer()
-                }
-                
-                // Threshold slider
-                if showControls {
-                    VStack {
-                        Spacer()
-                        VStack(spacing: 12) {
-                            Text("Brightness Threshold")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                            
-                            HStack {
-                                Text("\(Int(laserService.brightnessThreshold * 100))%")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.yellow)
-                                    .frame(width: 40)
-                                
-                                Slider(value: $laserService.brightnessThreshold, in: 0.5...0.99)
-                                    .tint(.yellow)
-                                
-                                Text("Boxes: \(filteredForDisplay.count)")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.yellow)
-                                    .frame(width: 70)
-                            }
-
-                            Divider()
-                                .background(Color.white.opacity(0.3))
-
-                            Text("Dot/Line Y Tolerance")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-
-                            HStack {
-                                Text(String(format: "%.0f cm", laserService.maxDotLineYDeltaMeters * 100))
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.yellow)
-                                    .frame(width: 60)
-
-                                Slider(
-                                    value: Binding(
-                                        get: { Double(laserService.maxDotLineYDeltaMeters) },
-                                        set: { laserService.maxDotLineYDeltaMeters = Float($0) }
-                                    ),
-                                    in: 0.0...0.5
-                                )
-                                .tint(.yellow)
-                            }
-                        }
-                        .padding(16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(.ultraThinMaterial)
-                        )
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 120)
-                    }
-                }
-                
                 // Bounding boxes
                 ForEach(filteredForDisplay) { point in
                     LaserBoundingBox(
@@ -136,15 +56,22 @@ struct LaserDetectionOverlay: View {
                 if let distance = measuredDistance {
                     VStack {
                         Spacer()
-                        Text(String(format: "%.2f m", distance))
-                            .font(.system(size: 56, weight: .bold, design: .rounded))
-                            .foregroundColor(.yellow)
-                            .shadow(color: .black.opacity(0.8), radius: 4, x: 0, y: 2)
-                            .padding(.bottom, 40)
+                        HStack {
+                            Text(String(format: "%.2f m", distance))
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.yellow)
+                                .frame(minWidth: 120, minHeight: 44)
+                                .lgCapsule(tint: .white)
+                                .scaleEffect(0.8, anchor: .leading)
+                            Spacer()
+                        }
+                        .frame(height: 80, alignment: .center)
+                        .padding(.leading, 16)
+                        .padding(.bottom, 50)
                     }
                 }
             }
-            .allowsHitTesting(showControls) // Only intercept touches when controls are visible
+            .allowsHitTesting(false)
             .onChange(of: detectedPoints) { _, newPoints in
                 measureDistanceBetweenDotAndLine(newPoints, viewSize: geometry.size)
             }
