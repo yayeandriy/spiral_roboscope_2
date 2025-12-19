@@ -26,6 +26,7 @@ class AppSettings: ObservableObject {
         static let skipModelConsistencyChecks = "skipModelConsistencyChecks"
         static let showPerformanceLogs = "showPerformanceLogs"
         static let registrationPreset = "registrationPreset"
+        static let laserGuideAutoRestartDistanceMeters = "laserGuideAutoRestartDistanceMeters"
     }
     
     // MARK: - Scan Registration Settings
@@ -102,6 +103,16 @@ class AppSettings: ObservableObject {
             defaults.set(currentPreset.rawValue, forKey: Keys.registrationPreset)
         }
     }
+
+    // MARK: - Laser Guide
+
+    /// When the Laser Guide has auto-scoped (snapped origin), automatically return to detection
+    /// mode if the camera moves farther than this distance from the scoped dot (meters).
+    @Published var laserGuideAutoRestartDistanceMeters: Double {
+        didSet {
+            defaults.set(laserGuideAutoRestartDistanceMeters, forKey: Keys.laserGuideAutoRestartDistanceMeters)
+        }
+    }
     
     // MARK: - Initialization
     
@@ -126,6 +137,9 @@ class AppSettings: ObservableObject {
         
         let presetRaw = defaults.string(forKey: Keys.registrationPreset) ?? RegistrationPreset.balanced.rawValue
         self.currentPreset = RegistrationPreset(rawValue: presetRaw) ?? .balanced
+
+        let autoRestart = defaults.double(forKey: Keys.laserGuideAutoRestartDistanceMeters)
+        self.laserGuideAutoRestartDistanceMeters = autoRestart > 0 ? autoRestart : 4.0
     }
     
     // MARK: - Preset Management

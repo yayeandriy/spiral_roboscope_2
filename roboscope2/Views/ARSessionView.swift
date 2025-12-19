@@ -584,6 +584,8 @@ struct LaserGuideARSessionView: View {
     @State private var autoScopeCandidateKey: String? = nil
     @State private var autoScopeSamples: [(t: TimeInterval, d: Float)] = []
     @State private var autoScopeLastSeenTime: TimeInterval = 0
+    @State private var autoScopedDotWorld: SIMD3<Float>? = nil
+    @State private var autoScopedAtTime: TimeInterval = 0
     @State private var debugDotAnchor: AnchorEntity? = nil
     @State private var debugLineAnchor: AnchorEntity? = nil
 
@@ -781,6 +783,9 @@ struct LaserGuideARSessionView: View {
                         arView.scene.subscribe(to: SceneEvents.Update.self) { _ in
                             if let frame = arView.session.currentFrame {
                                 self.laserDetection.processFrame(frame)
+
+                                // After auto-scope, monitor how far the user moves away from the scoped dot.
+                                self.maybeReturnToDetectionIfUserMovedAway(frame)
 
                                 // Map normalized image coordinates -> normalized view coordinates.
                                 if self.viewportSize.width > 0 && self.viewportSize.height > 0 {
@@ -1179,6 +1184,16 @@ struct LaserGuideARSessionView: View {
         autoScopeLastSeenTime = 0
     }
 
+    private func enterDetectionMode() {
+        hasAutoScoped = false
+        latestLaserMeasurement = nil
+        lastLaserGuideSnapTime = 0
+        autoScopedDotWorld = nil
+        autoScopedAtTime = 0
+        resetAutoScopeStability()
+        laserDetection.startDetection()
+    }
+
     private func candidateSegment(for distanceMeters: Float) -> (key: String, segment: LaserGuideGridSegment, delta: Float)? {
         guard let laserGuide, !laserGuide.grid.isEmpty else { return nil }
         guard let best = laserGuide.grid.min(by: {
@@ -1235,9 +1250,31 @@ struct LaserGuideARSessionView: View {
 
         // If stable, snap (subject to cooldown) and stop detection.
         if applyLaserGuideIfPossible(measurement) {
+            autoScopedDotWorld = measurement.dotWorld
+            autoScopedAtTime = now
             hasAutoScoped = true
             laserDetection.stopDetection()
             resetAutoScopeStability()
+        }
+    }
+
+    private func maybeReturnToDetectionIfUserMovedAway(_ frame: ARFrame) {
+        guard hasAutoScoped, let dotWorld = autoScopedDotWorld else { return }
+
+        let cameraTransform = frame.camera.transform
+        let cameraPosition = SIMD3<Float>(cameraTransform.columns.3.x, cameraTransform.columns.3.y, cameraTransform.columns.3.z)
+        let distanceMeters = simd_distance(cameraPosition, dotWorld)
+        let threshold = Float(settings.laserGuideAutoRestartDistanceMeters)
+
+        guard distanceMeters > threshold else { return }
+
+        let now = CACurrentMediaTime()
+        let secondsSinceScope = autoScopedAtTime > 0 ? (now - autoScopedAtTime) : 0
+        print("[LaserGuideSnap] Auto-return to detection: moved \(String(format: "%.2f", distanceMeters))m from dot after \(String(format: "%.2f", secondsSinceScope))s (threshold \(String(format: "%.2f", threshold))m)")
+
+        // Switch back to detection mode.
+        DispatchQueue.main.async {
+            self.enterDetectionMode()
         }
     }
 
