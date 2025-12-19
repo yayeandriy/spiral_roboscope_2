@@ -580,6 +580,7 @@ struct LaserGuideARSessionView: View {
     @State private var laserGuideFetchError: String? = nil
     @State private var lastLaserGuideSnapTime: TimeInterval = 0
     @State private var latestLaserMeasurement: LaserDotLineMeasurement? = nil
+    @State private var hasAutoScoped: Bool = false
     @State private var debugDotAnchor: AnchorEntity? = nil
     @State private var debugLineAnchor: AnchorEntity? = nil
 
@@ -952,17 +953,21 @@ struct LaserGuideARSessionView: View {
                         Spacer()
                         if manualPlacementState == .inactive {
                             HStack(spacing: 20) {
-                                // Manual snap button
-                                Button {
-                                    applyLaserGuideIfPossible(latestLaserMeasurement)
-                                } label: {
-                                    Image(systemName: "scope")
-                                        .font(.system(size: 24))
-                                        .frame(width: 60, height: 60)
+                                if hasAutoScoped {
+                                    // Restart detection button (replaces the old scope button)
+                                    Button {
+                                        hasAutoScoped = false
+                                        latestLaserMeasurement = nil
+                                        lastLaserGuideSnapTime = 0
+                                        laserDetection.startDetection()
+                                    } label: {
+                                        Image(systemName: "arrow.counterclockwise")
+                                            .font(.system(size: 24))
+                                            .frame(width: 60, height: 60)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .lgCircle(tint: .white)
                                 }
-                                .buttonStyle(.plain)
-                                .lgCircle(tint: latestLaserMeasurement != nil ? .orange : .gray)
-                                .disabled(latestLaserMeasurement == nil)
                                 
                                 // Add marker button
                                 Button { createAndPersistMarker() } label: {
@@ -1013,6 +1018,14 @@ struct LaserGuideARSessionView: View {
                     arView: arView,
                     onDotLineMeasurement: { measurement in
                         latestLaserMeasurement = measurement
+
+                        // Auto-scope: as soon as we have a measurement that matches a Laser Guide grid segment,
+                        // snap and stop detection. User can restart detection to repeat.
+                        guard !hasAutoScoped else { return }
+                        if applyLaserGuideIfPossible(measurement) {
+                            hasAutoScoped = true
+                            laserDetection.stopDetection()
+                        }
                     }
                 )
                 .zIndex(2)
@@ -1077,24 +1090,25 @@ struct LaserGuideARSessionView: View {
         }
     }
 
-    private func applyLaserGuideIfPossible(_ measurement: LaserDotLineMeasurement?) {
+    @discardableResult
+    private func applyLaserGuideIfPossible(_ measurement: LaserDotLineMeasurement?) -> Bool {
         guard let measurement else {
             print("[LaserGuideSnap] No measurement")
-            return
+            return false
         }
         guard let laserGuide else {
             print("[LaserGuideSnap] No laser guide loaded")
-            return
+            return false
         }
         guard !laserGuide.grid.isEmpty else {
             print("[LaserGuideSnap] Grid is empty")
-            return
+            return false
         }
 
         let now = CACurrentMediaTime()
         guard now - lastLaserGuideSnapTime >= laserGuideSnapCooldownSeconds else {
             print("[LaserGuideSnap] Cooldown active (last snap \(now - lastLaserGuideSnapTime)s ago)")
-            return
+            return false
         }
 
         print("[LaserGuideSnap] Measurement: dot=\(measurement.dotWorld), line=\(measurement.lineWorld), dist=\(measurement.distanceMeters)m")
@@ -1108,14 +1122,16 @@ struct LaserGuideARSessionView: View {
             
             guard delta <= laserGuideDistanceToleranceMeters else {
                 print("[LaserGuideSnap] Delta exceeds tolerance, skipping snap")
-                return
+                return false
             }
 
             print("[LaserGuideSnap] ✓ Snapping origin to align dot at segment (x=\(best.x), z=\(best.z))")
             snapFrameOriginToAlignDot(dotWorld: measurement.dotWorld, lineWorld: measurement.lineWorld, segment: best)
             lastLaserGuideSnapTime = now
+            return true
         } else {
             print("[LaserGuideSnap] No segments to match")
+            return false
         }
     }
 
