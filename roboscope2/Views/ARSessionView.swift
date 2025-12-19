@@ -594,6 +594,16 @@ struct LaserGuideARSessionView: View {
     private let autoScopeAllowedGapSeconds: TimeInterval = 0.25
     private let autoScopeMinSamples: Int = 8
 
+    private var locatingDistanceText: String {
+        if let d = latestLaserMeasurement?.distanceMeters {
+            return String(format: "%.2f m", d)
+        }
+        if let d = autoScopeSamples.last?.d {
+            return String(format: "%.2f m", d)
+        }
+        return "--"
+    }
+
     init(session: WorkSession) {
         self.session = session
         let capture = CaptureSession()
@@ -961,30 +971,27 @@ struct LaserGuideARSessionView: View {
                         if manualPlacementState == .inactive {
                             HStack(spacing: 20) {
                                 if hasAutoScoped {
-                                    // Restart detection button (replaces the old scope button)
-                                    Button {
-                                        hasAutoScoped = false
-                                        latestLaserMeasurement = nil
-                                        lastLaserGuideSnapTime = 0
-                                        resetAutoScopeStability()
-                                        laserDetection.startDetection()
-                                    } label: {
-                                        Image(systemName: "arrow.counterclockwise")
-                                            .font(.system(size: 24))
-                                            .frame(width: 60, height: 60)
+                                    // Add marker button (only after origin has auto-scoped)
+                                    Button { createAndPersistMarker() } label: {
+                                        Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
+                                            .font(.system(size: 36))
+                                            .frame(width: 80, height: 80)
                                     }
                                     .buttonStyle(.plain)
                                     .lgCircle(tint: .white)
+                                } else {
+                                    // Locating badge (replaces plus button until auto-scope)
+                                    VStack(spacing: 2) {
+                                        Text("Locating...")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.white)
+                                        Text(locatingDistanceText)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundColor(.yellow)
+                                    }
+                                    .frame(width: 120, height: 80)
+                                    .lgCapsule(tint: .white)
                                 }
-                                
-                                // Add marker button
-                                Button { createAndPersistMarker() } label: {
-                                    Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
-                                        .font(.system(size: 36))
-                                        .frame(width: 80, height: 80)
-                                }
-                                .buttonStyle(.plain)
-                                .lgCircle(tint: .white)
                             }
                         } else {
                             VStack(spacing: 10) {
@@ -1017,6 +1024,34 @@ struct LaserGuideARSessionView: View {
                     .padding(.bottom, 50)
                 }
                 .animation(.easeInOut(duration: 0.2), value: markerService.selectedMarkerID)
+
+                // Restart detection button (moved to bottom-left corner; replaces the old distance badge position)
+                if hasAutoScoped {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Button {
+                                hasAutoScoped = false
+                                latestLaserMeasurement = nil
+                                lastLaserGuideSnapTime = 0
+                                resetAutoScopeStability()
+                                laserDetection.startDetection()
+                            } label: {
+                                Image(systemName: "arrow.counterclockwise")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 44, height: 36)
+                            }
+                            .buttonStyle(.plain)
+                            .lgCapsule(tint: .white)
+
+                            Spacer()
+                        }
+                        .padding(.leading, 16)
+                        .padding(.bottom, 50)
+                    }
+                    .zIndex(3)
+                }
 
                 LaserDetectionOverlay(
                     detectedPoints: laserDetection.detectedPoints,

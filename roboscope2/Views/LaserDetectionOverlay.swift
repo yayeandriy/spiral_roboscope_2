@@ -23,7 +23,6 @@ struct LaserDetectionOverlay: View {
     let imageToViewTransform: CGAffineTransform
     let arView: ARView?
     let onDotLineMeasurement: ((LaserDotLineMeasurement?) -> Void)?
-    @State private var measuredDistance: Float?
 
     private var filteredForDisplay: [LaserPoint] {
         // Display max one dot and max one line.
@@ -51,25 +50,6 @@ struct LaserDetectionOverlay: View {
                         , imageToViewTransform: imageToViewTransform
                     )
                 }
-                
-                // Distance measurement display
-                if let distance = measuredDistance {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Text(String(format: "%.2f m", distance))
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.yellow)
-                                .frame(minWidth: 120, minHeight: 44)
-                                .lgCapsule(tint: .white)
-                                .scaleEffect(0.8, anchor: .leading)
-                            Spacer()
-                        }
-                        .frame(height: 80, alignment: .center)
-                        .padding(.leading, 16)
-                        .padding(.bottom, 50)
-                    }
-                }
             }
             .allowsHitTesting(false)
             .onChange(of: detectedPoints) { _, newPoints in
@@ -86,20 +66,17 @@ struct LaserDetectionOverlay: View {
     /// is within `laserService.maxDotLineYDeltaMeters` of the dot's Y.
     private func measureDistanceBetweenDotAndLine(_ points: [LaserPoint], viewSize: CGSize) {
         guard let arView = arView else {
-            measuredDistance = nil
             onDotLineMeasurement?(nil)
             return
         }
         // Pick best dot by brightness.
         guard let dot = points.filter({ $0.shape == .rounded }).max(by: { $0.brightness < $1.brightness }) else {
-            measuredDistance = nil
             onDotLineMeasurement?(nil)
             return
         }
 
         // Raycast dot to world.
         guard let dotWorld = raycastWorldPosition(for: dot, arView: arView, viewSize: viewSize) else {
-            measuredDistance = nil
             onDotLineMeasurement?(nil)
             return
         }
@@ -123,7 +100,6 @@ struct LaserDetectionOverlay: View {
         }
 
         guard let lineWorld = chosenLineWorld, chosenLine != nil else {
-            measuredDistance = nil
             onDotLineMeasurement?(nil)
             return
         }
@@ -133,8 +109,6 @@ struct LaserDetectionOverlay: View {
         let dy = dotWorld.y - lineWorld.y
         let dz = dotWorld.z - lineWorld.z
         let distance = sqrt(dx * dx + dy * dy + dz * dz)
-        measuredDistance = distance
-
         onDotLineMeasurement?(LaserDotLineMeasurement(
             dotWorld: SIMD3<Float>(dotWorld.x, dotWorld.y, dotWorld.z),
             lineWorld: SIMD3<Float>(lineWorld.x, lineWorld.y, lineWorld.z),

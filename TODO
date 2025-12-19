@@ -4,7 +4,7 @@ Todo:
   ✔ Improve detections @done(25-12-19 13:35)
   ✔ Marker placement @done(25-12-19 13:35)
   ✔ Marker location solving againt Laser Guide Table @done(25-12-19 13:35)
-  
+  ☐ 
 
 Distance match tolerance: laserGuideDistanceToleranceMeters (currently 0.03)
 Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)
