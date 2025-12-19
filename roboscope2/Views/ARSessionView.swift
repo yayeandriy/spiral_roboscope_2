@@ -581,11 +581,18 @@ struct LaserGuideARSessionView: View {
     @State private var lastLaserGuideSnapTime: TimeInterval = 0
     @State private var latestLaserMeasurement: LaserDotLineMeasurement? = nil
     @State private var hasAutoScoped: Bool = false
+    @State private var autoScopeCandidateKey: String? = nil
+    @State private var autoScopeSamples: [(t: TimeInterval, d: Float)] = []
+    @State private var autoScopeLastSeenTime: TimeInterval = 0
     @State private var debugDotAnchor: AnchorEntity? = nil
     @State private var debugLineAnchor: AnchorEntity? = nil
 
     private let laserGuideDistanceToleranceMeters: Float = 0.03
     private let laserGuideSnapCooldownSeconds: TimeInterval = 0.6
+    private let autoScopeStableSeconds: TimeInterval = 1.0
+    private let autoScopeAllowedJitterMeters: Float = 0.01
+    private let autoScopeAllowedGapSeconds: TimeInterval = 0.25
+    private let autoScopeMinSamples: Int = 8
 
     init(session: WorkSession) {
         self.session = session
@@ -959,6 +966,7 @@ struct LaserGuideARSessionView: View {
                                         hasAutoScoped = false
                                         latestLaserMeasurement = nil
                                         lastLaserGuideSnapTime = 0
+                                        resetAutoScopeStability()
                                         laserDetection.startDetection()
                                     } label: {
                                         Image(systemName: "arrow.counterclockwise")
@@ -1019,13 +1027,8 @@ struct LaserGuideARSessionView: View {
                     onDotLineMeasurement: { measurement in
                         latestLaserMeasurement = measurement
 
-                        // Auto-scope: as soon as we have a measurement that matches a Laser Guide grid segment,
-                        // snap and stop detection. User can restart detection to repeat.
-                        guard !hasAutoScoped else { return }
-                        if applyLaserGuideIfPossible(measurement) {
-                            hasAutoScoped = true
-                            laserDetection.stopDetection()
-                        }
+                        // Auto-scope (debounced): require a stable match for ~1s to reduce accidental jumps.
+                        maybeAutoScope(measurement)
                     }
                 )
                 .zIndex(2)
@@ -1132,6 +1135,74 @@ struct LaserGuideARSessionView: View {
         } else {
             print("[LaserGuideSnap] No segments to match")
             return false
+        }
+    }
+
+    private func resetAutoScopeStability() {
+        autoScopeCandidateKey = nil
+        autoScopeSamples = []
+        autoScopeLastSeenTime = 0
+    }
+
+    private func candidateSegment(for distanceMeters: Float) -> (key: String, segment: LaserGuideGridSegment, delta: Float)? {
+        guard let laserGuide, !laserGuide.grid.isEmpty else { return nil }
+        guard let best = laserGuide.grid.min(by: {
+            abs(Float($0.segmentLength) - distanceMeters) < abs(Float($1.segmentLength) - distanceMeters)
+        }) else {
+            return nil
+        }
+        let delta = abs(Float(best.segmentLength) - distanceMeters)
+        let key = "x=\(best.x),z=\(best.z),len=\(best.segmentLength)"
+        return (key: key, segment: best, delta: delta)
+    }
+
+    private func maybeAutoScope(_ measurement: LaserDotLineMeasurement?) {
+        guard !hasAutoScoped else { return }
+
+        let now = CACurrentMediaTime()
+
+        // Allow occasional missed frames without resetting immediately.
+        if measurement == nil {
+            if autoScopeLastSeenTime > 0, now - autoScopeLastSeenTime > autoScopeAllowedGapSeconds {
+                resetAutoScopeStability()
+            }
+            return
+        }
+
+        guard let measurement else { return }
+        autoScopeLastSeenTime = now
+
+        // Must match a segment within tolerance; otherwise reset stability window.
+        guard let candidate = candidateSegment(for: measurement.distanceMeters), candidate.delta <= laserGuideDistanceToleranceMeters else {
+            resetAutoScopeStability()
+            return
+        }
+
+        // Segment must remain consistent during the stability window.
+        if autoScopeCandidateKey != candidate.key {
+            autoScopeCandidateKey = candidate.key
+            autoScopeSamples = []
+        }
+
+        autoScopeSamples.append((t: now, d: measurement.distanceMeters))
+        autoScopeSamples = autoScopeSamples.filter { now - $0.t <= autoScopeStableSeconds }
+
+        // Need enough coverage across the window.
+        guard autoScopeSamples.count >= autoScopeMinSamples else { return }
+        guard let first = autoScopeSamples.first, let last = autoScopeSamples.last else { return }
+        guard last.t - first.t >= autoScopeStableSeconds * 0.9 else { return }
+
+        // Require distances to be stable (within a small jitter band).
+        let distances = autoScopeSamples.map { $0.d }
+        let minD = distances.min() ?? measurement.distanceMeters
+        let maxD = distances.max() ?? measurement.distanceMeters
+        guard (maxD - minD) <= (autoScopeAllowedJitterMeters * 2) else { return }
+
+        // If stable, snap (subject to cooldown) and stop detection.
+        if applyLaserGuideIfPossible(measurement) {
+            hasAutoScoped = true
+            laserDetection.stopDetection()
+            resetAutoScopeStability()
         }
     }
 
