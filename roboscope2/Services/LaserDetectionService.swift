@@ -60,11 +60,18 @@ class LaserDetectionService: ObservableObject {
     /// Used by UI overlay filtering (default 0.20m = 20cm).
     @Published var maxDotLineYDeltaMeters: Float = 0.20
     
-    // Detection parameters
+    // Detection parameters (adjustable via UI)
     /// Normalized luma threshold (0..1). Higher = fewer detections.
-    var brightnessThreshold: Float = 0.90
+    @Published var brightnessThreshold: Float = 0.90
+    /// If true, detect by hue proximity (ignores brightness threshold).
+    @Published var useHueDetection: Bool = false
+    /// Target hue in 0..1 (0=red, ~0.33=green, ~0.66=blue).
+    @Published var targetHue: Float = 0.0
+    /// Minimum normalized size for detected spots (filters noise).
+    @Published var minBlobSize: CGFloat = 0.002
+    /// Line shape threshold: higher values require more elongation.
+    @Published var lineAnisotropyThreshold: Double = 6.0
     /// Normalized size filters for final bounding boxes.
-    var minBlobSize: CGFloat = 0.002
     var maxBlobSize: CGFloat = 0.15
     /// Max number of boxes to display.
     /// Note: overlay further filters to max one dot + one line.
@@ -80,7 +87,8 @@ class LaserDetectionService: ObservableObject {
     private struct Peak {
         let x: Int
         let y: Int
-        let luma: UInt8
+        /// Either luma (brightness mode) or hue score (hue mode), 0..255.
+        let value: UInt8
     }
     
     /// Process AR frame to detect laser points
@@ -115,6 +123,11 @@ class LaserDetectionService: ObservableObject {
         let brightnessThreshold = self.brightnessThreshold
         let maxDetections = self.maxDetections
         let trackedCenter = self.lastTrackedCenterNorm
+        let minBlobSize = self.minBlobSize
+        let maxBlobSize = self.maxBlobSize
+        let lineAnisotropyThreshold = self.lineAnisotropyThreshold
+        let useHueDetection = self.useHueDetection
+        let targetHue = self.targetHue
 
         processingQueue.async { [weak self] in
             defer {
@@ -130,7 +143,12 @@ class LaserDetectionService: ObservableObject {
             let points = self.detectPrimaryBrightSpot(
                 in: pixelBuffer,
                 brightnessThreshold: brightnessThreshold,
-                previousCenterNorm: trackedCenter
+                previousCenterNorm: trackedCenter,
+                minBlobSize: minBlobSize,
+                maxBlobSize: maxBlobSize,
+                lineAnisotropyThreshold: lineAnisotropyThreshold,
+                useHueDetection: useHueDetection,
+                targetHue: targetHue
             )
 
             DispatchQueue.main.async {
@@ -157,7 +175,12 @@ class LaserDetectionService: ObservableObject {
     private func detectPrimaryBrightSpot(
         in pixelBuffer: CVPixelBuffer,
         brightnessThreshold: Float,
-        previousCenterNorm: CGPoint?
+        previousCenterNorm: CGPoint?,
+        minBlobSize: CGFloat,
+        maxBlobSize: CGFloat,
+        lineAnisotropyThreshold: Double,
+        useHueDetection: Bool,
+        targetHue: Float
     ) -> [LaserPoint] {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
@@ -168,7 +191,8 @@ class LaserDetectionService: ObservableObject {
         let useLumaPlane = (pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) ||
             (pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
 
-        guard useLumaPlane, CVPixelBufferGetPlaneCount(pixelBuffer) >= 1,
+          let planeCount = CVPixelBufferGetPlaneCount(pixelBuffer)
+          guard useLumaPlane, planeCount >= 1,
               let yBaseAddress = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) else {
             // Unsupported format for now.
             return []
@@ -179,13 +203,105 @@ class LaserDetectionService: ObservableObject {
         let yBytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
         let yBuffer = yBaseAddress.assumingMemoryBound(to: UInt8.self)
 
+        // Optional chroma plane (CbCr) for hue-based detection.
+        let cbcrBaseAddress: UnsafeMutableRawPointer?
+        let cbcrBytesPerRow: Int
+        let cbcrWidth: Int
+        let cbcrHeight: Int
+        if useHueDetection {
+            guard planeCount >= 2,
+                  let addr = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1) else {
+                // Hue detection requested but chroma plane not available.
+                return []
+            }
+            cbcrBaseAddress = addr
+            cbcrBytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1)
+            cbcrWidth = CVPixelBufferGetWidthOfPlane(pixelBuffer, 1)
+            cbcrHeight = CVPixelBufferGetHeightOfPlane(pixelBuffer, 1)
+        } else {
+            cbcrBaseAddress = nil
+            cbcrBytesPerRow = 0
+            cbcrWidth = 0
+            cbcrHeight = 0
+        }
+
         @inline(__always) func lumaAt(_ x: Int, _ y: Int) -> UInt8 {
             let xx = max(0, min(width - 1, x))
             let yy = max(0, min(height - 1, y))
             return yBuffer[yy * yBytesPerRow + xx]
         }
 
-        let thresholdByte = UInt8(max(0, min(255, Int(brightnessThreshold * 255.0))))
+        @inline(__always) func hueFromRGB(_ r: Float, _ g: Float, _ b: Float) -> Float {
+            let maxV = max(r, max(g, b))
+            let minV = min(r, min(g, b))
+            let delta = maxV - minV
+            if delta <= 1e-6 { return 0.0 }
+
+            var h: Float
+            if maxV == r {
+                h = (g - b) / delta
+                if h < 0 { h += 6 }
+            } else if maxV == g {
+                h = ((b - r) / delta) + 2
+            } else {
+                h = ((r - g) / delta) + 4
+            }
+            return (h / 6.0)
+        }
+
+        @inline(__always) func hueDistance(_ a: Float, _ b: Float) -> Float {
+            let d = abs(a - b)
+            return min(d, 1.0 - d)
+        }
+
+        @inline(__always) func hueScoreAt(_ x: Int, _ y: Int) -> UInt8 {
+            guard let cbcrBaseAddress else { return 0 }
+            let xx = max(0, min(width - 1, x))
+            let yy = max(0, min(height - 1, y))
+
+            // 420 bi-planar chroma is half resolution.
+            let cX = max(0, min(cbcrWidth - 1, xx / 2))
+            let cY = max(0, min(cbcrHeight - 1, yy / 2))
+            let cbcr = cbcrBaseAddress.assumingMemoryBound(to: UInt8.self)
+            let idx = (cY * cbcrBytesPerRow) + (cX * 2)
+            let cb = Float(cbcr[idx + 0]) - 128.0
+            let cr = Float(cbcr[idx + 1]) - 128.0
+
+            // Reject extremely low-chroma pixels (avoids random hue noise).
+            let chromaMag = sqrt(cb * cb + cr * cr)
+            if chromaMag < 18.0 { return 0 }
+
+            // Convert YCbCr -> RGB (approx). Using Y for conversion only, not for thresholding.
+            let yv = Float(lumaAt(xx, yy))
+            var r = yv + (1.402 * cr)
+            var g = yv - (0.344136 * cb) - (0.714136 * cr)
+            var b = yv + (1.772 * cb)
+
+            r = max(0.0, min(255.0, r))
+            g = max(0.0, min(255.0, g))
+            b = max(0.0, min(255.0, b))
+
+            let hue = hueFromRGB(r / 255.0, g / 255.0, b / 255.0)
+            let dist = hueDistance(hue, max(0.0, min(1.0, targetHue)))
+
+            // Fixed tolerance: user selects the hue; detector matches near it.
+            let tolerance: Float = 0.06
+            if dist > tolerance { return 0 }
+            let score = 1.0 - (dist / tolerance)
+            return UInt8(max(0.0, min(255.0, score * 255.0)))
+        }
+
+        @inline(__always) func valueAt(_ x: Int, _ y: Int) -> UInt8 {
+            useHueDetection ? hueScoreAt(x, y) : lumaAt(x, y)
+        }
+
+        let thresholdByte: UInt8
+        if useHueDetection {
+            // Threshold in hue-score space (0..255). Higher = stricter hue match.
+            thresholdByte = 150
+        } else {
+            thresholdByte = UInt8(max(0, min(255, Int(brightnessThreshold * 255.0))))
+        }
         let step = 4
 
         // Line detectability tweaks:
@@ -216,11 +332,11 @@ class LaserDetectionService: ObservableObject {
 
         var bestX = -1
         var bestY = -1
-        var bestLuma: UInt8 = 0
+        var bestValue: UInt8 = 0
 
         for y in stride(from: roiMinY, through: roiMaxY, by: step) {
             for x in stride(from: roiMinX, through: roiMaxX, by: step) {
-                let center = lumaAt(x, y)
+                let center = valueAt(x, y)
                 if center < thresholdByte { continue }
 
                 // Sample 8 points around at a fixed radius.
@@ -232,13 +348,13 @@ class LaserDetectionService: ObservableObject {
                 ]
                 var sum = 0
                 for (dx, dy) in offsets {
-                    sum += Int(lumaAt(x + dx, y + dy))
+                    sum += Int(valueAt(x + dx, y + dy))
                 }
                 let neighborMean = sum / offsets.count
                 if Int(center) - neighborMean < minPeakDelta { continue }
 
-                if center > bestLuma {
-                    bestLuma = center
+                if center > bestValue {
+                    bestValue = center
                     bestX = x
                     bestY = y
                 }
@@ -249,7 +365,7 @@ class LaserDetectionService: ObservableObject {
         if bestX < 0 {
             for y in stride(from: 0, to: height, by: step) {
                 for x in stride(from: 0, to: width, by: step) {
-                    let center = lumaAt(x, y)
+                    let center = valueAt(x, y)
                     if center < thresholdByte { continue }
 
                     let offsets = [
@@ -260,13 +376,13 @@ class LaserDetectionService: ObservableObject {
                     ]
                     var sum = 0
                     for (dx, dy) in offsets {
-                        sum += Int(lumaAt(x + dx, y + dy))
+                        sum += Int(valueAt(x + dx, y + dy))
                     }
                     let neighborMean = sum / offsets.count
                     if Int(center) - neighborMean < minPeakDelta { continue }
 
-                    if center > bestLuma {
-                        bestLuma = center
+                    if center > bestValue {
+                        bestValue = center
                         bestX = x
                         bestY = y
                     }
@@ -277,7 +393,7 @@ class LaserDetectionService: ObservableObject {
         guard bestX >= 0, bestY >= 0 else { return [] }
         
         // Collect multiple peaks with minimum separation
-        var peaks: [Peak] = [Peak(x: bestX, y: bestY, luma: bestLuma)]
+        var peaks: [Peak] = [Peak(x: bestX, y: bestY, value: bestValue)]
         let minSeparation = 80  // Min pixel distance between peaks
         
         // Find additional peaks
@@ -290,7 +406,7 @@ class LaserDetectionService: ObservableObject {
         for (minX, maxX, minY, maxY) in scanRegion {
             for y in stride(from: minY, through: maxY, by: step) {
                 for x in stride(from: minX, through: maxX, by: step) {
-                    let center = lumaAt(x, y)
+                    let center = valueAt(x, y)
                     if center < thresholdByte { continue }
                     
                     // Check if too close to existing peaks
@@ -314,12 +430,12 @@ class LaserDetectionService: ObservableObject {
                     ]
                     var sum = 0
                     for (dx, dy) in offsets {
-                        sum += Int(lumaAt(x + dx, y + dy))
+                        sum += Int(valueAt(x + dx, y + dy))
                     }
                     let neighborMean = sum / offsets.count
                     if Int(center) - neighborMean < minPeakDelta { continue }
                     
-                    peaks.append(Peak(x: x, y: y, luma: center))
+                    peaks.append(Peak(x: x, y: y, value: center))
                     if peaks.count >= 8 { break }  // Limit search
                 }
                 if peaks.count >= 8 { break }
@@ -332,7 +448,7 @@ class LaserDetectionService: ObservableObject {
         if let linePeak = findBestLinePeak(
             width: width,
             height: height,
-            lumaAt: lumaAt,
+            valueAt: valueAt,
             thresholdByte: lineThresholdByte
         ) {
             // Only add if it's not too close to an existing peak.
@@ -364,11 +480,10 @@ class LaserDetectionService: ObservableObject {
         let lineMinLengthNorm: CGFloat = 0.12
         let lineMinThicknessNorm: CGFloat = 0.006
         let lineMaxSizeNorm: CGFloat = 0.35
-        let lineAnisotropyThreshold: Double = 6.0
         
         for peak in peaks {
             // Refine bounding box around this peak
-            let localThreshold = max(Int(thresholdByte), Int(peak.luma) - 28)
+            let localThreshold = max(Int(thresholdByte), Int(peak.value) - 28)
             
             var minX = peak.x
             var maxX = peak.x
@@ -390,7 +505,7 @@ class LaserDetectionService: ObservableObject {
 
             for y in wMinY...wMaxY {
                 for x in wMinX...wMaxX {
-                    if Int(lumaAt(x, y)) >= localThreshold {
+                    if Int(valueAt(x, y)) >= localThreshold {
                         if x < minX { minX = x }
                         if x > maxX { maxX = x }
                         if y < minY { minY = y }
@@ -466,9 +581,9 @@ class LaserDetectionService: ObservableObject {
                     peakY: peak.y,
                     width: width,
                     height: height,
-                    lumaAt: lumaAt,
+                    valueAt: valueAt,
                     thresholdByte: thresholdByte,
-                    peakLuma: peak.luma,
+                    peakValue: peak.value,
                     windowRadius: lineFitWindowRadius,
                     step: lineFitStep,
                     minLengthNorm: lineMinLengthNorm,
@@ -493,7 +608,7 @@ class LaserDetectionService: ObservableObject {
             
             points.append(LaserPoint(
                 boundingBox: finalRectNorm,
-                brightness: Float(peak.luma) / 255.0,
+                brightness: Float(peak.value) / 255.0,
                 timestamp: Date(),
                 imageSize: CGSize(width: width, height: height),
                 shape: shape,
@@ -515,7 +630,7 @@ class LaserDetectionService: ObservableObject {
     private func findBestLinePeak(
         width: Int,
         height: Int,
-        lumaAt: (Int, Int) -> UInt8,
+        valueAt: (Int, Int) -> UInt8,
         thresholdByte: UInt8
     ) -> Peak? {
         // Coarse sampling for performance.
@@ -530,7 +645,7 @@ class LaserDetectionService: ObservableObject {
 
         for y in stride(from: 0, to: height, by: scanStep) {
             for x in stride(from: 0, to: width, by: scanStep) {
-                let center = lumaAt(x, y)
+                let center = valueAt(x, y)
                 if center < thresholdByte { continue }
 
                 let minX = max(0, x - windowRadius)
@@ -547,7 +662,7 @@ class LaserDetectionService: ObservableObject {
 
                 for yy in stride(from: minY, through: maxY, by: windowStep) {
                     for xx in stride(from: minX, through: maxX, by: windowStep) {
-                        if lumaAt(xx, yy) >= thresholdByte {
+                        if valueAt(xx, yy) >= thresholdByte {
                             count += 1
                             let xd = Double(xx)
                             let yd = Double(yy)
@@ -582,7 +697,7 @@ class LaserDetectionService: ObservableObject {
                 let score = Double(center) * anisotropy
                 if score > bestScore {
                     bestScore = score
-                    best = Peak(x: Int(meanX.rounded()), y: Int(meanY.rounded()), luma: center)
+                    best = Peak(x: Int(meanX.rounded()), y: Int(meanY.rounded()), value: center)
                 }
             }
         }
@@ -603,16 +718,16 @@ class LaserDetectionService: ObservableObject {
         peakY: Int,
         width: Int,
         height: Int,
-        lumaAt: (Int, Int) -> UInt8,
+        valueAt: (Int, Int) -> UInt8,
         thresholdByte: UInt8,
-        peakLuma: UInt8,
+        peakValue: UInt8,
         windowRadius: Int,
         step: Int,
         minLengthNorm: CGFloat,
         minThicknessNorm: CGFloat
     ) -> LineFitResult? {
         // Use a slightly more permissive threshold to include dimmer parts of the line.
-        let localThreshold = max(Int(thresholdByte), Int(peakLuma) - 40)
+        let localThreshold = max(Int(thresholdByte), Int(peakValue) - 40)
 
         let minX = max(0, peakX - windowRadius)
         let maxX = min(width - 1, peakX + windowRadius)
@@ -628,7 +743,7 @@ class LaserDetectionService: ObservableObject {
 
         for y in stride(from: minY, through: maxY, by: step) {
             for x in stride(from: minX, through: maxX, by: step) {
-                if Int(lumaAt(x, y)) >= localThreshold {
+                if Int(valueAt(x, y)) >= localThreshold {
                     count += 1
                     let xd = Double(x)
                     let yd = Double(y)
@@ -664,7 +779,7 @@ class LaserDetectionService: ObservableObject {
 
         for y in stride(from: minY, through: maxY, by: step) {
             for x in stride(from: minX, through: maxX, by: step) {
-                if Int(lumaAt(x, y)) >= localThreshold {
+                if Int(valueAt(x, y)) >= localThreshold {
                     let dx = Double(x) - meanX
                     let dy = Double(y) - meanY
                     let along = dx * dirX + dy * dirY

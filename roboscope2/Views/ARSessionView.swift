@@ -592,6 +592,7 @@ struct LaserGuideARSessionView: View {
     @State private var autoScopedSegment: LaserGuideGridSegment? = nil
     @State private var debugDotAnchor: AnchorEntity? = nil
     @State private var debugLineAnchor: AnchorEntity? = nil
+    @State private var showDetectionSettings = false
 
     private let laserGuideDistanceToleranceMeters: Float = 0.03
     private let laserGuideSnapCooldownSeconds: TimeInterval = 0.6
@@ -944,6 +945,170 @@ struct LaserGuideARSessionView: View {
                     Spacer()
                 }
                 .zIndex(2)
+
+                // Detection Settings Panel (top-left)
+                VStack {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 0) {
+                            // Toggle button
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                    showDetectionSettings.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "slider.horizontal.3")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Text("Detection")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Image(systemName: showDetectionSettings ? "chevron.up" : "chevron.down")
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(.ultraThinMaterial)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(
+                                                LinearGradient(
+                                                    colors: [.white.opacity(0.35), .white.opacity(0.1)],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ),
+                                                lineWidth: 1
+                                            )
+                                    )
+                            )
+                            
+                            // Settings panel
+                            if showDetectionSettings {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    // Hue Mode toggle
+                                    Toggle(isOn: $laserDetection.useHueDetection) {
+                                        Text("Hue Mode")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.9))
+                                    }
+                                    .toggleStyle(.switch)
+                                    .tint(.yellow)
+
+                                    // Hue (only used in Hue Mode)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text("Hue")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(.white.opacity(0.9))
+                                            Spacer()
+                                            Text(String(format: "%.2f", laserDetection.targetHue))
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.yellow)
+                                        }
+                                        Slider(value: $laserDetection.targetHue, in: 0.00...1.00, step: 0.01)
+                                            .tint(.yellow)
+                                    }
+                                    .disabled(!laserDetection.useHueDetection)
+                                    .opacity(laserDetection.useHueDetection ? 1.0 : 0.5)
+
+                                    // Brightness Threshold
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text("Brightness")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(.white.opacity(0.9))
+                                            Spacer()
+                                            Text(String(format: "%.2f", laserDetection.brightnessThreshold))
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.yellow)
+                                        }
+                                        Slider(value: $laserDetection.brightnessThreshold, in: 0.30...0.98, step: 0.01)
+                                            .tint(.yellow)
+                                    }
+                                    .disabled(laserDetection.useHueDetection)
+                                    .opacity(laserDetection.useHueDetection ? 0.5 : 1.0)
+                                    
+                                    // Line Ratio (Anisotropy)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text("Line Ratio")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(.white.opacity(0.9))
+                                            Spacer()
+                                            Text(String(format: "%.1f", laserDetection.lineAnisotropyThreshold))
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.yellow)
+                                        }
+                                        Slider(value: $laserDetection.lineAnisotropyThreshold, in: 2.0...12.0, step: 0.5)
+                                            .tint(.yellow)
+                                    }
+                                    
+                                    // Min Size
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text("Min Size")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(.white.opacity(0.9))
+                                            Spacer()
+                                            Text(String(format: "%.3f", laserDetection.minBlobSize))
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.yellow)
+                                        }
+                                        Slider(value: Binding(
+                                            get: { Double(laserDetection.minBlobSize) },
+                                            set: { laserDetection.minBlobSize = CGFloat($0) }
+                                        ), in: 0.001...0.010, step: 0.001)
+                                            .tint(.yellow)
+                                    }
+                                    
+                                    // Max Y Delta
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text("Max Y Delta")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(.white.opacity(0.9))
+                                            Spacer()
+                                            Text(String(format: "%.2fm", laserDetection.maxDotLineYDeltaMeters))
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.yellow)
+                                        }
+                                        Slider(value: $laserDetection.maxDotLineYDeltaMeters, in: 0.05...0.50, step: 0.05)
+                                            .tint(.yellow)
+                                    }
+                                }
+                                .padding(12)
+                                .frame(width: 220)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(.ultraThinMaterial)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .strokeBorder(
+                                                    LinearGradient(
+                                                        colors: [.white.opacity(0.35), .white.opacity(0.1)],
+                                                        startPoint: .topLeading,
+                                                        endPoint: .bottomTrailing
+                                                    ),
+                                                    lineWidth: 1
+                                                )
+                                        )
+                                )
+                                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topLeading)))
+                                .padding(.top, 4)
+                            }
+                        }
+                        
+                        Spacer()
+                    }
+                    .padding(.leading, 16)
+                    .padding(.top, 120)
+                    
+                    Spacer()
+                }
+                .zIndex(4)
 
                 if isRegistering {
                     registrationProgressOverlay
