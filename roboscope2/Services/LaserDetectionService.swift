@@ -281,8 +281,10 @@ class LaserDetectionService: ObservableObject {
         let minSeparation = 80  // Min pixel distance between peaks
         
         // Find additional peaks
-        let scanRegion = previousCenterNorm != nil ? 
-            [(roiMinX, roiMaxX, roiMinY, roiMaxY)] : 
+        // When tracking is enabled we still need to find BOTH dot + line, which can be far apart.
+        // So we scan the ROI first for stability, then allow a full-frame pass for additional peaks.
+        let scanRegion = previousCenterNorm != nil ?
+            [(roiMinX, roiMaxX, roiMinY, roiMaxY), (0, width - 1, 0, height - 1)] :
             [(0, width - 1, 0, height - 1)]
         
         for (minX, maxX, minY, maxY) in scanRegion {
