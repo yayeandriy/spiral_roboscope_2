@@ -706,6 +706,11 @@ struct LaserGuideARSessionView: View {
                 .onAppear {
                     print("[LaserGuideSnap] ARViewContainer appeared, starting session")
                     startARSession()
+
+                    // Restore per-space detection tuning.
+                    if let saved = SpaceDetectionSettingsStore.shared.load(spaceId: session.spaceId) {
+                        applyDetectionSettings(saved)
+                    }
                     laserDetection.startDetection()
 
                     Task {
@@ -768,6 +773,24 @@ struct LaserGuideARSessionView: View {
                             // Silent
                         }
                     }
+                }
+                .onChange(of: laserDetection.brightnessThreshold) { _, _ in
+                    saveDetectionSettings()
+                }
+                .onChange(of: laserDetection.useHueDetection) { _, _ in
+                    saveDetectionSettings()
+                }
+                .onChange(of: laserDetection.targetHue) { _, _ in
+                    saveDetectionSettings()
+                }
+                .onChange(of: laserDetection.minBlobSize) { _, _ in
+                    saveDetectionSettings()
+                }
+                .onChange(of: laserDetection.lineAnisotropyThreshold) { _, _ in
+                    saveDetectionSettings()
+                }
+                .onChange(of: laserDetection.maxDotLineYDeltaMeters) { _, _ in
+                    saveDetectionSettings()
                 }
                 .onDisappear {
                     laserDetection.stopDetection()
@@ -1308,6 +1331,27 @@ struct LaserGuideARSessionView: View {
             )
         }
         .navigationBarBackButtonHidden()
+    }
+
+    private func saveDetectionSettings() {
+        let settings = LaserDetectionSettings(
+            brightnessThreshold: laserDetection.brightnessThreshold,
+            useHueDetection: laserDetection.useHueDetection,
+            targetHue: laserDetection.targetHue,
+            minBlobSize: Double(laserDetection.minBlobSize),
+            lineAnisotropyThreshold: laserDetection.lineAnisotropyThreshold,
+            maxDotLineYDeltaMeters: laserDetection.maxDotLineYDeltaMeters
+        )
+        SpaceDetectionSettingsStore.shared.save(spaceId: session.spaceId, settings: settings)
+    }
+
+    private func applyDetectionSettings(_ settings: LaserDetectionSettings) {
+        laserDetection.brightnessThreshold = settings.brightnessThreshold
+        laserDetection.useHueDetection = settings.useHueDetection
+        laserDetection.targetHue = settings.targetHue
+        laserDetection.minBlobSize = CGFloat(settings.minBlobSize)
+        laserDetection.lineAnisotropyThreshold = settings.lineAnisotropyThreshold
+        laserDetection.maxDotLineYDeltaMeters = settings.maxDotLineYDeltaMeters
     }
 
     private func startARSession() {
