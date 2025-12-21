@@ -85,9 +85,9 @@ final class LaserMLDetectionService: ObservableObject {
             let (mlModel, modelURL) = try Self.loadLaserPensModel()
             let vnModel = try VNCoreMLModel(for: mlModel)
             let request = VNCoreMLRequest(model: vnModel)
-            // For object detection, scaleFill is typically the most robust default.
-            // scaleFit can introduce letterboxing which may reduce detections depending on training.
-            request.imageCropAndScaleOption = .scaleFill
+            // YOLO models are typically trained with letterbox (scaleFit) preprocessing.
+            // Using scaleFit ensures the inverse coordinate mapping matches training.
+            request.imageCropAndScaleOption = .scaleFit
             if !self.didLogModelLoad {
                 self.didLogModelLoad = true
                 self.modelInputSize = Self.inferModelInputSize(from: mlModel)
@@ -176,14 +176,21 @@ final class LaserMLDetectionService: ObservableObject {
 
             do {
                 // Apply ROI (Vision uses normalized coordinates with origin at bottom-left).
+                // Keep an equivalent top-left normalized rect for mapping decoded tensor outputs.
+                let roiRectTopLeft: CGRect
                 if useROI {
                     let size = CGFloat(roiSize)
                     let x = (1.0 - size) / 2.0
                     let yTopLeft = (1.0 - size) / 2.0
                     let yBottomLeft = 1.0 - yTopLeft - size
                     request.regionOfInterest = CGRect(x: x, y: yBottomLeft, width: size, height: size)
+
+                    // Convert bottom-left coords to top-left coords.
+                    roiRectTopLeft = CGRect(x: x, y: yTopLeft, width: size, height: size)
                 } else {
                     request.regionOfInterest = CGRect(x: 0, y: 0, width: 1, height: 1)
+
+                    roiRectTopLeft = CGRect(x: 0, y: 0, width: 1, height: 1)
                 }
 
                 try handler.perform([request])
@@ -239,6 +246,7 @@ final class LaserMLDetectionService: ObservableObject {
                         from: coreMLFeatures,
                         modelInputSize: modelInputSize,
                         orientedImageSize: Self.orientedImageSize(for: pixelBuffer, orientation: orientation),
+                        roiRectTopLeftNormalized: roiRectTopLeft,
                         orientation: orientation,
                         cropAndScaleOption: request.imageCropAndScaleOption,
                         confidenceThreshold: confidenceThreshold,
@@ -346,6 +354,7 @@ final class LaserMLDetectionService: ObservableObject {
         from featureObservations: [VNCoreMLFeatureValueObservation],
         modelInputSize: CGSize?,
         orientedImageSize: CGSize,
+        roiRectTopLeftNormalized: CGRect,
         orientation: CGImagePropertyOrientation,
         cropAndScaleOption: VNImageCropAndScaleOption,
         confidenceThreshold: Float,
@@ -401,21 +410,32 @@ final class LaserMLDetectionService: ObservableObject {
         let inputW = inputSize.width
         let inputH = inputSize.height
 
+        // If Vision ROI is enabled, the model sees only that cropped region. We must interpret tensor
+        // coordinates in ROI space, then map back into full oriented-image normalized coordinates.
+        let roi = roiRectTopLeftNormalized
+        let roiOrientedImageSize = CGSize(width: orientedImageSize.width * roi.width, height: orientedImageSize.height * roi.height)
+
         // Inverse mapping: model-input pixel coords -> oriented camera image pixel coords.
-        // We only implement scaleFill precisely; for other modes we fall back to a simple normalization.
+        // scaleFit (letterbox): image is scaled to fit, padding is added.
+        // scaleFill: image is scaled to fill, excess is cropped.
         let scale: CGFloat
-        let xOffset: CGFloat
-        let yOffset: CGFloat
-        if cropAndScaleOption == .scaleFill {
-            scale = max(inputW / orientedImageSize.width, inputH / orientedImageSize.height)
-            let scaledW = orientedImageSize.width * scale
-            let scaledH = orientedImageSize.height * scale
-            xOffset = (scaledW - inputW) / 2.0
-            yOffset = (scaledH - inputH) / 2.0
+        let xPadding: CGFloat  // padding added to reach model input size
+        let yPadding: CGFloat
+        if cropAndScaleOption == .scaleFit || cropAndScaleOption == .centerCrop {
+            // Letterbox: scale = min so image fits inside model input; remaining space is padded.
+            scale = min(inputW / roiOrientedImageSize.width, inputH / roiOrientedImageSize.height)
+            let scaledW = roiOrientedImageSize.width * scale
+            let scaledH = roiOrientedImageSize.height * scale
+            xPadding = (inputW - scaledW) / 2.0
+            yPadding = (inputH - scaledH) / 2.0
         } else {
-            scale = 1.0
-            xOffset = 0
-            yOffset = 0
+            // scaleFill: scale = max so image fills model input; excess is cropped.
+            scale = max(inputW / roiOrientedImageSize.width, inputH / roiOrientedImageSize.height)
+            let scaledW = roiOrientedImageSize.width * scale
+            let scaledH = roiOrientedImageSize.height * scale
+            // For scaleFill, "padding" is negative (represents crop offset).
+            xPadding = (inputW - scaledW) / 2.0
+            yPadding = (inputH - scaledH) / 2.0
         }
 
         let ptr = pred.dataPointer.assumingMemoryBound(to: Float.self)
@@ -464,28 +484,27 @@ final class LaserMLDetectionService: ObservableObject {
             }
 
             // Map to oriented camera image pixels.
-            let imgX: CGFloat
-            let imgY: CGFloat
-            let imgW: CGFloat
-            let imgH: CGFloat
-            if cropAndScaleOption == .scaleFill {
-                imgX = (modelRect.origin.x + xOffset) / scale
-                imgY = (modelRect.origin.y + yOffset) / scale
-                imgW = modelRect.size.width / scale
-                imgH = modelRect.size.height / scale
-            } else {
-                // Fallback: treat modelRect as already in image space.
-                imgX = modelRect.origin.x
-                imgY = modelRect.origin.y
-                imgW = modelRect.size.width
-                imgH = modelRect.size.height
-            }
+            // For letterbox: subtract padding, then divide by scale.
+            // For scaleFill: subtract (negative) padding = add crop offset, then divide by scale.
+            let imgX = (modelRect.origin.x - xPadding) / scale
+            let imgY = (modelRect.origin.y - yPadding) / scale
+            let imgW = modelRect.size.width / scale
+            let imgH = modelRect.size.height / scale
 
+            // Normalized within ROI-oriented image.
+            let normRectOrientedInROI = CGRect(
+                x: imgX / roiOrientedImageSize.width,
+                y: imgY / roiOrientedImageSize.height,
+                width: imgW / roiOrientedImageSize.width,
+                height: imgH / roiOrientedImageSize.height
+            )
+
+            // Map ROI-normalized -> full oriented-image normalized (top-left origin).
             let normRectOriented = CGRect(
-                x: imgX / orientedImageSize.width,
-                y: imgY / orientedImageSize.height,
-                width: imgW / orientedImageSize.width,
-                height: imgH / orientedImageSize.height
+                x: roi.minX + (normRectOrientedInROI.minX * roi.width),
+                y: roi.minY + (normRectOrientedInROI.minY * roi.height),
+                width: normRectOrientedInROI.width * roi.width,
+                height: normRectOrientedInROI.height * roi.height
             )
 
             // Convert from the oriented/model coordinate system back into the raw ARFrame capturedImage
@@ -499,12 +518,13 @@ final class LaserMLDetectionService: ObservableObject {
                     maskCoefficients: maskCoeffs,
                     modelRect: modelRect,
                     inputSize: inputSize,
-                    orientedImageSize: orientedImageSize,
+                    orientedImageSize: roiOrientedImageSize,
+                    roiRectTopLeftNormalized: roi,
                     orientation: orientation,
                     cropAndScaleOption: cropAndScaleOption,
-                    scaleFillScale: scale,
-                    scaleFillXOffset: xOffset,
-                    scaleFillYOffset: yOffset
+                    scale: scale,
+                    xPadding: xPadding,
+                    yPadding: yPadding
                 )
             } else {
                 orientedQuad = nil
@@ -532,11 +552,12 @@ final class LaserMLDetectionService: ObservableObject {
         modelRect: CGRect,
         inputSize: CGSize,
         orientedImageSize: CGSize,
+        roiRectTopLeftNormalized: CGRect,
         orientation: CGImagePropertyOrientation,
         cropAndScaleOption: VNImageCropAndScaleOption,
-        scaleFillScale: CGFloat,
-        scaleFillXOffset: CGFloat,
-        scaleFillYOffset: CGFloat
+        scale: CGFloat,
+        xPadding: CGFloat,
+        yPadding: CGFloat
     ) -> LaserMLOrientedQuad? {
         guard proto.dataType == .float32 else { return nil }
         guard proto.shape.count == 4 else { return nil }
@@ -703,16 +724,10 @@ final class LaserMLDetectionService: ObservableObject {
         let m4 = toModel(c4)
 
         // Map model-input pixels -> oriented camera image normalized coords.
+        // Subtract padding (positive for letterbox, negative for scaleFill) then divide by scale.
         func modelToOrientedNorm(_ p: CGPoint) -> CGPoint {
-            let imgX: CGFloat
-            let imgY: CGFloat
-            if cropAndScaleOption == .scaleFill {
-                imgX = (p.x + scaleFillXOffset) / scaleFillScale
-                imgY = (p.y + scaleFillYOffset) / scaleFillScale
-            } else {
-                imgX = p.x
-                imgY = p.y
-            }
+            let imgX = (p.x - xPadding) / scale
+            let imgY = (p.y - yPadding) / scale
             return CGPoint(x: imgX / orientedImageSize.width, y: imgY / orientedImageSize.height)
         }
 
@@ -721,11 +736,22 @@ final class LaserMLDetectionService: ObservableObject {
         let o3 = modelToOrientedNorm(m3)
         let o4 = modelToOrientedNorm(m4)
 
+        // If ROI is enabled, points are normalized within ROI; expand to full oriented-image normalized coords.
+        let roi = roiRectTopLeftNormalized
+        func roiToFull(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: roi.minX + (p.x * roi.width), y: roi.minY + (p.y * roi.height))
+        }
+
+        let f1 = roiToFull(o1)
+        let f2 = roiToFull(o2)
+        let f3 = roiToFull(o3)
+        let f4 = roiToFull(o4)
+
         // Convert oriented -> raw normalized coords.
-        let r1 = mapNormalizedPointFromOrientedToRaw(o1, orientation: orientation)
-        let r2 = mapNormalizedPointFromOrientedToRaw(o2, orientation: orientation)
-        let r3 = mapNormalizedPointFromOrientedToRaw(o3, orientation: orientation)
-        let r4 = mapNormalizedPointFromOrientedToRaw(o4, orientation: orientation)
+        let r1 = mapNormalizedPointFromOrientedToRaw(f1, orientation: orientation)
+        let r2 = mapNormalizedPointFromOrientedToRaw(f2, orientation: orientation)
+        let r3 = mapNormalizedPointFromOrientedToRaw(f3, orientation: orientation)
+        let r4 = mapNormalizedPointFromOrientedToRaw(f4, orientation: orientation)
 
         return LaserMLOrientedQuad(p1: r1, p2: r2, p3: r3, p4: r4)
     }
