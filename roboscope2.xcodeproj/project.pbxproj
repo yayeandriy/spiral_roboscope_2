@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		4DFE00032F5C0A3B0011ABC3 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 4DFE00022F5C0A3B0011ABC2 /* ZIPFoundation */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		4D12F5A02E9EAD140011EEF8 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -57,6 +61,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4DFE00032F5C0A3B0011ABC3 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -119,6 +124,7 @@
 			);
 			name = roboscope2;
 			packageProductDependencies = (
+				4DFE00022F5C0A3B0011ABC2 /* ZIPFoundation */,
 			);
 			productName = roboscope2;
 			productReference = 4D12F5922E9EAD130011EEF8 /* roboscope2.app */;
@@ -202,6 +208,9 @@
 			);
 			mainGroup = 4D12F5892E9EAD130011EEF8;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				4DFE00012F5C0A3B0011ABC1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4D12F5932E9EAD130011EEF8 /* Products */;
 			projectDirPath = "";
@@ -415,7 +424,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.4;
+				MARKETING_VERSION = 2.0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "spiral-technology.yayeandriy.roboscope2";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -449,7 +458,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.4;
+				MARKETING_VERSION = 2.0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "spiral-technology.yayeandriy.roboscope2";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -597,6 +606,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		4DFE00012F5C0A3B0011ABC1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4DFE00022F5C0A3B0011ABC2 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4DFE00012F5C0A3B0011ABC1 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 4D12F58A2E9EAD130011EEF8 /* Project object */;
 }

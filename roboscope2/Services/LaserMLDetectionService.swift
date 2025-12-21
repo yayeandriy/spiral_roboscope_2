@@ -80,18 +80,41 @@ final class LaserMLDetectionService: ObservableObject {
 
     private var modelInputSize: CGSize? = nil
 
+    private var request: VNCoreMLRequest? = nil
+    /// The currently loaded model path (compiled .mlmodelc) used to build `request`.
+    private var requestModelPath: String? = nil
+
     private func log(_ message: String) {
         print("[LaserGuideML] \(message)")
     }
 
-    private lazy var request: VNCoreMLRequest? = {
+    func reloadModel() {
+        request = nil
+        requestModelPath = nil
+        didLogModelLoad = false
+        modelInputSize = nil
+        lastError = nil
+    }
+
+    private func ensureRequest() -> VNCoreMLRequest? {
+        let overrideURL = AppSettings.shared.laserGuideMLModelURL
+        let desiredPath = overrideURL?.path
+
+        if let request, requestModelPath == desiredPath {
+            return request
+        }
+
         do {
-            let (mlModel, modelURL) = try Self.loadLaserPensModel()
+            let (mlModel, modelURL) = try Self.loadLaserPensModel(overrideURL: overrideURL)
             let vnModel = try VNCoreMLModel(for: mlModel)
             let request = VNCoreMLRequest(model: vnModel)
             // YOLO models are typically trained with letterbox (scaleFit) preprocessing.
             // Using scaleFit ensures the inverse coordinate mapping matches training.
             request.imageCropAndScaleOption = .scaleFit
+
+            self.request = request
+            self.requestModelPath = modelURL?.path
+
             if !self.didLogModelLoad {
                 self.didLogModelLoad = true
                 self.modelInputSize = Self.inferModelInputSize(from: mlModel)
@@ -112,7 +135,7 @@ final class LaserMLDetectionService: ObservableObject {
             }
             return nil
         }
-    }()
+    }
 
     func startDetection() {
         detectionGeneration &+= 1
@@ -132,7 +155,7 @@ final class LaserMLDetectionService: ObservableObject {
 
     func processFrame(_ frame: ARFrame, orientation: CGImagePropertyOrientation = .right) {
         guard isDetecting else { return }
-        guard let request else {
+        guard let request = ensureRequest() else {
             if lastError == nil {
                 lastError = "ML request not available (model failed to load)"
                 log("Skipping frames: ML request unavailable")
@@ -296,9 +319,13 @@ final class LaserMLDetectionService: ObservableObject {
         }
     }
 
-    private static func loadLaserPensModel() throws -> (MLModel, URL?) {
+    private static func loadLaserPensModel(overrideURL: URL?) throws -> (MLModel, URL?) {
         let config = MLModelConfiguration()
         config.computeUnits = .all
+
+        if let overrideURL {
+            return (try MLModel(contentsOf: overrideURL, configuration: config), overrideURL)
+        }
 
         if let direct = Bundle.main.url(forResource: "laser-pens", withExtension: "mlmodelc") {
             return (try MLModel(contentsOf: direct, configuration: config), direct)

@@ -27,6 +27,8 @@ class AppSettings: ObservableObject {
         static let showPerformanceLogs = "showPerformanceLogs"
         static let registrationPreset = "registrationPreset"
         static let laserGuideAutoRestartDistanceMeters = "laserGuideAutoRestartDistanceMeters"
+        static let laserGuideMLModelLocalPath = "laserGuideMLModelLocalPath"
+        static let laserGuideMLModelDisplayName = "laserGuideMLModelDisplayName"
     }
     
     // MARK: - Scan Registration Settings
@@ -113,6 +115,34 @@ class AppSettings: ObservableObject {
             defaults.set(laserGuideAutoRestartDistanceMeters, forKey: Keys.laserGuideAutoRestartDistanceMeters)
         }
     }
+
+    /// Optional local filesystem path to a compiled CoreML model (.mlmodelc) used for LaserGuide ML detection.
+    /// When nil, the bundled `laser-pens` model is used.
+    @Published var laserGuideMLModelLocalPath: String? {
+        didSet {
+            if let laserGuideMLModelLocalPath {
+                defaults.set(laserGuideMLModelLocalPath, forKey: Keys.laserGuideMLModelLocalPath)
+            } else {
+                defaults.removeObject(forKey: Keys.laserGuideMLModelLocalPath)
+            }
+        }
+    }
+
+    /// Display name for the selected LaserGuide ML model.
+    @Published var laserGuideMLModelDisplayName: String? {
+        didSet {
+            if let laserGuideMLModelDisplayName {
+                defaults.set(laserGuideMLModelDisplayName, forKey: Keys.laserGuideMLModelDisplayName)
+            } else {
+                defaults.removeObject(forKey: Keys.laserGuideMLModelDisplayName)
+            }
+        }
+    }
+
+    var laserGuideMLModelURL: URL? {
+        guard let path = laserGuideMLModelLocalPath, !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path)
+    }
     
     // MARK: - Initialization
     
@@ -140,6 +170,9 @@ class AppSettings: ObservableObject {
 
         let autoRestart = defaults.double(forKey: Keys.laserGuideAutoRestartDistanceMeters)
         self.laserGuideAutoRestartDistanceMeters = autoRestart > 0 ? autoRestart : 4.0
+
+        self.laserGuideMLModelLocalPath = defaults.string(forKey: Keys.laserGuideMLModelLocalPath)
+        self.laserGuideMLModelDisplayName = defaults.string(forKey: Keys.laserGuideMLModelDisplayName)
     }
     
     // MARK: - Preset Management

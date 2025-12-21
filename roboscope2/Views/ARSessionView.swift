@@ -839,6 +839,10 @@ struct LaserGuideARSessionView: View {
                 .onChange(of: mlDetection.roiSize) { _, _ in
                     if useMLDetection { saveMLDetectionSettings() }
                 }
+                .onChange(of: settings.laserGuideMLModelLocalPath) { _, _ in
+                    // If a new model is selected (e.g. from Google Drive via Files), reload it.
+                    mlDetection.reloadModel()
+                }
                 .onDisappear {
                     laserDetection.stopDetection()
                     mlDetection.stopDetection()
