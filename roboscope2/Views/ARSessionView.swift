@@ -212,8 +212,12 @@ struct ARSessionView: View {
                 }
             }
             .onAppear {
-                // Initialize viewport size to full screen (ignoring safe areas)
-                self.viewportSize = UIScreen.main.bounds.size
+                // Must match the actual rendered AR view size; using UIScreen bounds can drift
+                // when presented inside a NavigationStack or with system overlays.
+                self.viewportSize = geometry.size
+            }
+            .onChange(of: geometry.size) { _, newSize in
+                self.viewportSize = newSize
             }
             // SwiftUI DragGesture removed; we now drive one-finger via the overlay to avoid conflicts
             // Removed LongPressGesture: selection is automatic; long-press was cancelling active movement
@@ -454,8 +458,8 @@ struct ARSessionView: View {
                 )
                 .zIndex(2)
                 .onAppear {
-                    // Use full screen size (ignoring safe areas) for coordinate mapping
-                    viewportSize = UIScreen.main.bounds.size
+                    // Keep mapping consistent with the real rendered size.
+                    viewportSize = geometry.size
                 }
             }
             }  // Close GeometryReader
@@ -883,8 +887,8 @@ struct LaserGuideARSessionView: View {
                     }
                 }
                 .onAppear {
-                    // Initialize viewport size to full screen (ignoring safe areas)
-                    self.viewportSize = UIScreen.main.bounds.size
+                    // Initialize to the actual rendered size; UIScreen bounds can drift.
+                    self.viewportSize = geometry.size
                 }
 
                 // Invisible two-finger overlay to detect two-finger contact immediately
@@ -1401,7 +1405,12 @@ struct LaserGuideARSessionView: View {
                 }
                 .zIndex(2)
                 .onAppear {
-                    viewportSize = UIScreen.main.bounds.size
+                    // Must match the actual rendered AR view size; using UIScreen bounds can drift
+                    // when presented inside a NavigationStack or with system overlays.
+                    viewportSize = geometry.size
+                }
+                .onChange(of: geometry.size) { _, newValue in
+                    viewportSize = newValue
                 }
             }
         }
