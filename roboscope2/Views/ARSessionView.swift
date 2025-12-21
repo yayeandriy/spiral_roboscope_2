@@ -596,6 +596,23 @@ struct LaserGuideARSessionView: View {
     @State private var showDetectionSettings = false
     @State private var useMLDetection: Bool = false
 
+    private static func cgImageOrientation(for interfaceOrientation: UIInterfaceOrientation) -> CGImagePropertyOrientation {
+        // Back camera (not mirrored). This mapping keeps Vision's orientation consistent with
+        // ARFrame.displayTransform(for: interfaceOrientation, ...).
+        switch interfaceOrientation {
+        case .portrait:
+            return .right
+        case .portraitUpsideDown:
+            return .left
+        case .landscapeLeft:
+            return .up
+        case .landscapeRight:
+            return .down
+        default:
+            return .right
+        }
+    }
+
     private let laserGuideDistanceToleranceMeters: Float = 0.03
     private let laserGuideSnapCooldownSeconds: TimeInterval = 0.6
     private let autoScopeStableSeconds: TimeInterval = 1.0
@@ -847,8 +864,9 @@ struct LaserGuideARSessionView: View {
                     if let arView = newValue {
                         arView.scene.subscribe(to: SceneEvents.Update.self) { _ in
                             if let frame = arView.session.currentFrame {
+                                let interfaceOrientation = arView.window?.windowScene?.interfaceOrientation ?? .portrait
                                 if self.useMLDetection {
-                                    self.mlDetection.processFrame(frame)
+                                    self.mlDetection.processFrame(frame, orientation: Self.cgImageOrientation(for: interfaceOrientation))
                                 } else {
                                     self.laserDetection.processFrame(frame)
                                 }
@@ -858,7 +876,7 @@ struct LaserGuideARSessionView: View {
 
                                 // Map normalized image coordinates -> normalized view coordinates.
                                 if self.viewportSize.width > 0 && self.viewportSize.height > 0 {
-                                    self.imageToViewTransform = frame.displayTransform(for: .portrait, viewportSize: self.viewportSize)
+                                    self.imageToViewTransform = frame.displayTransform(for: interfaceOrientation, viewportSize: self.viewportSize)
                                 }
                             }
                         }.store(in: &cancellables)
