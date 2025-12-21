@@ -29,6 +29,8 @@ struct LaserMLDetection: Identifiable, Equatable {
     let boundingBox: CGRect
     /// Optional rotated quad in normalized image coordinates.
     let orientedQuad: LaserMLOrientedQuad?
+    /// Raw class index from the model output (when available).
+    let classIndex: Int?
     let label: String
     let confidence: Float
     let timestamp: Date
@@ -36,12 +38,14 @@ struct LaserMLDetection: Identifiable, Equatable {
     init(
         boundingBox: CGRect,
         orientedQuad: LaserMLOrientedQuad? = nil,
+        classIndex: Int? = nil,
         label: String,
         confidence: Float,
         timestamp: Date
     ) {
         self.boundingBox = boundingBox
         self.orientedQuad = orientedQuad
+        self.classIndex = classIndex
         self.label = label
         self.confidence = confidence
         self.timestamp = timestamp
@@ -215,6 +219,7 @@ final class LaserMLDetectionService: ObservableObject {
                         return LaserMLDetection(
                             boundingBox: Self.toTopLeftBoundingBox(obs.boundingBox),
                             orientedQuad: nil,
+                            classIndex: nil,
                             label: label,
                             confidence: conf,
                             timestamp: Date()
@@ -231,6 +236,7 @@ final class LaserMLDetectionService: ObservableObject {
                         return LaserMLDetection(
                             boundingBox: Self.toTopLeftBoundingBox(obs.boundingBox),
                             orientedQuad: nil,
+                            classIndex: nil,
                             label: "object",
                             confidence: obs.confidence,
                             timestamp: Date()
@@ -540,9 +546,23 @@ final class LaserMLDetectionService: ObservableObject {
             if numClasses <= 1 {
                 label = "laser"
             } else {
-                label = "class \($0.classIndex)"
+                switch $0.classIndex {
+                case 0:
+                    label = "dot"
+                case 1:
+                    label = "line"
+                default:
+                    label = "class \($0.classIndex)"
+                }
             }
-            return LaserMLDetection(boundingBox: $0.rect, orientedQuad: $0.orientedQuad, label: label, confidence: $0.score, timestamp: Date())
+            return LaserMLDetection(
+                boundingBox: $0.rect,
+                orientedQuad: $0.orientedQuad,
+                classIndex: $0.classIndex,
+                label: label,
+                confidence: $0.score,
+                timestamp: Date()
+            )
         }
     }
 

@@ -1385,7 +1385,15 @@ struct LaserGuideARSessionView: View {
                         LaserMLDetectionOverlay(
                             detections: mlDetection.detections,
                             viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
-                            imageToViewTransform: imageToViewTransform
+                            imageToViewTransform: imageToViewTransform,
+                            arView: arView,
+                            maxDotLineYDeltaMeters: laserDetection.maxDotLineYDeltaMeters,
+                            onDotLineMeasurement: { measurement in
+                                latestLaserMeasurement = measurement
+
+                                // Auto-scope (debounced): require a stable match for ~1s to reduce accidental jumps.
+                                maybeAutoScope(measurement)
+                            }
                         )
                     } else {
                         LaserDetectionOverlay(
