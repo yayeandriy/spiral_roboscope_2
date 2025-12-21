@@ -298,10 +298,18 @@ private struct SessionDashboardView: View {
     @State private var isLoading: Bool = false
     @State private var errorMessage: String?
     @State private var arSession: WorkSession?
+    @State private var useMLDetection: Bool = false
 
     var body: some View {
         NavigationView {
             List {
+                Section {
+                    Toggle("ML Detection", isOn: $useMLDetection)
+                        .onChange(of: useMLDetection) { _, newValue in
+                            SessionSettingsStore.shared.setLaserGuideMLDetection(sessionId: session.id, enabled: newValue)
+                        }
+                }
+
                 Section {
                     Button {
                         arSession = session
@@ -343,6 +351,7 @@ private struct SessionDashboardView: View {
                 }
             }
             .task {
+                useMLDetection = SessionSettingsStore.shared.isLaserGuideMLDetection(sessionId: session.id)
                 await loadMarkers()
             }
             .fullScreenCover(item: $arSession) { session in

@@ -45,6 +45,11 @@
 			path = roboscope2UITests;
 			sourceTree = "<group>";
 		};
+		4D9ACE922EF7FCC0008D2872 /* models */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = models;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,6 +84,7 @@
 				4D12F5A22E9EAD150011EEF8 /* roboscope2Tests */,
 				4D12F5AC2E9EAD150011EEF8 /* roboscope2UITests */,
 				4D12F5932E9EAD130011EEF8 /* Products */,
+				4D9ACE922EF7FCC0008D2872 /* models */,
 			);
 			sourceTree = "<group>";
 		};
@@ -109,6 +115,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				4D12F5942E9EAD130011EEF8 /* roboscope2 */,
+				4D9ACE922EF7FCC0008D2872 /* models */,
 			);
 			name = roboscope2;
 			packageProductDependencies = (
