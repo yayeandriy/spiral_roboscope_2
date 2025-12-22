@@ -7,6 +7,10 @@ Todo:
   ✔ Hide markers until autoscope @done(25-12-19 15:01)
   ✔ Hide origin in detection mode @done(25-12-19 15:01)
   ✔ Restart AR when we restart detection @done(25-12-19 15:05)
+  ✔ Timings settings @started(25-12-22 14:59) @done(25-12-22 15:05) @lasted(6m29s)
+  ☐ Overlapp segments
+  ☐ IP
+
 
 
 Distance match tolerance: laserGuideDistanceToleranceMeters (currently 0.03)

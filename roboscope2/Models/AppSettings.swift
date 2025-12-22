@@ -27,6 +27,7 @@ class AppSettings: ObservableObject {
         static let showPerformanceLogs = "showPerformanceLogs"
         static let registrationPreset = "registrationPreset"
         static let laserGuideAutoRestartDistanceMeters = "laserGuideAutoRestartDistanceMeters"
+        static let laserGuideAutoScopeStableSeconds = "laserGuideAutoScopeStableSeconds"
         static let laserGuideMLModelLocalPath = "laserGuideMLModelLocalPath"
         static let laserGuideMLModelDisplayName = "laserGuideMLModelDisplayName"
     }
@@ -116,6 +117,13 @@ class AppSettings: ObservableObject {
         }
     }
 
+    /// How long the dot/line distance must remain stable before auto-scope snaps (seconds).
+    @Published var laserGuideAutoScopeStableSeconds: Double {
+        didSet {
+            defaults.set(laserGuideAutoScopeStableSeconds, forKey: Keys.laserGuideAutoScopeStableSeconds)
+        }
+    }
+
     /// Optional local filesystem path to a compiled CoreML model (.mlmodelc) used for LaserGuide ML detection.
     /// When nil, the bundled `laser-pens` model is used.
     @Published var laserGuideMLModelLocalPath: String? {
@@ -170,6 +178,9 @@ class AppSettings: ObservableObject {
 
         let autoRestart = defaults.double(forKey: Keys.laserGuideAutoRestartDistanceMeters)
         self.laserGuideAutoRestartDistanceMeters = autoRestart > 0 ? autoRestart : 4.0
+
+        let stableSeconds = defaults.double(forKey: Keys.laserGuideAutoScopeStableSeconds)
+        self.laserGuideAutoScopeStableSeconds = stableSeconds > 0 ? stableSeconds : 1.0
 
         self.laserGuideMLModelLocalPath = defaults.string(forKey: Keys.laserGuideMLModelLocalPath)
         self.laserGuideMLModelDisplayName = defaults.string(forKey: Keys.laserGuideMLModelDisplayName)

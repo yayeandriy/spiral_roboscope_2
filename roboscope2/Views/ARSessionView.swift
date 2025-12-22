@@ -619,10 +619,13 @@ struct LaserGuideARSessionView: View {
 
     private let laserGuideDistanceToleranceMeters: Float = 0.03
     private let laserGuideSnapCooldownSeconds: TimeInterval = 0.6
-    private let autoScopeStableSeconds: TimeInterval = 1.0
     private let autoScopeAllowedJitterMeters: Float = 0.01
     private let autoScopeAllowedGapSeconds: TimeInterval = 0.25
     private let autoScopeMinSamples: Int = 8
+
+    private var autoScopeStableSeconds: TimeInterval {
+        settings.laserGuideAutoScopeStableSeconds
+    }
 
     private var locatingDistanceText: String {
         if let d = latestLaserMeasurement?.distanceMeters {
@@ -1113,6 +1116,27 @@ struct LaserGuideARSessionView: View {
                                                 .foregroundColor(.red)
                                                 .lineLimit(3)
                                         }
+
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack {
+                                                Text("Auto-scope Stable")
+                                                    .font(.system(size: 12, weight: .medium))
+                                                    .foregroundColor(.white.opacity(0.9))
+                                                Spacer()
+                                                Text(String(format: "%.1fs", settings.laserGuideAutoScopeStableSeconds))
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundColor(.green)
+                                            }
+                                            Slider(
+                                                value: Binding(
+                                                    get: { settings.laserGuideAutoScopeStableSeconds },
+                                                    set: { settings.laserGuideAutoScopeStableSeconds = $0 }
+                                                ),
+                                                in: 0.2...3.0,
+                                                step: 0.1
+                                            )
+                                            .tint(.green)
+                                        }
                                     } else {
                                         // Hue Mode toggle
                                         Toggle(isOn: $laserDetection.useHueDetection) {
@@ -1203,6 +1227,27 @@ struct LaserGuideARSessionView: View {
                                             }
                                             Slider(value: $laserDetection.maxDotLineYDeltaMeters, in: 0.05...0.50, step: 0.05)
                                                 .tint(.yellow)
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack {
+                                                Text("Auto-scope Stable")
+                                                    .font(.system(size: 12, weight: .medium))
+                                                    .foregroundColor(.white.opacity(0.9))
+                                                Spacer()
+                                                Text(String(format: "%.1fs", settings.laserGuideAutoScopeStableSeconds))
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundColor(.yellow)
+                                            }
+                                            Slider(
+                                                value: Binding(
+                                                    get: { settings.laserGuideAutoScopeStableSeconds },
+                                                    set: { settings.laserGuideAutoScopeStableSeconds = $0 }
+                                                ),
+                                                in: 0.2...3.0,
+                                                step: 0.1
+                                            )
+                                            .tint(.yellow)
                                         }
                                     }
                                 }
@@ -1611,7 +1656,7 @@ struct LaserGuideARSessionView: View {
             .filter { $0 > 1e-6 }
 
         guard let minDelta = deltas.min() else { return nil }
-        return 0.5 * Float(minDelta)
+        return 0.75 * Float(minDelta)
     }
 
     private func candidateSegment(for distanceMeters: Float) -> (key: String, segment: LaserGuideGridSegment, delta: Float)? {
