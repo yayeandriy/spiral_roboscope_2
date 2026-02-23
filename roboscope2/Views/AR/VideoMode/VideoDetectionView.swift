@@ -40,6 +40,8 @@ struct VideoDetectionView: View {
     @State private var viewportSize: CGSize = .zero
     @State private var showDetectionSettings = false
     @State private var isPlaying = true
+    @State private var showHistoryPanel = false
+    @State var detectionHistory: [DetectionFrameRecord] = []
 
     init(session: WorkSession) {
         self.session = session
@@ -125,6 +127,21 @@ struct VideoDetectionView: View {
 
                         Spacer()
 
+                        // History toggle button
+                        Button {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                showHistoryPanel.toggle()
+                            }
+                        } label: {
+                            Image(systemName: showHistoryPanel ? "clock.fill" : "clock")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .lgCircle(tint: showHistoryPanel ? .green : .white)
+                        .padding(.trailing, 8)
+                        .padding(.top, 56)
+
                         // Done button (top-right)
                         Button("Done") { dismiss() }
                             .buttonStyle(.plain)
@@ -179,10 +196,41 @@ struct VideoDetectionView: View {
                     }
                     .zIndex(3)
                 }
+
+                // —— History panel ——
+                if showHistoryPanel {
+                    VStack {
+                        Spacer().frame(height: 120)
+                        VideoDetectionHistoryPanel(
+                            records: detectionHistory,
+                            onClose: {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    showHistoryPanel = false
+                                }
+                            }
+                        )
+                        .padding(.horizontal, 16)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        Spacer()
+                    }
+                    .zIndex(5)
+                }
             }
         }
         .ignoresSafeArea(.all)
         .navigationBarBackButtonHidden()
+        .onChange(of: mlDetection.detections) { _, newDetections in
+            guard !newDetections.isEmpty else { return }
+            let record = DetectionFrameRecord(
+                timestamp: Date(),
+                dots: newDetections.filter { $0.label == "dot" || $0.classIndex == 0 }.count,
+                lines: newDetections.filter { $0.label == "line" || $0.classIndex == 1 }.count,
+                otherCount: newDetections.filter { ($0.classIndex ?? -1) > 1 }.count,
+                distanceMeters: latestMeasurement?.distanceMeters
+            )
+            detectionHistory.append(record)
+            if detectionHistory.count > 50 { detectionHistory.removeFirst(detectionHistory.count - 50) }
+        }
         .onAppear {
             setupVideoMode()
             Task { await fetchLaserGuide() }
