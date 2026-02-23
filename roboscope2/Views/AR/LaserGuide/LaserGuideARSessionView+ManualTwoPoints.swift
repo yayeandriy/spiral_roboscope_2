@@ -1,15 +1,15 @@
 //
-//  ARSessionView+ManualTwoPoints.swift
+//  LaserGuideARSessionView+ManualTwoPoints.swift
 //  roboscope2
 //
-//  Manual two-point origin placement and movement helpers
+//  Manual two-point origin placement helpers for LaserGuideARSessionView
 //
 
 import SwiftUI
 import RealityKit
 import ARKit
 
-extension ARSessionView {
+extension LaserGuideARSessionView {
     // MARK: - Manual Two-Point Placement
     func enterManualTwoPointsMode() {
         // Clean any existing helper anchors from prior runs
@@ -39,7 +39,6 @@ extension ARSessionView {
         markerService.setMarkersVisible(false)
         frameOriginAnchor?.isEnabled = false
         selectedManualPointIndex = nil
-        
     }
 
     func cancelManualTwoPointsMode() {
@@ -51,7 +50,6 @@ extension ARSessionView {
         frameOriginAnchor?.isEnabled = true
         selectedManualPointIndex = nil
         endManualPointMove()
-        
     }
 
     func manualPlacementButtonTitle() -> String {
@@ -71,7 +69,6 @@ extension ARSessionView {
                 manualFirstPoint = p
                 manualFirstPreferredAlignment = align
                 manualPlacementState = .placeSecond
-                
             }
         case .placeSecond:
             if let (p, align) = prioritizedRaycastFromCenter() {
@@ -79,7 +76,6 @@ extension ARSessionView {
                 manualSecondPoint = p
                 manualSecondPreferredAlignment = align
                 manualPlacementState = .readyToApply
-                
             }
         case .readyToApply:
             applyManualTwoPointOrigin()
@@ -96,7 +92,6 @@ extension ARSessionView {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
-                
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
@@ -104,11 +99,10 @@ extension ARSessionView {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
-                
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
-        
+
         return nil
     }
 
@@ -121,7 +115,6 @@ extension ARSessionView {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
-                
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
@@ -130,7 +123,6 @@ extension ARSessionView {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
-                
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
@@ -139,7 +131,6 @@ extension ARSessionView {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
-                
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
@@ -147,11 +138,10 @@ extension ARSessionView {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
-                
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
-        
+
         return nil
     }
 
@@ -163,7 +153,6 @@ extension ARSessionView {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
-                
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
@@ -172,7 +161,6 @@ extension ARSessionView {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
-                
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
@@ -181,11 +169,10 @@ extension ARSessionView {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
-                
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
-        
+
         return nil
     }
 
@@ -233,13 +220,12 @@ extension ARSessionView {
         let rotation = simd_quatf(angle: yaw, axis: SIMD3<Float>(0, 1, 0))
         var transform = float4x4(rotation)
         transform.columns.3 = SIMD4<Float>(p1.x, p1.y, p1.z, 1)
-        
-        
+
         // Apply new FrameOrigin
         frameOriginTransform = transform
         placeFrameOriginGizmo(at: transform)
         updateMarkersForNewFrameOrigin()
-        
+
         // Exit manual mode and restore UI
         cancelManualTwoPointsMode()
 
@@ -248,7 +234,6 @@ extension ARSessionView {
         preservedSecondPoint = p2
         preservedFirstPreferredAlignment = manualFirstPreferredAlignment
         preservedSecondPreferredAlignment = manualSecondPreferredAlignment
-        
     }
 
     /// Clear both points and restart Two Point placement from the first point
@@ -269,7 +254,6 @@ extension ARSessionView {
         preservedSecondPreferredAlignment = nil
         // Go back to placing the first point
         manualPlacementState = .placeFirst
-        
     }
 
     // MARK: - Manual point selection + moving
@@ -363,13 +347,13 @@ extension ARSessionView {
             }
         }
         RunLoop.main.add(timer, forMode: .common)
-    manualPointMoveTimer = timer
+        manualPointMoveTimer = timer
     }
 
     func endManualPointMove() {
         manualPointMoveTimer?.invalidate()
         manualPointMoveTimer = nil
-    fixedManualMoveScreenPoint = nil
+        fixedManualMoveScreenPoint = nil
     }
 
     func moveSelectedPointToCrossRaycast() {
@@ -397,7 +381,6 @@ extension ARSessionView {
                 sphere.setTransformMatrix(t, relativeTo: nil)
             }
         } else if idx == 2 {
-            
             manualSecondPoint = newPos
             if let a = manualSecondAnchor,
                let sphere = a.children.first(where: { $0.name == "manual_point_2" }) {
@@ -479,4 +462,3 @@ extension ARSessionView {
         return CGPoint(x: CGFloat(screenX), y: CGFloat(screenY))
     }
 }
-
