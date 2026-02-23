@@ -23,7 +23,6 @@ struct ARSessionView: View {
     @StateObject var spaceService: SpaceService
     @StateObject var settings: AppSettings
     @StateObject var viewModel: ARSessionViewModel
-    @StateObject var laserDetection = LaserDetectionService()
 
     init(session: WorkSession) {
         self.session = session
@@ -122,10 +121,6 @@ struct ARSessionView: View {
                 .onAppear {
                     startARSession()
 
-                    if isLaserGuideSession {
-                        laserDetection.startDetection()
-                    }
-                    
                     // Place initial frame origin at AR session origin
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     placeFrameOriginGizmo(at: frameOriginTransform)
@@ -182,7 +177,6 @@ struct ARSessionView: View {
                 }
             }
             .onDisappear {
-                laserDetection.stopDetection()
                 viewModel.cancelAllTimers()
                 autoDropTimer?.invalidate()
                 autoDropTimer = nil
@@ -195,21 +189,6 @@ struct ARSessionView: View {
                 markerService.arView = newValue
                 viewModel.bindARView(newValue)
                 
-                // Set up frame callback for laser detection
-                if isLaserGuideSession, let arView = newValue {
-                    arView.scene.subscribe(to: SceneEvents.Update.self) { event in
-                        if let frame = arView.session.currentFrame {
-                            self.laserDetection.processFrame(frame)
-
-                            // Map normalized image coordinates -> normalized view coordinates.
-                            // Use the same viewport size that the overlay will use for pixel conversion.
-                            // We assume portrait UI; if you support rotation, this should track device orientation.
-                            if self.viewportSize.width > 0 && self.viewportSize.height > 0 {
-                                self.imageToViewTransform = frame.displayTransform(for: .portrait, viewportSize: self.viewportSize)
-                            }
-                        }
-                    }.store(in: &cancellables)
-                }
             }
             .onAppear {
                 // Must match the actual rendered AR view size; using UIScreen bounds can drift
@@ -446,22 +425,6 @@ struct ARSessionView: View {
             }
             .animation(.easeInOut(duration: 0.2), value: markerService.selectedMarkerID)
             
-            // Laser detection overlay (only in LaserGuide mode)
-            if isLaserGuideSession {
-                LaserDetectionOverlay(
-                    detectedPoints: laserDetection.detectedPoints,
-                    viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
-                    laserService: laserDetection,
-                    imageToViewTransform: imageToViewTransform,
-                    arView: arView,
-                    onDotLineMeasurement: nil
-                )
-                .zIndex(2)
-                .onAppear {
-                    // Keep mapping consistent with the real rendered size.
-                    viewportSize = geometry.size
-                }
-            }
             }  // Close GeometryReader
         }
         .ignoresSafeArea(.all)
@@ -580,11 +543,10 @@ struct LaserGuideARSessionView: View {
     @StateObject var spaceService: SpaceService
     @StateObject var settings: AppSettings
     @StateObject var viewModel: ARSessionViewModel
-    // Detection services are declared explicitly so all $-bindings in the settings panel
-    // continue to work. They are wired into DetectionPipeline via its DI init.
-    @StateObject var laserDetection: LaserDetectionService
+    // mlDetection is declared explicitly so all $-bindings in the settings panel work.
+    // It is wired into DetectionPipeline via its DI init.
     @StateObject var mlDetection: LaserMLDetectionService
-    /// Reusable detection pipeline — owns mode switching and raw pixel-buffer routing.
+    /// Reusable detection pipeline — routes raw pixel-buffers to LaserMLDetectionService.
     /// Plug this into Video Mode by feeding CVPixelBuffers from AVPlayerItemVideoOutput.
     @StateObject var pipeline: DetectionPipeline
     @State private var laserGuide: LaserGuide? = nil
@@ -603,8 +565,6 @@ struct LaserGuideARSessionView: View {
     @State private var debugDotAnchor: AnchorEntity? = nil
     @State private var debugLineAnchor: AnchorEntity? = nil
     @State private var showDetectionSettings = false
-    /// Read-only accessor — source of truth is pipeline.useML.
-    private var useMLDetection: Bool { pipeline.useML }
 
     private static func cgImageOrientation(for interfaceOrientation: UIInterfaceOrientation) -> CGImagePropertyOrientation {
         // Back camera (not mirrored). This mapping keeps Vision's orientation consistent with
@@ -658,13 +618,11 @@ struct LaserGuideARSessionView: View {
         _spaceService = StateObject(wrappedValue: spaceService)
         _settings = StateObject(wrappedValue: settings)
         _viewModel = StateObject(wrappedValue: ARSessionViewModel(sessionId: session.id, markerService: markerService, markerApi: markerApi))
-        // Create detection services and share them with DetectionPipeline so the $-bindings
-        // in the settings panel and the pipeline's routing both use the same instances.
-        let laserDet = LaserDetectionService()
+        // Create mlDetection service and share with DetectionPipeline so $-bindings
+        // in the settings panel and the pipeline's routing both use the same instance.
         let mlDet = LaserMLDetectionService()
-        _laserDetection = StateObject(wrappedValue: laserDet)
         _mlDetection = StateObject(wrappedValue: mlDet)
-        _pipeline = StateObject(wrappedValue: DetectionPipeline(classic: laserDet, ml: mlDet))
+        _pipeline = StateObject(wrappedValue: DetectionPipeline(ml: mlDet))
     }
 
     @State var arView: ARView?
@@ -746,19 +704,13 @@ struct LaserGuideARSessionView: View {
                     print("[LaserGuideSnap] ARViewContainer appeared, starting session")
                     startARSession()
 
-                    // Read per-session detection selection.
-                    let useML = SessionSettingsStore.shared.isLaserGuideMLDetection(sessionId: session.id)
-
-                    // Restore tuning first so services start with the right params.
-                    if let saved = SpaceDetectionSettingsStore.shared.load(spaceId: session.spaceId) {
-                        applyDetectionSettings(saved)
-                    }
+                    // Restore ML detection tuning from last session.
                     if let mlSaved = SpaceMLDetectionSettingsStore.shared.load(spaceId: session.spaceId) {
                         applyMLDetectionSettings(mlSaved)
                     }
 
-                    // Start the pipeline — routes processPixelBuffer to the right service.
-                    pipeline.start(useML: useML)
+                    // Start the ML detection pipeline.
+                    pipeline.start()
 
                     Task {
                         print("[LaserGuideSnap] Launching fetchLaserGuideIfNeeded task")
@@ -821,32 +773,14 @@ struct LaserGuideARSessionView: View {
                         }
                     }
                 }
-                .onChange(of: laserDetection.brightnessThreshold) { _, _ in
-                    if !useMLDetection { saveDetectionSettings() }
-                }
-                .onChange(of: laserDetection.useHueDetection) { _, _ in
-                    if !useMLDetection { saveDetectionSettings() }
-                }
-                .onChange(of: laserDetection.targetHue) { _, _ in
-                    if !useMLDetection { saveDetectionSettings() }
-                }
-                .onChange(of: laserDetection.minBlobSize) { _, _ in
-                    if !useMLDetection { saveDetectionSettings() }
-                }
-                .onChange(of: laserDetection.lineAnisotropyThreshold) { _, _ in
-                    if !useMLDetection { saveDetectionSettings() }
-                }
-                .onChange(of: laserDetection.maxDotLineYDeltaMeters) { _, _ in
-                    if !useMLDetection { saveDetectionSettings() }
-                }
                 .onChange(of: mlDetection.confidenceThreshold) { _, _ in
-                    if useMLDetection { saveMLDetectionSettings() }
+                    saveMLDetectionSettings()
                 }
                 .onChange(of: mlDetection.useROI) { _, _ in
-                    if useMLDetection { saveMLDetectionSettings() }
+                    saveMLDetectionSettings()
                 }
                 .onChange(of: mlDetection.roiSize) { _, _ in
-                    if useMLDetection { saveMLDetectionSettings() }
+                    saveMLDetectionSettings()
                 }
                 .onChange(of: settings.laserGuideMLModelLocalPath) { _, _ in
                     // If a new model is selected (e.g. from Google Drive via Files), reload it.
@@ -1077,184 +1011,70 @@ struct LaserGuideARSessionView: View {
                             // Settings panel
                             if showDetectionSettings {
                                 VStack(alignment: .leading, spacing: 12) {
-                                    if useMLDetection {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text("Confidence")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                Spacer()
-                                                Text(String(format: "%.2f", mlDetection.confidenceThreshold))
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.green)
-                                            }
-                                            Slider(value: $mlDetection.confidenceThreshold, in: 0.05...0.95, step: 0.05)
-                                                .tint(.green)
-                                        }
-
-                                        Toggle(isOn: $mlDetection.useROI) {
-                                            Text("Use ROI")
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text("Confidence")
                                                 .font(.system(size: 12, weight: .medium))
                                                 .foregroundColor(.white.opacity(0.9))
-                                        }
-                                        .toggleStyle(.switch)
-                                        .tint(.green)
-
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text("ROI Size")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                Spacer()
-                                                Text(String(format: "%.2f", mlDetection.roiSize))
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.green)
-                                            }
-                                            Slider(value: $mlDetection.roiSize, in: 0.20...1.00, step: 0.05)
-                                                .tint(.green)
-                                        }
-                                        .disabled(!mlDetection.useROI)
-                                        .opacity(mlDetection.useROI ? 1.0 : 0.5)
-
-                                        if let err = mlDetection.lastError, !err.isEmpty {
-                                            Text(err)
+                                            Spacer()
+                                            Text(String(format: "%.2f", mlDetection.confidenceThreshold))
                                                 .font(.system(size: 11, weight: .semibold))
-                                                .foregroundColor(.red)
-                                                .lineLimit(3)
+                                                .foregroundColor(.green)
                                         }
-
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text("Auto-scope Stable")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                Spacer()
-                                                Text(String(format: "%.1fs", settings.laserGuideAutoScopeStableSeconds))
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.green)
-                                            }
-                                            Slider(
-                                                value: Binding(
-                                                    get: { settings.laserGuideAutoScopeStableSeconds },
-                                                    set: { settings.laserGuideAutoScopeStableSeconds = $0 }
-                                                ),
-                                                in: 0.2...3.0,
-                                                step: 0.1
-                                            )
+                                        Slider(value: $mlDetection.confidenceThreshold, in: 0.05...0.95, step: 0.05)
                                             .tint(.green)
-                                        }
-                                    } else {
-                                        // Hue Mode toggle
-                                        Toggle(isOn: $laserDetection.useHueDetection) {
-                                            Text("Hue Mode")
+                                    }
+
+                                    Toggle(isOn: $mlDetection.useROI) {
+                                        Text("Use ROI")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.9))
+                                    }
+                                    .toggleStyle(.switch)
+                                    .tint(.green)
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text("ROI Size")
                                                 .font(.system(size: 12, weight: .medium))
                                                 .foregroundColor(.white.opacity(0.9))
+                                            Spacer()
+                                            Text(String(format: "%.2f", mlDetection.roiSize))
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.green)
                                         }
-                                        .toggleStyle(.switch)
-                                        .tint(.yellow)
+                                        Slider(value: $mlDetection.roiSize, in: 0.20...1.00, step: 0.05)
+                                            .tint(.green)
+                                    }
+                                    .disabled(!mlDetection.useROI)
+                                    .opacity(mlDetection.useROI ? 1.0 : 0.5)
 
-                                        // Hue (only used in Hue Mode)
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text("Hue")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                Spacer()
-                                                Text(String(format: "%.2f", laserDetection.targetHue))
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.yellow)
-                                            }
-                                            Slider(value: $laserDetection.targetHue, in: 0.00...1.00, step: 0.01)
-                                                .tint(.yellow)
-                                        }
-                                        .disabled(!laserDetection.useHueDetection)
-                                        .opacity(laserDetection.useHueDetection ? 1.0 : 0.5)
+                                    if let err = mlDetection.lastError, !err.isEmpty {
+                                        Text(err)
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundColor(.red)
+                                            .lineLimit(3)
+                                    }
 
-                                        // Brightness Threshold
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text("Brightness")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                Spacer()
-                                                Text(String(format: "%.2f", laserDetection.brightnessThreshold))
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.yellow)
-                                            }
-                                            Slider(value: $laserDetection.brightnessThreshold, in: 0.30...0.98, step: 0.01)
-                                                .tint(.yellow)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text("Auto-scope Stable")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundColor(.white.opacity(0.9))
+                                            Spacer()
+                                            Text(String(format: "%.1fs", settings.laserGuideAutoScopeStableSeconds))
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.green)
                                         }
-                                        .disabled(laserDetection.useHueDetection)
-                                        .opacity(laserDetection.useHueDetection ? 0.5 : 1.0)
-
-                                        // Line Ratio (Anisotropy)
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text("Line Ratio")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                Spacer()
-                                                Text(String(format: "%.1f", laserDetection.lineAnisotropyThreshold))
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.yellow)
-                                            }
-                                            Slider(value: $laserDetection.lineAnisotropyThreshold, in: 2.0...12.0, step: 0.5)
-                                                .tint(.yellow)
-                                        }
-
-                                        // Min Size
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text("Min Size")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                Spacer()
-                                                Text(String(format: "%.3f", laserDetection.minBlobSize))
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.yellow)
-                                            }
-                                            Slider(value: Binding(
-                                                get: { Double(laserDetection.minBlobSize) },
-                                                set: { laserDetection.minBlobSize = CGFloat($0) }
-                                            ), in: 0.001...0.010, step: 0.001)
-                                                .tint(.yellow)
-                                        }
-
-                                        // Max Y Delta
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text("Max Y Delta")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                Spacer()
-                                                Text(String(format: "%.2fm", laserDetection.maxDotLineYDeltaMeters))
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.yellow)
-                                            }
-                                            Slider(value: $laserDetection.maxDotLineYDeltaMeters, in: 0.05...0.50, step: 0.05)
-                                                .tint(.yellow)
-                                        }
-
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack {
-                                                Text("Auto-scope Stable")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                                Spacer()
-                                                Text(String(format: "%.1fs", settings.laserGuideAutoScopeStableSeconds))
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.yellow)
-                                            }
-                                            Slider(
-                                                value: Binding(
-                                                    get: { settings.laserGuideAutoScopeStableSeconds },
-                                                    set: { settings.laserGuideAutoScopeStableSeconds = $0 }
-                                                ),
-                                                in: 0.2...3.0,
-                                                step: 0.1
-                                            )
-                                            .tint(.yellow)
-                                        }
+                                        Slider(
+                                            value: Binding(
+                                                get: { settings.laserGuideAutoScopeStableSeconds },
+                                                set: { settings.laserGuideAutoScopeStableSeconds = $0 }
+                                            ),
+                                            in: 0.2...3.0,
+                                            step: 0.1
+                                        )
+                                        .tint(.green)
                                     }
                                 }
                                 .padding(12)
@@ -1436,35 +1256,19 @@ struct LaserGuideARSessionView: View {
                 }
 
                 Group {
-                    if useMLDetection {
-                        LaserMLDetectionOverlay(
-                            detections: mlDetection.detections,
-                            viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
-                            imageToViewTransform: imageToViewTransform,
-                            arView: arView,
-                            maxDotLineYDeltaMeters: laserDetection.maxDotLineYDeltaMeters,
-                            onDotLineMeasurement: { measurement in
-                                latestLaserMeasurement = measurement
+                    LaserMLDetectionOverlay(
+                        detections: mlDetection.detections,
+                        viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
+                        imageToViewTransform: imageToViewTransform,
+                        arView: arView,
+                        maxDotLineYDeltaMeters: mlDetection.maxDotLineYDeltaMeters,
+                        onDotLineMeasurement: { measurement in
+                            latestLaserMeasurement = measurement
 
-                                // Auto-scope (debounced): require a stable match for ~1s to reduce accidental jumps.
-                                maybeAutoScope(measurement)
-                            }
-                        )
-                    } else {
-                        LaserDetectionOverlay(
-                            detectedPoints: laserDetection.detectedPoints,
-                            viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
-                            laserService: laserDetection,
-                            imageToViewTransform: imageToViewTransform,
-                            arView: arView,
-                            onDotLineMeasurement: { measurement in
-                                latestLaserMeasurement = measurement
-
-                                // Auto-scope (debounced): require a stable match for ~1s to reduce accidental jumps.
-                                maybeAutoScope(measurement)
-                            }
-                        )
-                    }
+                            // Auto-scope (debounced): require a stable match for ~1s to reduce accidental jumps.
+                            maybeAutoScope(measurement)
+                        }
+                    )
                 }
                 .zIndex(2)
                 .onAppear {
@@ -1509,27 +1313,6 @@ struct LaserGuideARSessionView: View {
             )
         }
         .navigationBarBackButtonHidden()
-    }
-
-    private func saveDetectionSettings() {
-        let settings = LaserDetectionSettings(
-            brightnessThreshold: laserDetection.brightnessThreshold,
-            useHueDetection: laserDetection.useHueDetection,
-            targetHue: laserDetection.targetHue,
-            minBlobSize: Double(laserDetection.minBlobSize),
-            lineAnisotropyThreshold: laserDetection.lineAnisotropyThreshold,
-            maxDotLineYDeltaMeters: laserDetection.maxDotLineYDeltaMeters
-        )
-        SpaceDetectionSettingsStore.shared.save(spaceId: session.spaceId, settings: settings)
-    }
-
-    private func applyDetectionSettings(_ settings: LaserDetectionSettings) {
-        laserDetection.brightnessThreshold = settings.brightnessThreshold
-        laserDetection.useHueDetection = settings.useHueDetection
-        laserDetection.targetHue = settings.targetHue
-        laserDetection.minBlobSize = CGFloat(settings.minBlobSize)
-        laserDetection.lineAnisotropyThreshold = settings.lineAnisotropyThreshold
-        laserDetection.maxDotLineYDeltaMeters = settings.maxDotLineYDeltaMeters
     }
 
     private func saveMLDetectionSettings() {
@@ -1645,7 +1428,7 @@ struct LaserGuideARSessionView: View {
             markerService.setMarkersVisible(false)
         }
 
-        laserDetection.startDetection()
+        pipeline.start()
     }
 
     private func computeAutoRestartThresholdZ(for segment: LaserGuideGridSegment) -> Float? {
@@ -1746,7 +1529,7 @@ struct LaserGuideARSessionView: View {
                 markerService.setMarkersVisible(true)
             }
 
-            laserDetection.stopDetection()
+            pipeline.stop()
             resetAutoScopeStability()
         }
     }
