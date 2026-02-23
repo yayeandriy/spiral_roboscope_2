@@ -15,6 +15,12 @@ Todo:
 
 2.0.9:
   ☐ Model API
+    iOS APP: Implement new feature: Dynamic update ml model:
+      ✔ API now has new field: Space: ml_model_url — there is url to *.zip with mlcore model @done(26-02-23 16:20)
+      ✔ We need check if it not null and upload it and use instead that on which emdebed now dynamically @done(26-02-23 16:20)
+      ✔ ZIP foundation already there @done(26-02-23 16:20)
+      ✔ For reference see roboscope_monorepo @done(26-02-23 16:20)
+      ✔ Add to Settings abilty to manage ml models (see, laod, update) @done(26-02-23 16:20)
   ☐ Video mode
   ☐ Frame merge
 
