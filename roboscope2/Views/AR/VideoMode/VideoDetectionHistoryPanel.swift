@@ -19,6 +19,8 @@ struct DetectionFrameRecord: Identifiable {
     let otherCount: Int
     /// Scaled distance in fake world metres, nil when no valid dot+line pair was found.
     let distanceMeters: Float?
+    /// Diagonal of best-line bbox / diagonal of best-dot bbox. Nil when either class is absent.
+    let lineToDotSizeRatio: Float?
 }
 
 // MARK: - Panel view
@@ -92,15 +94,26 @@ struct VideoDetectionHistoryPanel: View {
 
     @ViewBuilder
     private func rowView(for record: DetectionFrameRecord, index: Int) -> some View {
+        // A ratio < 4 means the line box is barely longer than the dot box — likely a bad pair.
+        let suspectRatio = record.lineToDotSizeRatio.map { $0 < 4 } ?? false
+
         HStack(spacing: 12) {
-            // Frame index circle
-            ZStack {
-                Circle()
-                    .fill(record.distanceMeters != nil ? Color.green.opacity(0.2) : Color.white.opacity(0.06))
-                    .frame(width: 28, height: 28)
-                Text("\(index + 1)")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(record.distanceMeters != nil ? .green : .white.opacity(0.5))
+            // Frame index circle (+ red badge when ratio is suspiciously small)
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    Circle()
+                        .fill(record.distanceMeters != nil ? Color.green.opacity(0.2) : Color.white.opacity(0.06))
+                        .frame(width: 28, height: 28)
+                    Text("\(index + 1)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(record.distanceMeters != nil ? .green : .white.opacity(0.5))
+                }
+                if suspectRatio {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                        .offset(x: 2, y: -2)
+                }
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -131,6 +144,19 @@ struct VideoDetectionHistoryPanel: View {
                         Text(String(format: "%.3f m scaled", d))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.green)
+                    }
+                }
+
+                // Line/dot size ratio (red when < 4× — line barely longer than dot)
+                if let ratio = record.lineToDotSizeRatio {
+                    let isSuspect = ratio < 4
+                    HStack(spacing: 4) {
+                        Image(systemName: isSuspect ? "exclamationmark.triangle" : "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 9))
+                            .foregroundColor(isSuspect ? .red.opacity(0.9) : .orange.opacity(0.8))
+                        Text(String(format: "line/dot ×%.2f", ratio))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(isSuspect ? .red : .orange)
                     }
                 }
             }

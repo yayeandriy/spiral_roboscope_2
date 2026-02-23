@@ -16,6 +16,14 @@ import ImageIO
 
 extension LaserMLDetectionService {
 
+    // Intermediate box candidate used during tensor decode + NMS.
+    struct DecodeCandidate {
+        let rect: CGRect
+        let classIndex: Int
+        let score: Float
+        let orientedQuad: LaserMLOrientedQuad?
+    }
+
     func decodeYOLOLikeDetections(
         from featureObservations: [VNCoreMLFeatureValueObservation],
         modelInputSize: CGSize?,
@@ -99,13 +107,7 @@ extension LaserMLDetectionService {
 
         let ptr = pred.dataPointer.assumingMemoryBound(to: Float.self)
 
-        struct Candidate {
-            let rect: CGRect
-            let classIndex: Int
-            let score: Float
-            let orientedQuad: LaserMLOrientedQuad?
-        }
-        var candidates: [Candidate] = []
+        var candidates: [DecodeCandidate] = []
         candidates.reserveCapacity(min(512, numAnchors))
 
         for j in 0..<numAnchors {
@@ -178,10 +180,13 @@ extension LaserMLDetectionService {
                 orientedQuad = nil
             }
 
-            candidates.append(Candidate(rect: normRectRaw, classIndex: bestClass, score: bestScore, orientedQuad: orientedQuad))
+            candidates.append(DecodeCandidate(rect: normRectRaw, classIndex: bestClass, score: bestScore, orientedQuad: orientedQuad))
         }
 
-        let top = candidates.sorted(by: { $0.score > $1.score }).prefix(maxDetections)
+        // Per-class NMS: suppress overlapping boxes of the same class with IoU > threshold.
+        let nmsThreshold: Float = 0.45
+        let suppressed = Self.applyNMS(candidates: candidates, iouThreshold: nmsThreshold)
+        let top = suppressed.sorted(by: { $0.score > $1.score }).prefix(maxDetections)
         return top.map {
             let label: String
             if numClasses <= 1 {
@@ -202,5 +207,41 @@ extension LaserMLDetectionService {
                 timestamp: Date()
             )
         }
+    }
+
+    // MARK: - NMS helpers
+
+    private static func applyNMS(
+        candidates: [DecodeCandidate],
+        iouThreshold: Float
+    ) -> [DecodeCandidate] {
+        // Group by class then apply greedy NMS within each group.
+        let classes = Set(candidates.map { $0.classIndex })
+        var kept: [DecodeCandidate] = []
+        for cls in classes {
+            let group = candidates.filter { $0.classIndex == cls }.sorted { $0.score > $1.score }
+            var active = [Bool](repeating: true, count: group.count)
+            for i in 0..<group.count {
+                guard active[i] else { continue }
+                kept.append(group[i])
+                for j in (i+1)..<group.count {
+                    guard active[j] else { continue }
+                    if iou(group[i].rect, group[j].rect) > iouThreshold {
+                        active[j] = false
+                    }
+                }
+            }
+        }
+        return kept
+    }
+
+    private static func iou(_ a: CGRect, _ b: CGRect) -> Float {
+        let ix = max(0, min(a.maxX, b.maxX) - max(a.minX, b.minX))
+        let iy = max(0, min(a.maxY, b.maxY) - max(a.minY, b.minY))
+        let inter = ix * iy
+        guard inter > 0 else { return 0 }
+        let union = a.width * a.height + b.width * b.height - inter
+        guard union > 0 else { return 0 }
+        return Float(inter / union)
     }
 }

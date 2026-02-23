@@ -221,12 +221,25 @@ struct VideoDetectionView: View {
         .navigationBarBackButtonHidden()
         .onChange(of: mlDetection.detections) { _, newDetections in
             guard !newDetections.isEmpty else { return }
+            let dotDetections  = newDetections.filter { $0.label == "dot"  || $0.classIndex == 0 }
+            let lineDetections = newDetections.filter { $0.label == "line" || $0.classIndex == 1 }
+            let bestDot  = dotDetections.max(by:  { $0.confidence < $1.confidence })
+            let bestLine = lineDetections.max(by: { $0.confidence < $1.confidence })
+            let lineToDotRatio: Float? = {
+                guard let d = bestDot, let l = bestLine else { return nil }
+                // Longest side of each bbox — more meaningful than diagonal for elongated line boxes.
+                let dotLong  = Float(max(d.boundingBox.width, d.boundingBox.height))
+                let lineLong = Float(max(l.boundingBox.width, l.boundingBox.height))
+                guard dotLong > 0 else { return nil }
+                return lineLong / dotLong
+            }()
             let record = DetectionFrameRecord(
                 timestamp: Date(),
-                dots: newDetections.filter { $0.label == "dot" || $0.classIndex == 0 }.count,
-                lines: newDetections.filter { $0.label == "line" || $0.classIndex == 1 }.count,
+                dots: dotDetections.count,
+                lines: lineDetections.count,
                 otherCount: newDetections.filter { ($0.classIndex ?? -1) > 1 }.count,
-                distanceMeters: latestMeasurement?.distanceMeters
+                distanceMeters: latestMeasurement?.distanceMeters,
+                lineToDotSizeRatio: lineToDotRatio
             )
             detectionHistory.append(record)
             if detectionHistory.count > 50 { detectionHistory.removeFirst(detectionHistory.count - 50) }
