@@ -2,7 +2,7 @@
 //  VideoDetectionHistoryPanel.swift
 //  roboscope2
 //
-//  Slide-in panel showing the last 10 detection frames for VideoDetectionView.
+//  Slide-in panel showing the last 50 detection frames for VideoDetectionView.
 //  Each row summarises detected objects and the measured dot→line distance.
 //
 
@@ -40,7 +40,7 @@ struct VideoDetectionHistoryPanel: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white)
                 Spacer()
-                Text("last \(min(records.count, 10)) frames")
+                Text("last \(min(records.count, 50)) frames")
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.5))
                 Button { onClose() } label: {
@@ -67,9 +67,9 @@ struct VideoDetectionHistoryPanel: View {
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(records.reversed().prefix(10).enumerated()), id: \.element.id) { idx, record in
+                        ForEach(Array(records.reversed().prefix(50).enumerated()), id: \.element.id) { idx, record in
                             rowView(for: record, index: idx)
-                            if idx < min(records.count, 10) - 1 {
+                            if idx < min(records.count, 50) - 1 {
                                 Divider()
                                     .background(Color.white.opacity(0.07))
                                     .padding(.leading, 16)
@@ -97,27 +97,19 @@ struct VideoDetectionHistoryPanel: View {
         // A ratio < 4 means the line box is barely longer than the dot box — likely a bad pair.
         let suspectRatio = record.lineToDotSizeRatio.map { $0 < 4 } ?? false
 
-        HStack(spacing: 12) {
-            // Frame index circle (+ red badge when ratio is suspiciously small)
-            ZStack(alignment: .topTrailing) {
-                ZStack {
-                    Circle()
-                        .fill(record.distanceMeters != nil ? Color.green.opacity(0.2) : Color.white.opacity(0.06))
-                        .frame(width: 28, height: 28)
-                    Text("\(index + 1)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(record.distanceMeters != nil ? .green : .white.opacity(0.5))
-                }
-                if suspectRatio {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
-                        .offset(x: 2, y: -2)
-                }
+        HStack(alignment: .center, spacing: 10) {
+            // Frame index circle (no badge here any more — indicator moved to right)
+            ZStack {
+                Circle()
+                    .fill(record.distanceMeters != nil ? Color.green.opacity(0.2) : Color.white.opacity(0.06))
+                    .frame(width: 28, height: 28)
+                Text("\(index + 1)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(record.distanceMeters != nil ? .green : .white.opacity(0.5))
             }
 
+            // Detection chips + distance
             VStack(alignment: .leading, spacing: 3) {
-                // Detection labels row
                 HStack(spacing: 6) {
                     if record.dots > 0 {
                         detectionChip(label: "\(record.dots) dot\(record.dots > 1 ? "s" : "")", color: .cyan)
@@ -135,7 +127,6 @@ struct VideoDetectionHistoryPanel: View {
                     }
                 }
 
-                // Distance
                 if let d = record.distanceMeters {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.left.and.right")
@@ -147,26 +138,32 @@ struct VideoDetectionHistoryPanel: View {
                     }
                 }
 
-                // Line/dot size ratio (red when < 4× — line barely longer than dot)
-                if let ratio = record.lineToDotSizeRatio {
-                    let isSuspect = ratio < 4
-                    HStack(spacing: 4) {
-                        Image(systemName: isSuspect ? "exclamationmark.triangle" : "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 9))
-                            .foregroundColor(isSuspect ? .red.opacity(0.9) : .orange.opacity(0.8))
-                        Text(String(format: "line/dot ×%.2f", ratio))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(isSuspect ? .red : .orange)
-                    }
-                }
+                // Relative timestamp
+                Text(relativeTime(record.timestamp))
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.35))
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            // Relative timestamp
-            Text(relativeTime(record.timestamp))
-                .font(.system(size: 10))
-                .foregroundColor(.white.opacity(0.35))
+            // Ratio — large, white, between info and the suspect dot
+            if let ratio = record.lineToDotSizeRatio {
+                let isSuspect = ratio < 4
+                VStack(spacing: 1) {
+                    Text(String(format: "×%.2f", ratio))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(isSuspect ? .red : .white)
+                    Text("l/d")
+                        .font(.system(size: 9))
+                        .foregroundColor(isSuspect ? .red.opacity(0.7) : .white.opacity(0.4))
+                }
+                .frame(minWidth: 44)
+            }
+
+            // Suspect indicator dot — right edge, vertically centered
+            Circle()
+                .fill(suspectRatio ? Color.red : Color.clear)
+                .frame(width: 8, height: 8)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
