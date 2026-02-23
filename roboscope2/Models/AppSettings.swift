@@ -31,6 +31,8 @@ class AppSettings: ObservableObject {
         static let laserGuideMLModelLocalPath = "laserGuideMLModelLocalPath"
         static let laserGuideMLModelDisplayName = "laserGuideMLModelDisplayName"
         static let laserGuideMLModelSourceURL = "laserGuideMLModelSourceURL"
+        static let videoModeEnabled = "videoModeEnabled"
+        static let videoModeDistanceScale = "videoModeDistanceScale"
     }
     
     // MARK: - Scan Registration Settings
@@ -162,9 +164,39 @@ class AppSettings: ObservableObject {
 
     var laserGuideMLModelURL: URL? {
         guard let path = laserGuideMLModelLocalPath, !path.isEmpty else { return nil }
-        return URL(fileURLWithPath: path)
+        let url = URL(fileURLWithPath: path)
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+
+        // Absolute path is stale (app container UUID changed after reinstall/update).
+        // Recover by finding the "MLModels/..." portion and re-rooting it under the
+        // current Application Support directory, then persist the corrected path.
+        guard let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first else { return nil }
+
+        let components = url.pathComponents
+        guard let idx = components.firstIndex(of: "MLModels") else { return nil }
+        let recovered = components[idx...].reduce(appSupport) { $0.appendingPathComponent($1) }
+        guard FileManager.default.fileExists(atPath: recovered.path) else { return nil }
+
+        DispatchQueue.main.async { self.laserGuideMLModelLocalPath = recovered.path }
+        return recovered
     }
-    
+
+    // MARK: - Video Mode
+
+    /// When true, LaserGuide session runs detection against uploaded video footage instead of live AR camera.
+    @Published var videoModeEnabled: Bool {
+        didSet { defaults.set(videoModeEnabled, forKey: Keys.videoModeEnabled) }
+    }
+
+    /// Scale factor to convert normalised image-space distance (0..1) to fake world-space metres.
+    /// Used by the video-mode measurement path in LaserMLDetectionOverlay when arView is nil.
+    /// Default 5.0 — tune so detected values fall within the laser-guide segment range.
+    @Published var videoModeDistanceScale: Float {
+        didSet { defaults.set(videoModeDistanceScale, forKey: Keys.videoModeDistanceScale) }
+    }
+
     // MARK: - Initialization
     
     private init() {
@@ -198,6 +230,9 @@ class AppSettings: ObservableObject {
         self.laserGuideMLModelLocalPath = defaults.string(forKey: Keys.laserGuideMLModelLocalPath)
         self.laserGuideMLModelDisplayName = defaults.string(forKey: Keys.laserGuideMLModelDisplayName)
         self.laserGuideMLModelSourceURL = defaults.string(forKey: Keys.laserGuideMLModelSourceURL)
+        self.videoModeEnabled = defaults.object(forKey: Keys.videoModeEnabled) as? Bool ?? false
+        let vmScale = defaults.float(forKey: Keys.videoModeDistanceScale)
+        self.videoModeDistanceScale = vmScale > 0 ? vmScale : 5.0
     }
     
     // MARK: - Preset Management

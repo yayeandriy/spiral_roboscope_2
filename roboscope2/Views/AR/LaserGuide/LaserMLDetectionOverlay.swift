@@ -17,6 +17,9 @@ struct LaserMLDetectionOverlay: View {
     let arView: ARView?
     let maxDotLineYDeltaMeters: Float
     let onDotLineMeasurement: ((LaserDotLineMeasurement?) -> Void)?
+    /// Scale factor applied to normalised image-space distance to produce fake "world" metres
+    /// in Video Mode (when arView is nil). Default 5.0 — adjust in Settings to match your guide.
+    var videoModeDistanceScale: Float = 5.0
 
     var body: some View {
         GeometryReader { geometry in
@@ -74,10 +77,11 @@ struct LaserMLDetectionOverlay: View {
     /// - classIndex 0 => dot
     /// - classIndex 1 => line
     private func measureDistanceBetweenDotAndLine(_ detections: [LaserMLDetection], viewSize: CGSize) {
-        guard let arView else {
-            onDotLineMeasurement?(nil)
+        if arView == nil {
+            measureVideoMode(detections)
             return
         }
+        guard let arView else { return }
 
         // Choose best dot by confidence.
         guard let dot = detections
@@ -133,6 +137,54 @@ struct LaserMLDetectionOverlay: View {
     private func isLine(_ d: LaserMLDetection) -> Bool {
         if let idx = d.classIndex { return idx == 1 }
         return d.label.lowercased().contains("line")
+    }
+
+    // MARK: - Video Mode measurement (no ARView — image-space 2D distance)
+
+    /// Computes an approximate distance between dot and line using their normalised image-space
+    /// positions, scaled by `videoModeDistanceScale` to produce a value in fake "world metres".
+    /// The Y-delta filter reuses `maxDotLineYDeltaMeters` treated as a fraction of view height.
+    private func measureVideoMode(_ detections: [LaserMLDetection]) {
+        guard let dot = detections
+            .filter({ isDot($0) })
+            .max(by: { $0.confidence < $1.confidence }) else {
+            onDotLineMeasurement?(nil)
+            return
+        }
+
+        let dotNorm = CGPoint(x: dot.boundingBox.midX, y: dot.boundingBox.midY)
+            .applying(imageToViewTransform)
+
+        let lineCandidates = detections
+            .filter({ isLine($0) })
+            .sorted(by: { $0.confidence > $1.confidence })
+
+        for candidate in lineCandidates {
+            let lineNorm = CGPoint(x: candidate.boundingBox.midX, y: candidate.boundingBox.midY)
+                .applying(imageToViewTransform)
+
+            // Reject pairs where vertical separation exceeds 50% of view height.
+            // (maxDotLineYDeltaMeters is an AR world-space value and is not meaningful
+            // in normalised image space, so use a fixed generous threshold here.)
+            let yDeltaNorm = abs(dotNorm.y - lineNorm.y)
+            guard yDeltaNorm <= 0.5 else { continue }
+
+            // Euclidean distance in normalised view space → fake world metres.
+            let dx = dotNorm.x - lineNorm.x
+            let dy = dotNorm.y - lineNorm.y
+            let dNorm = sqrt(dx * dx + dy * dy)
+            let dMeters = Float(dNorm) * videoModeDistanceScale
+
+            // Use placeholder world vectors (no real 3-D in video mode).
+            let dummy = SIMD3<Float>(Float(dotNorm.x), 0, Float(lineNorm.x))
+            onDotLineMeasurement?(LaserDotLineMeasurement(
+                dotWorld: dummy,
+                lineWorld: SIMD3<Float>(Float(lineNorm.x), 0, Float(lineNorm.x)),
+                distanceMeters: dMeters
+            ))
+            return
+        }
+        onDotLineMeasurement?(nil)
     }
 
     private func raycastWorldPosition(for detection: LaserMLDetection, arView: ARView, viewSize: CGSize) -> simd_float4? {

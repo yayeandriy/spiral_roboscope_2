@@ -10,6 +10,7 @@ import SwiftUI
 struct SessionsView: View {
     @StateObject private var workSessionService = WorkSessionService.shared
     @StateObject private var spaceService = SpaceService.shared
+    @StateObject private var settings = AppSettings.shared
     @State private var showingCreateSheet = false
     @State private var selectedSession: WorkSession?
     @State private var showingEditSheet = false
@@ -20,7 +21,16 @@ struct SessionsView: View {
     @State private var dashboardSession: WorkSession?
     @State private var isLaunchingAR: Bool = false
     @State private var refreshTrigger: Bool = false  // Force row refresh
-    
+
+    @ViewBuilder
+    private func laserGuideDestination(for session: WorkSession) -> some View {
+        if settings.videoModeEnabled {
+            VideoDetectionView(session: session)
+        } else {
+            LaserGuideARSessionView(session: session)
+        }
+    }
+
     var body: some View {
         NavigationView {
             VStack { sessionsList }
@@ -86,7 +96,7 @@ struct SessionsView: View {
                 }
             }
             .fullScreenCover(item: $arSession) { session in
-                LaserGuideARSessionView(session: session)
+                laserGuideDestination(for: session)
             }
             .onChange(of: arSession) { oldValue, newValue in
                 // As soon as navigation triggers, hide the local overlay
@@ -293,6 +303,16 @@ private struct SessionDashboardView: View {
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var markerService = MarkerService.shared
+    @StateObject private var settings = AppSettings.shared
+
+    @ViewBuilder
+    private func laserGuideDestination(for session: WorkSession) -> some View {
+        if settings.videoModeEnabled {
+            VideoDetectionView(session: session)
+        } else {
+            LaserGuideARSessionView(session: session)
+        }
+    }
 
     @State private var markers: [Marker] = []
     @State private var isLoading: Bool = false
@@ -346,7 +366,7 @@ private struct SessionDashboardView: View {
                 await loadMarkers()
             }
             .fullScreenCover(item: $arSession) { session in
-                LaserGuideARSessionView(session: session)
+                laserGuideDestination(for: session)
             }
             .onChange(of: arSession) { oldValue, newValue in
                 // When returning from AR, refresh markers list

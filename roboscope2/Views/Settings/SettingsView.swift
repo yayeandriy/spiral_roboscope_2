@@ -12,11 +12,14 @@ import ZIPFoundation
 
 struct SettingsView: View {
     @StateObject var settings = AppSettings.shared
+    @StateObject var videoService = VideoModeService.shared
     @ObservedObject private var mlDownloadService = MLModelDownloadService.shared
     @State var showResetConfirmation = false
     @State var isApplyingPreset = false
     @State var showLaserGuideModelPicker = false
     @State var laserGuideModelError: String? = nil
+    @State var showVideoModePicker = false
+    @State var videoModeError: String? = nil
     
     var body: some View {
         NavigationView {
@@ -233,6 +236,19 @@ struct SettingsView: View {
                     Text("When you open a Space with a configured ML model URL, the model ZIP is automatically downloaded, compiled, and activated for laser detection.")
                 }
                 
+                // Video Mode Section
+                Section {
+                    Toggle("Video Mode", isOn: $settings.videoModeEnabled)
+
+                    if settings.videoModeEnabled {
+                        videoModeRow
+                    }
+                } header: {
+                    Text("Video Mode")
+                } footer: {
+                    Text("Run laser detection on recorded video footage instead of the live AR camera. Upload a video, then open a LaserGuide session to analyse it.")
+                }
+
                 // Reset Section
                 Section {
                     Button(action: {
@@ -313,6 +329,27 @@ struct SettingsView: View {
                         showLaserGuideModelPicker = false
                     }
                 )
+            }
+            .sheet(isPresented: $showVideoModePicker) {
+                VideoDocumentPicker(
+                    onPick: { url in
+                        Task { @MainActor in
+                            do {
+                                try VideoModeService.shared.saveVideo(from: url)
+                                showVideoModePicker = false
+                            } catch {
+                                videoModeError = error.localizedDescription
+                                showVideoModePicker = false
+                            }
+                        }
+                    },
+                    onCancel: { showVideoModePicker = false }
+                )
+            }
+            .alert("Video Error", isPresented: .constant(videoModeError != nil)) {
+                Button("OK") { videoModeError = nil }
+            } message: {
+                if let videoModeError { Text(videoModeError) }
             }
         }
     }
