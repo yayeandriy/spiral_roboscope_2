@@ -91,8 +91,15 @@ class LaserDetectionService: ObservableObject {
         let value: UInt8
     }
     
-    /// Process AR frame to detect laser points
+    /// Process AR frame to detect laser points.
+    /// Delegates to `processPixelBuffer` — prefer calling that directly when an ARFrame is not available.
     func processFrame(_ frame: ARFrame) {
+        processPixelBuffer(frame.capturedImage)
+    }
+
+    /// Feed a raw CVPixelBuffer for laser detection.
+    /// Works in both AR and Video Mode (no ARFrame dependency).
+    func processPixelBuffer(_ pixelBuffer: CVPixelBuffer) {
         guard isDetecting else { return }
 
         // Use a stable wall-clock timer here rather than ARFrame.timestamp.
@@ -101,9 +108,6 @@ class LaserDetectionService: ObservableObject {
         let currentTime = CACurrentMediaTime()
         guard currentTime - lastProcessTime >= processingInterval else { return }
         lastProcessTime = currentTime
-        
-        // Get camera image
-        let pixelBuffer = frame.capturedImage
 
         // Avoid queue backlogs: if a frame is already being processed, drop this one.
         stateLock.lock()

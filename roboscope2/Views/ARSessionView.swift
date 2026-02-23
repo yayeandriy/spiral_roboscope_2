@@ -580,8 +580,13 @@ struct LaserGuideARSessionView: View {
     @StateObject var spaceService: SpaceService
     @StateObject var settings: AppSettings
     @StateObject var viewModel: ARSessionViewModel
-    @StateObject var laserDetection = LaserDetectionService()
-    @StateObject var mlDetection = LaserMLDetectionService()
+    // Detection services are declared explicitly so all $-bindings in the settings panel
+    // continue to work. They are wired into DetectionPipeline via its DI init.
+    @StateObject var laserDetection: LaserDetectionService
+    @StateObject var mlDetection: LaserMLDetectionService
+    /// Reusable detection pipeline — owns mode switching and raw pixel-buffer routing.
+    /// Plug this into Video Mode by feeding CVPixelBuffers from AVPlayerItemVideoOutput.
+    @StateObject var pipeline: DetectionPipeline
     @State private var laserGuide: LaserGuide? = nil
     @State private var laserGuideFetchError: String? = nil
     @State private var lastLaserGuideSnapTime: TimeInterval = 0
@@ -598,7 +603,8 @@ struct LaserGuideARSessionView: View {
     @State private var debugDotAnchor: AnchorEntity? = nil
     @State private var debugLineAnchor: AnchorEntity? = nil
     @State private var showDetectionSettings = false
-    @State private var useMLDetection: Bool = false
+    /// Read-only accessor — source of truth is pipeline.useML.
+    private var useMLDetection: Bool { pipeline.useML }
 
     private static func cgImageOrientation(for interfaceOrientation: UIInterfaceOrientation) -> CGImagePropertyOrientation {
         // Back camera (not mirrored). This mapping keeps Vision's orientation consistent with
@@ -652,6 +658,13 @@ struct LaserGuideARSessionView: View {
         _spaceService = StateObject(wrappedValue: spaceService)
         _settings = StateObject(wrappedValue: settings)
         _viewModel = StateObject(wrappedValue: ARSessionViewModel(sessionId: session.id, markerService: markerService, markerApi: markerApi))
+        // Create detection services and share them with DetectionPipeline so the $-bindings
+        // in the settings panel and the pipeline's routing both use the same instances.
+        let laserDet = LaserDetectionService()
+        let mlDet = LaserMLDetectionService()
+        _laserDetection = StateObject(wrappedValue: laserDet)
+        _mlDetection = StateObject(wrappedValue: mlDet)
+        _pipeline = StateObject(wrappedValue: DetectionPipeline(classic: laserDet, ml: mlDet))
     }
 
     @State var arView: ARView?
@@ -734,25 +747,18 @@ struct LaserGuideARSessionView: View {
                     startARSession()
 
                     // Read per-session detection selection.
-                    useMLDetection = SessionSettingsStore.shared.isLaserGuideMLDetection(sessionId: session.id)
+                    let useML = SessionSettingsStore.shared.isLaserGuideMLDetection(sessionId: session.id)
 
-                    // Restore per-space detection tuning.
+                    // Restore tuning first so services start with the right params.
                     if let saved = SpaceDetectionSettingsStore.shared.load(spaceId: session.spaceId) {
                         applyDetectionSettings(saved)
                     }
-
-                    // Restore per-space ML tuning.
                     if let mlSaved = SpaceMLDetectionSettingsStore.shared.load(spaceId: session.spaceId) {
                         applyMLDetectionSettings(mlSaved)
                     }
 
-                    if useMLDetection {
-                        laserDetection.stopDetection()
-                        mlDetection.startDetection()
-                    } else {
-                        mlDetection.stopDetection()
-                        laserDetection.startDetection()
-                    }
+                    // Start the pipeline — routes processPixelBuffer to the right service.
+                    pipeline.start(useML: useML)
 
                     Task {
                         print("[LaserGuideSnap] Launching fetchLaserGuideIfNeeded task")
@@ -847,8 +853,7 @@ struct LaserGuideARSessionView: View {
                     mlDetection.reloadModel()
                 }
                 .onDisappear {
-                    laserDetection.stopDetection()
-                    mlDetection.stopDetection()
+                    pipeline.stop()
                     viewModel.cancelAllTimers()
                     autoDropTimer?.invalidate()
                     autoDropTimer = nil
@@ -876,11 +881,12 @@ struct LaserGuideARSessionView: View {
                         arView.scene.subscribe(to: SceneEvents.Update.self) { _ in
                             if let frame = arView.session.currentFrame {
                                 let interfaceOrientation = arView.window?.windowScene?.interfaceOrientation ?? .portrait
-                                if self.useMLDetection {
-                                    self.mlDetection.processFrame(frame, orientation: Self.cgImageOrientation(for: interfaceOrientation))
-                                } else {
-                                    self.laserDetection.processFrame(frame)
-                                }
+                                // Route through the pipeline — works identically in Video Mode
+                                // (replace frame.capturedImage with a CVPixelBuffer from video).
+                                self.pipeline.processPixelBuffer(
+                                    frame.capturedImage,
+                                    orientation: Self.cgImageOrientation(for: interfaceOrientation)
+                                )
 
                                 // After auto-scope, monitor how far the user moves away from the scoped dot.
                                 self.maybeReturnToDetectionIfUserMovedAway(frame)

@@ -153,7 +153,15 @@ final class LaserMLDetectionService: ObservableObject {
         log("Detection stopped")
     }
 
+    /// Process an AR frame. Delegates to `processPixelBuffer` — prefer calling that directly
+    /// when an ARFrame is not available (e.g. in Video Mode).
     func processFrame(_ frame: ARFrame, orientation: CGImagePropertyOrientation = .right) {
+        processPixelBuffer(frame.capturedImage, orientation: orientation)
+    }
+
+    /// Feed a raw CVPixelBuffer for ML detection.
+    /// Works in both AR and Video Mode (no ARFrame dependency).
+    func processPixelBuffer(_ pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation = .right) {
         guard isDetecting else { return }
         guard let request = ensureRequest() else {
             if lastError == nil {
@@ -182,7 +190,8 @@ final class LaserMLDetectionService: ObservableObject {
         let roiSize = max(0.05, min(1.0, self.roiSize))
         let modelInputSize = self.modelInputSize
 
-        let pixelBuffer = frame.capturedImage
+        // Pass pixel buffer across the DispatchQueue boundary via an unmanaged pointer to avoid
+        // Swift 6 Sendable warnings/errors for CVPixelBuffer in @Sendable closures.
         let pixelBufferOpaque = Unmanaged.passRetained(pixelBuffer).toOpaque()
 
         processingQueue.async { [weak self] in

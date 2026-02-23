@@ -23,6 +23,7 @@ Todo:
       ✔ Add to Settings abilty to manage ml models (see, laod, update) @done(26-02-23 16:20)
   ☐ Video mode
   ☐ Frame merge
+  ☐ Always ml model on 
 
 Distance match tolerance: laserGuideDistanceToleranceMeters (currently 0.03)
 Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)
