@@ -94,6 +94,10 @@ struct SpaceARView: View {
         .sheet(isPresented: $show3DViewer) {
             Space3DViewer(space: space)
         }
+        // Automatically download and activate the Space's remote ML model (if any).
+        .task {
+            MLModelDownloadService.shared.syncModelForSpace(space)
+        }
         .onChange(of: show3DViewer) { newValue in
             if !newValue {
                 // When 3D viewer is dismissed, switch back to scan mode
@@ -313,6 +317,7 @@ struct SpaceARView: View {
         modelUsdcUrl: nil,
         previewUrl: nil,
         scanUrl: nil,
+        mlModelUrl: nil,
         meta: nil,
         createdAt: nil,
         updatedAt: nil

@@ -30,6 +30,7 @@ class AppSettings: ObservableObject {
         static let laserGuideAutoScopeStableSeconds = "laserGuideAutoScopeStableSeconds"
         static let laserGuideMLModelLocalPath = "laserGuideMLModelLocalPath"
         static let laserGuideMLModelDisplayName = "laserGuideMLModelDisplayName"
+        static let laserGuideMLModelSourceURL = "laserGuideMLModelSourceURL"
     }
     
     // MARK: - Scan Registration Settings
@@ -147,6 +148,18 @@ class AppSettings: ObservableObject {
         }
     }
 
+    /// Original remote URL from which the currently active model was downloaded.
+    /// Used to detect when the API serves a newer version.
+    @Published var laserGuideMLModelSourceURL: String? {
+        didSet {
+            if let laserGuideMLModelSourceURL {
+                defaults.set(laserGuideMLModelSourceURL, forKey: Keys.laserGuideMLModelSourceURL)
+            } else {
+                defaults.removeObject(forKey: Keys.laserGuideMLModelSourceURL)
+            }
+        }
+    }
+
     var laserGuideMLModelURL: URL? {
         guard let path = laserGuideMLModelLocalPath, !path.isEmpty else { return nil }
         return URL(fileURLWithPath: path)
@@ -184,6 +197,7 @@ class AppSettings: ObservableObject {
 
         self.laserGuideMLModelLocalPath = defaults.string(forKey: Keys.laserGuideMLModelLocalPath)
         self.laserGuideMLModelDisplayName = defaults.string(forKey: Keys.laserGuideMLModelDisplayName)
+        self.laserGuideMLModelSourceURL = defaults.string(forKey: Keys.laserGuideMLModelSourceURL)
     }
     
     // MARK: - Preset Management

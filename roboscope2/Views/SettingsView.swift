@@ -12,6 +12,7 @@ import ZIPFoundation
 
 struct SettingsView: View {
     @StateObject private var settings = AppSettings.shared
+    @ObservedObject private var mlDownloadService = MLModelDownloadService.shared
     @State private var showResetConfirmation = false
     @State private var isApplyingPreset = false
     @State private var showLaserGuideModelPicker = false
@@ -193,14 +194,43 @@ struct SettingsView: View {
 
                     if settings.laserGuideMLModelLocalPath != nil {
                         Button("Use Bundled Model", role: .destructive) {
-                            settings.laserGuideMLModelLocalPath = nil
-                            settings.laserGuideMLModelDisplayName = nil
+                            mlDownloadService.resetToBundled()
                         }
                     }
                 } header: {
                     Text("Laser Guide ML")
                 } footer: {
                     Text("Pick a .mlmodel or .mlmodelc from Files (Google Drive supported). The model is compiled/cached locally.")
+                }
+
+                // Remote ML Model (from Space API)
+                Section {
+                    remoteMLModelStatusRow
+
+                    if case .ready = mlDownloadService.downloadState {
+                        Button("Re-download") {
+                            mlDownloadService.redownload()
+                        }
+                        .disabled(mlDownloadService.downloadState.isInProgress)
+
+                        Button("Remove Remote Model", role: .destructive) {
+                            mlDownloadService.resetToBundled()
+                        }
+                    }
+
+                    if let errMsg = mlDownloadService.downloadState.errorMessage {
+                        Button("Retry") {
+                            mlDownloadService.redownload()
+                        }
+                        .disabled(AppSettings.shared.laserGuideMLModelSourceURL == nil)
+                        Text(errMsg)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                } header: {
+                    Text("Remote ML Model (Space)")
+                } footer: {
+                    Text("When you open a Space with a configured ML model URL, the model ZIP is automatically downloaded, compiled, and activated for laser detection.")
                 }
                 
                 // Reset Section
@@ -504,6 +534,62 @@ private struct LaserGuideModelDocumentPicker: UIViewControllerRepresentable {
 }
     // MARK: - Helper Views
     
+    @ViewBuilder
+    private var remoteMLModelStatusRow: some View {
+        switch mlDownloadService.downloadState {
+        case .idle:
+            HStack {
+                Image(systemName: "cpu")
+                    .foregroundColor(.secondary)
+                Text("No remote model installed")
+                    .foregroundColor(.secondary)
+            }
+
+        case .downloading(let progress):
+            VStack(alignment: .leading, spacing: 6) {
+                Label(
+                    progress < 0 ? "Downloading…" : "Downloading \(Int(progress * 100))%",
+                    systemImage: "arrow.down.circle.fill"
+                )
+                .foregroundColor(.blue)
+                if progress >= 0 {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                }
+            }
+
+        case .installing:
+            HStack {
+                Label("Compiling model…", systemImage: "gear.circle.fill")
+                    .foregroundColor(.orange)
+                Spacer()
+                ProgressView()
+            }
+
+        case .ready(let displayName, let sourceURL):
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text(displayName)
+                        .fontWeight(.medium)
+                }
+                Text(sourceURL)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+        case .error:
+            Label("Download failed — see below", systemImage: "exclamationmark.triangle.fill")
+                .foregroundColor(.red)
+        }
+    }
+
     private var estimatedTimeRow: some View {
         HStack {
             Text("Estimated Time:")

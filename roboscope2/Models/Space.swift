@@ -19,6 +19,9 @@ struct Space: Codable, Identifiable, Hashable {
     let modelUsdcUrl: String?
     let previewUrl: String?
     let scanUrl: String?
+    /// URL pointing to a remote *.zip containing a CoreML model for laser detection.
+    /// When non-nil the app should download, unzip, and activate this model dynamically.
+    let mlModelUrl: String?
     let meta: [String: AnyCodable]?
     let createdAt: Date?
     let updatedAt: Date?
@@ -29,6 +32,7 @@ struct Space: Codable, Identifiable, Hashable {
         case modelUsdcUrl = "model_usdc_url"
         case previewUrl = "preview_url"
         case scanUrl = "scan_url"
+        case mlModelUrl = "ml_model_url"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }

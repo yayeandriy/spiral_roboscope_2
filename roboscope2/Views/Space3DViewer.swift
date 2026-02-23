@@ -1478,6 +1478,7 @@ struct CameraControlButtons: View {
         modelUsdcUrl: "https://example.com/model.usdz",
         previewUrl: nil,
         scanUrl: "https://example.com/scan.usdc",
+        mlModelUrl: nil,
         meta: nil,
         createdAt: Date(),
         updatedAt: Date()
