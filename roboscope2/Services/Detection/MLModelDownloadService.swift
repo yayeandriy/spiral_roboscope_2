@@ -64,10 +64,10 @@ final class MLModelDownloadService: ObservableObject {
 
     private init() {
         // Restore state from persisted settings on cold launch.
+        // Use laserGuideMLModelURL (not the raw path) so stale container UUIDs are recovered.
         let settings = AppSettings.shared
         if let sourceURL = settings.laserGuideMLModelSourceURL,
-           let localPath = settings.laserGuideMLModelLocalPath,
-           FileManager.default.fileExists(atPath: localPath) {
+           settings.laserGuideMLModelURL != nil {
             downloadState = .ready(
                 displayName: settings.laserGuideMLModelDisplayName ?? "Remote Model",
                 sourceURL: sourceURL
@@ -87,8 +87,7 @@ final class MLModelDownloadService: ObservableObject {
 
         // Already have this exact version installed.
         if settings.laserGuideMLModelSourceURL == urlString,
-           let localPath = settings.laserGuideMLModelLocalPath,
-           FileManager.default.fileExists(atPath: localPath) {
+           settings.laserGuideMLModelURL != nil {
             downloadState = .ready(
                 displayName: settings.laserGuideMLModelDisplayName ?? "Remote Model",
                 sourceURL: urlString
@@ -260,6 +259,8 @@ final class MLModelDownloadService: ObservableObject {
             options: [.skipsHiddenFiles]
         ) else { return nil }
         for case let url as URL in enumerator {
+            // Skip macOS resource-fork metadata directories (__MACOSX)
+            guard !url.pathComponents.contains("__MACOSX") else { continue }
             if url.pathExtension.lowercased() == ext.lowercased() { return url }
         }
         return nil

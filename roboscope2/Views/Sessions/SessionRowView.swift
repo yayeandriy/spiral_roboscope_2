@@ -18,6 +18,7 @@ struct SessionRowView: View {
     
     @StateObject private var spaceService = SpaceService.shared
     @StateObject private var markerService = MarkerService.shared
+    @ObservedObject private var mlDownloadService = MLModelDownloadService.shared
     @State private var sessionMarkersCount: Int? = nil
     @Environment(\.colorScheme) private var colorScheme
     
@@ -62,6 +63,11 @@ struct SessionRowView: View {
                 Spacer()
                 markersBadge
             }
+
+            // ML model row (only for LaserGuide sessions whose space has a model URL)
+            if session.isLaserGuide, let space = associatedSpace, space.mlModelUrl != nil {
+                mlModelRow(space: space)
+            }
         }
         .padding()
         .background(
@@ -91,7 +97,53 @@ struct SessionRowView: View {
     }
     
     // MARK: - Actions
-    
+
+    @ViewBuilder
+    private func mlModelRow(space: Space) -> some View {
+        let installedURL = AppSettings.shared.laserGuideMLModelSourceURL
+        let modelURL = space.mlModelUrl!
+        let isInstalled = installedURL == modelURL && AppSettings.shared.laserGuideMLModelURL != nil
+        let isDownloading = mlDownloadService.downloadState.isInProgress
+
+        HStack(spacing: 8) {
+            Image(systemName: isInstalled ? "cpu.fill" : "cpu")
+                .font(.caption)
+                .foregroundColor(isInstalled ? .green : .secondary)
+
+            Text(isInstalled
+                 ? (AppSettings.shared.laserGuideMLModelDisplayName ?? "ML Model")
+                 : "ML Model available")
+                .font(.caption)
+                .foregroundColor(isInstalled ? .primary : .secondary)
+
+            Spacer()
+
+            if isDownloading {
+                ProgressView()
+                    .scaleEffect(0.7)
+            } else {
+                Button {
+                    mlDownloadService.downloadAndInstall(
+                        from: modelURL,
+                        displayName: "\(space.name) Model"
+                    )
+                } label: {
+                    Text(isInstalled ? "Update" : "Download")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(isInstalled ? Color.orange : Color.accentColor))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 4)
+        // Prevent tap bubbling to the card's onTapGesture (which would start AR)
+        .onTapGesture {}
+    }
+
     private func fetchMarkerCount() async {
         let count = await markerService.getMarkerCountForSession(session.id)
         sessionMarkersCount = count
