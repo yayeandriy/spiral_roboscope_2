@@ -11,7 +11,12 @@ Todo:
   ☐ Overlapp segments
   ☐ IP
 
+---------------------------------------------------------------------------------------
 
+2.0.9:
+  ☐ Model API
+  ☐ Video mode
+  ☐ Frame merge
 
 Distance match tolerance: laserGuideDistanceToleranceMeters (currently 0.03)
 Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)
