@@ -43,6 +43,10 @@ struct VideoDetectionView: View {
     @State private var showHistoryPanel = false
     @State var detectionHistory: [DetectionFrameRecord] = []
 
+    // Accumulator: ring buffer of last N frames of raw detections, merged for measurement.
+    @State var frameAccumulator: [[LaserMLDetection]] = []
+    @State var accumulatedDetections: [LaserMLDetection] = []
+
     init(session: WorkSession) {
         self.session = session
         let det = LaserMLDetectionService()
@@ -98,7 +102,7 @@ struct VideoDetectionView: View {
 
                 // —— ML Detection boxes ——
                 LaserMLDetectionOverlay(
-                    detections: mlDetection.detections,
+                    detections: accumulatedDetections.isEmpty ? mlDetection.detections : accumulatedDetections,
                     viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
                     imageToViewTransform: videoImageToViewTransform,
                     arView: nil,
@@ -143,13 +147,15 @@ struct VideoDetectionView: View {
                         .padding(.top, 56)
 
                         // Done button (top-right)
-                        Button("Done") { dismiss() }
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .lgCapsule(tint: .white)
-                            .padding(.trailing, 16)
-                            .padding(.top, 56)
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .lgCircle(tint: .white)
+                        .padding(.trailing, 16)
+                        .padding(.top, 56)
                     }
 
                     Spacer()
@@ -220,16 +226,46 @@ struct VideoDetectionView: View {
         .ignoresSafeArea(.all)
         .navigationBarBackButtonHidden()
         .onChange(of: mlDetection.detections) { _, newDetections in
+            // --- Accumulator update (always, to age out stale frames) ---
+            let maxFrames = max(1, settings.videoModeAccumulatorFrames)
+            var acc = frameAccumulator
+            acc.append(newDetections)
+            if acc.count > maxFrames { acc.removeFirst(acc.count - maxFrames) }
+            frameAccumulator = acc
+            let merged = Self.mergeDetections(from: acc)
+            accumulatedDetections = merged
+
+            // --- History record (only when this frame has detections) ---
             guard !newDetections.isEmpty else { return }
             let dotDetections  = newDetections.filter { $0.label == "dot"  || $0.classIndex == 0 }
             let lineDetections = newDetections.filter { $0.label == "line" || $0.classIndex == 1 }
             let bestDot  = dotDetections.max(by:  { $0.confidence < $1.confidence })
             let bestLine = lineDetections.max(by: { $0.confidence < $1.confidence })
+            // Capture these so the closures below don't implicitly capture self.
+            let t = videoImageToViewTransform
+            let vp = viewportSize.width > 0 ? viewportSize : CGSize(width: 390, height: 844)
             let lineToDotRatio: Float? = {
                 guard let d = bestDot, let l = bestLine else { return nil }
-                // Longest side of each bbox — more meaningful than diagonal for elongated line boxes.
-                let dotLong  = Float(max(d.boundingBox.width, d.boundingBox.height))
-                let lineLong = Float(max(l.boundingBox.width, l.boundingBox.height))
+                let dotLong  = Self.longestSidePixels(d.boundingBox, transform: t, viewport: vp)
+                let lineLong = Self.longestSidePixels(l.boundingBox, transform: t, viewport: vp)
+                guard dotLong > 0 else { return nil }
+                return lineLong / dotLong
+            }()
+            let mergedDots  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }.count
+            let mergedLines = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }.count
+            let accumulatedRatio: Float? = {
+                // Use the union-merged LINE box (full accumulated extent across frames) as numerator.
+                // For the dot denominator, prefer the current frame's dot (avoids jitter inflation).
+                // Fall back to the merged dot when the current frame has none — the whole point of
+                // accumulation is to bridge frames where one class is temporarily missing.
+                let mLine = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
+                    .max(by: { $0.confidence < $1.confidence })
+                let mDot  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
+                    .max(by: { $0.confidence < $1.confidence })
+                let dot = bestDot ?? mDot
+                guard let d = dot, let l = mLine else { return nil }
+                let dotLong  = Self.longestSidePixels(d.boundingBox, transform: t, viewport: vp)
+                let lineLong = Self.longestSidePixels(l.boundingBox, transform: t, viewport: vp)
                 guard dotLong > 0 else { return nil }
                 return lineLong / dotLong
             }()
@@ -239,7 +275,11 @@ struct VideoDetectionView: View {
                 lines: lineDetections.count,
                 otherCount: newDetections.filter { ($0.classIndex ?? -1) > 1 }.count,
                 distanceMeters: latestMeasurement?.distanceMeters,
-                lineToDotSizeRatio: lineToDotRatio
+                lineToDotSizeRatio: lineToDotRatio,
+                accumulatedDots: mergedDots,
+                accumulatedLines: mergedLines,
+                accumulatorFramesUsed: acc.filter { !$0.isEmpty }.count,
+                accumulatedLineToDotRatio: accumulatedRatio
             )
             detectionHistory.append(record)
             if detectionHistory.count > 50 { detectionHistory.removeFirst(detectionHistory.count - 50) }
@@ -280,6 +320,106 @@ struct VideoDetectionView: View {
         videoService.stopFramePump()
         videoService.pause()
         pipeline.stop()
+    }
+
+    // MARK: - Detection accumulator / merge
+
+    /// Returns the longest display-pixel side of a bounding box (given in raw buffer-normalised
+    /// coords) after accounting for the image→view orientation transform and viewport size.
+    /// This correctly handles aspect-ratio differences between the raw buffer and the display.
+    ///
+    /// For an axis-aligned bbox (w, h) and a transform with components (a,b,c,d):
+    ///   view_x_extent_normalised = |a|·w + |c|·h
+    ///   view_y_extent_normalised = |b|·w + |d|·h
+    /// Multiply by viewport pixel dimensions to get physical pixel sizes.
+    static func longestSidePixels(
+        _ bbox: CGRect,
+        transform t: CGAffineTransform,
+        viewport: CGSize
+    ) -> Float {
+        let vxNorm = abs(t.a) * bbox.width + abs(t.c) * bbox.height
+        let vyNorm = abs(t.b) * bbox.width + abs(t.d) * bbox.height
+        return Float(max(vxNorm * viewport.width, vyNorm * viewport.height))
+    }
+
+    /// Merges detections from multiple frames into a unified set.
+    /// Boxes of the same class that overlap (CGRect.intersects) are union-merged into one box,
+    /// taking the highest-confidence detection's metadata.
+    static func mergeDetections(from frames: [[LaserMLDetection]]) -> [LaserMLDetection] {
+        let all = frames.flatMap { $0 }
+        guard !all.isEmpty else { return [] }
+        let dots   = unionMerge(all.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") })
+        let lines  = unionMerge(all.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") })
+        let others = unionMerge(all.filter {
+            guard let idx = $0.classIndex else { return false }
+            return idx > 1
+        })
+        return dots + lines + others
+    }
+
+    private static func unionMerge(_ detections: [LaserMLDetection]) -> [LaserMLDetection] {
+        guard !detections.isEmpty else { return [] }
+
+        // Phase 1 — greedy seed clustering on direct bbox intersection.
+        var clusters: [[LaserMLDetection]] = []
+        for det in detections {
+            if let (idx, _) = clusters.enumerated().first(where: { (_, cluster) in
+                cluster.contains(where: { $0.boundingBox.intersects(det.boundingBox) })
+            }) {
+                clusters[idx].append(det)
+            } else {
+                clusters.append([det])
+            }
+        }
+
+        // Phase 2 — transitive closure: merge clusters whose union boxes are within
+        // 10 % of the longer box’s longest side of each other (handles gapped segments).
+        var changed = true
+        while changed {
+            changed = false
+            var merged: [[LaserMLDetection]] = []
+            var used = [Bool](repeating: false, count: clusters.count)
+            for i in clusters.indices {
+                guard !used[i] else { continue }
+                var group = clusters[i]
+                var box = group.reduce(group[0].boundingBox) { $0.union($1.boundingBox) }
+                for j in (i + 1)..<clusters.count {
+                    guard !used[j] else { continue }
+                    let other = clusters[j].reduce(clusters[j][0].boundingBox) {
+                        $0.union($1.boundingBox)
+                    }
+                    // Gap tolerance = 10 % of the longer box’s longest side.
+                    let longestSide = max(
+                        max(box.width, box.height),
+                        max(other.width, other.height)
+                    )
+                    let tol = longestSide * 0.10
+                    let expanded = box.insetBy(dx: -tol, dy: -tol)
+                    if expanded.intersects(other) {
+                        group += clusters[j]
+                        box = box.union(other)
+                        used[j] = true
+                        changed = true
+                    }
+                }
+                merged.append(group)
+                used[i] = true
+            }
+            clusters = merged
+        }
+
+        return clusters.compactMap { cluster -> LaserMLDetection? in
+            guard let best = cluster.max(by: { $0.confidence < $1.confidence }) else { return nil }
+            let unionBox = cluster.dropFirst().reduce(cluster[0].boundingBox) { $0.union($1.boundingBox) }
+            return LaserMLDetection(
+                boundingBox: unionBox,
+                orientedQuad: nil,
+                classIndex: best.classIndex,
+                label: best.label,
+                confidence: best.confidence,
+                timestamp: best.timestamp
+            )
+        }
     }
 
     @MainActor

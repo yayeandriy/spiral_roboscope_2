@@ -50,6 +50,8 @@ struct LaserGuideARSessionView: View {
     @State var debugDotAnchor: AnchorEntity? = nil
     @State var debugLineAnchor: AnchorEntity? = nil
     @State var showDetectionSettings = false
+    @State var showHistoryPanel = false
+    @State var detectionHistory: [DetectionFrameRecord] = []
 
     static func cgImageOrientation(for interfaceOrientation: UIInterfaceOrientation) -> CGImagePropertyOrientation {
         // Back camera (not mirrored). This mapping keeps Vision's orientation consistent with

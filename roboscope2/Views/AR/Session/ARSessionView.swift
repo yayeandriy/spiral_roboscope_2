@@ -323,11 +323,13 @@ struct ARSessionView: View {
                     
                     Spacer(minLength: 8)
                     
-                    Button("Done") { dismiss() }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .lgCapsule(tint: .white)
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .lgCircle(tint: .white)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 56)

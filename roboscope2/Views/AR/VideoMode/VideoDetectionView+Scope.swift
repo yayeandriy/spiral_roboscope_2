@@ -78,6 +78,8 @@ extension VideoDetectionView {
         hasFoundOrigin = false
         foundSegment = nil
         latestMeasurement = nil
+        frameAccumulator = []
+        accumulatedDetections = []
         resetScope()
         pipeline.start()
     }

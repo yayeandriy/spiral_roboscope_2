@@ -21,6 +21,14 @@ struct DetectionFrameRecord: Identifiable {
     let distanceMeters: Float?
     /// Diagonal of best-line bbox / diagonal of best-dot bbox. Nil when either class is absent.
     let lineToDotSizeRatio: Float?
+    /// Merged dot count after union across all accumulator frames.
+    let accumulatedDots: Int
+    /// Merged line count after union across all accumulator frames.
+    let accumulatedLines: Int
+    /// How many frames were in the accumulator when this record was built.
+    let accumulatorFramesUsed: Int
+    /// Ratio computed from the union-merged (accumulated) best dot/line boxes.
+    let accumulatedLineToDotRatio: Float?
 }
 
 // MARK: - Panel view
@@ -94,9 +102,6 @@ struct VideoDetectionHistoryPanel: View {
 
     @ViewBuilder
     private func rowView(for record: DetectionFrameRecord, index: Int) -> some View {
-        // A ratio < 4 means the line box is barely longer than the dot box — likely a bad pair.
-        let suspectRatio = record.lineToDotSizeRatio.map { $0 < 4 } ?? false
-
         HStack(alignment: .center, spacing: 10) {
             // Frame index circle (no badge here any more — indicator moved to right)
             ZStack {
@@ -146,24 +151,35 @@ struct VideoDetectionHistoryPanel: View {
 
             Spacer(minLength: 4)
 
-            // Ratio — large, white, between info and the suspect dot
-            if let ratio = record.lineToDotSizeRatio {
-                let isSuspect = ratio < 4
-                VStack(spacing: 1) {
-                    Text(String(format: "×%.2f", ratio))
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(isSuspect ? .red : .white)
-                    Text("l/d")
-                        .font(.system(size: 9))
-                        .foregroundColor(isSuspect ? .red.opacity(0.7) : .white.opacity(0.4))
+            // Right column: per-frame ratio, then accumulated ratio
+            HStack(alignment: .center, spacing: 8) {
+                // Per-frame ratio
+                if let ratio = record.lineToDotSizeRatio {
+                    let isSuspect = ratio < 4
+                    VStack(spacing: 1) {
+                        Text(String(format: "\u{00d7}%.2f", ratio))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(isSuspect ? .red : .white)
+                        Text("1f")
+                            .font(.system(size: 9))
+                            .foregroundColor(isSuspect ? .red.opacity(0.7) : .white.opacity(0.4))
+                    }
+                    .frame(minWidth: 44)
                 }
-                .frame(minWidth: 44)
-            }
 
-            // Suspect indicator dot — right edge, vertically centered
-            Circle()
-                .fill(suspectRatio ? Color.red : Color.clear)
-                .frame(width: 8, height: 8)
+                // Accumulated ratio (from merged detections across N frames)
+                if let ratio = record.accumulatedLineToDotRatio, record.accumulatorFramesUsed > 1 {
+                    VStack(spacing: 1) {
+                        Text(String(format: "\u{00d7}%.2f", ratio))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                        Text("\(record.accumulatorFramesUsed)f")
+                            .font(.system(size: 9))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                    .frame(minWidth: 44)
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)

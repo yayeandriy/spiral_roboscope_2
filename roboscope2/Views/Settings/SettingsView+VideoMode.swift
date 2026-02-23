@@ -66,6 +66,24 @@ extension SettingsView {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
+
+        // Accumulator frame count
+        Stepper(
+            value: $settings.videoModeAccumulatorFrames,
+            in: 1...10
+        ) {
+            HStack {
+                Text("Accumulation Frames")
+                    .font(.subheadline)
+                Spacer()
+                Text("\(settings.videoModeAccumulatorFrames)")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundColor(.secondary)
+            }
+        }
+        Text("Detections from the last N frames are merged before measurement, recovering laser lines drawn across multiple frames.")
+            .font(.caption)
+            .foregroundColor(.secondary)
     }
 }
 

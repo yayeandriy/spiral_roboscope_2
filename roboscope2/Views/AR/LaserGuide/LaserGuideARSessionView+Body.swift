@@ -279,11 +279,26 @@ extension LaserGuideARSessionView {
 
                         Spacer(minLength: 8)
 
-                        Button("Done") { dismiss() }
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .lgCapsule(tint: .white)
+                        // History toggle button
+                        Button {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                showHistoryPanel.toggle()
+                            }
+                        } label: {
+                            Image(systemName: showHistoryPanel ? "clock.fill" : "clock")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .lgCircle(tint: showHistoryPanel ? .green : .white)
+
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .lgCircle(tint: .white)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 56)
@@ -480,6 +495,25 @@ extension LaserGuideARSessionView {
                 .onChange(of: geometry.size) { _, newValue in
                     viewportSize = newValue
                 }
+
+                // History panel overlay
+                if showHistoryPanel {
+                    VStack {
+                        Spacer().frame(height: 120)
+                        VideoDetectionHistoryPanel(
+                            records: detectionHistory,
+                            onClose: {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    showHistoryPanel = false
+                                }
+                            }
+                        )
+                        .padding(.horizontal, 16)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        Spacer()
+                    }
+                    .zIndex(5)
+                }
             }
         }
         .ignoresSafeArea(.all)
@@ -514,5 +548,43 @@ extension LaserGuideARSessionView {
             )
         }
         .navigationBarBackButtonHidden()
+        .onChange(of: mlDetection.detections) { _, newDetections in
+            guard !newDetections.isEmpty else { return }
+            let dotDetections  = newDetections.filter { $0.label == "dot"  || $0.classIndex == 0 }
+            let lineDetections = newDetections.filter { $0.label == "line" || $0.classIndex == 1 }
+            let bestDot  = dotDetections.max(by: { $0.confidence < $1.confidence })
+            let bestLine = lineDetections.max(by: { $0.confidence < $1.confidence })
+            let t = imageToViewTransform
+            let vp = viewportSize.width > 0 ? viewportSize : CGSize(width: 390, height: 844)
+            let lineToDotRatio: Float? = {
+                guard let d = bestDot, let l = bestLine else { return nil }
+                let lineLong: Float = {
+                    let vx = abs(t.a) * l.boundingBox.width + abs(t.c) * l.boundingBox.height
+                    let vy = abs(t.b) * l.boundingBox.width + abs(t.d) * l.boundingBox.height
+                    return Float(max(vx * vp.width, vy * vp.height))
+                }()
+                let dotLong: Float = {
+                    let vx = abs(t.a) * d.boundingBox.width + abs(t.c) * d.boundingBox.height
+                    let vy = abs(t.b) * d.boundingBox.width + abs(t.d) * d.boundingBox.height
+                    return Float(max(vx * vp.width, vy * vp.height))
+                }()
+                guard dotLong > 0 else { return nil }
+                return lineLong / dotLong
+            }()
+            let record = DetectionFrameRecord(
+                timestamp: Date(),
+                dots: dotDetections.count,
+                lines: lineDetections.count,
+                otherCount: newDetections.filter { ($0.classIndex ?? -1) > 1 }.count,
+                distanceMeters: latestLaserMeasurement?.distanceMeters,
+                lineToDotSizeRatio: lineToDotRatio,
+                accumulatedDots: 0,
+                accumulatedLines: 0,
+                accumulatorFramesUsed: 1,
+                accumulatedLineToDotRatio: nil
+            )
+            detectionHistory.append(record)
+            if detectionHistory.count > 50 { detectionHistory.removeFirst(detectionHistory.count - 50) }
+        }
     }
 }

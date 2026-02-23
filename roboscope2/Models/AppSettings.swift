@@ -33,6 +33,7 @@ class AppSettings: ObservableObject {
         static let laserGuideMLModelSourceURL = "laserGuideMLModelSourceURL"
         static let videoModeEnabled = "videoModeEnabled"
         static let videoModeDistanceScale = "videoModeDistanceScale"
+        static let videoModeAccumulatorFrames = "videoModeAccumulatorFrames"
     }
     
     // MARK: - Scan Registration Settings
@@ -197,6 +198,12 @@ class AppSettings: ObservableObject {
         didSet { defaults.set(videoModeDistanceScale, forKey: Keys.videoModeDistanceScale) }
     }
 
+    /// Number of recent frames whose detections are merged before measurement.
+    /// Higher values recover more of a partially-drawn laser line at the cost of temporal blending.
+    @Published var videoModeAccumulatorFrames: Int {
+        didSet { defaults.set(videoModeAccumulatorFrames, forKey: Keys.videoModeAccumulatorFrames) }
+    }
+
     // MARK: - Initialization
     
     private init() {
@@ -233,6 +240,8 @@ class AppSettings: ObservableObject {
         self.videoModeEnabled = defaults.object(forKey: Keys.videoModeEnabled) as? Bool ?? false
         let vmScale = defaults.float(forKey: Keys.videoModeDistanceScale)
         self.videoModeDistanceScale = vmScale > 0 ? vmScale : 5.0
+        let vmFrames = defaults.integer(forKey: Keys.videoModeAccumulatorFrames)
+        self.videoModeAccumulatorFrames = vmFrames > 0 ? vmFrames : 3
     }
     
     // MARK: - Preset Management
