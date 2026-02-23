@@ -76,9 +76,12 @@ struct VideoDetectionView: View {
                 // —— Video layer ——
                 if videoService.player != nil {
                     VideoPlayerView(player: videoService.player)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea()
                 } else {
-                    Color.black.ignoresSafeArea()
+                    Color.black
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .ignoresSafeArea()
                     VStack(spacing: 16) {
                         Image(systemName: "video.slash")
                             .font(.system(size: 48))
