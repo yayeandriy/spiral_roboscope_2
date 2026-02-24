@@ -21,6 +21,7 @@ struct SessionsView: View {
     @State private var dashboardSession: WorkSession?
     @State private var isLaunchingAR: Bool = false
     @State private var refreshTrigger: Bool = false  // Force row refresh
+    @State private var isQuickCreating: Bool = false
 
     @ViewBuilder
     private func laserGuideDestination(for session: WorkSession) -> some View {
@@ -50,7 +51,7 @@ struct SessionsView: View {
                             )
                             .foregroundColor(.primary)
 
-                        Button(action: { showingCreateSheet = true }) {
+                        Button(action: { handleCreateTapped() }) {
                             Image(systemName: "plus")
                         }
                     }
@@ -188,12 +189,12 @@ struct SessionsView: View {
             }
         }
         .overlay {
-            if isLaunchingAR {
+            if isLaunchingAR || isQuickCreating {
                 ZStack {
                     Color.black.opacity(0.12).ignoresSafeArea()
                     HStack(spacing: 10) {
                         ProgressView()
-                        Text("Opening session...")
+                        Text(isQuickCreating ? "Creating session…" : "Opening session...")
                             .font(.subheadline)
                             .foregroundColor(.primary)
                     }
@@ -221,7 +222,7 @@ struct SessionsView: View {
                 .multilineTextAlignment(.center)
             
             Button {
-                showingCreateSheet = true
+                handleCreateTapped()
             } label: {
                 Label("Create Session", systemImage: "plus")
                     .font(.headline)
@@ -278,6 +279,40 @@ struct SessionsView: View {
         }
     }
     
+    // MARK: - Create helpers
+
+    private func handleCreateTapped() {
+        if spaceService.spaces.count == 1, let space = spaceService.spaces.first {
+            Task { await quickCreateAndOpen(space: space) }
+        } else {
+            showingCreateSheet = true
+        }
+    }
+
+    private func quickCreateAndOpen(space: Space) async {
+        isQuickCreating = true
+        defer { isQuickCreating = false }
+        do {
+            let request = CreateWorkSession(
+                spaceId: space.id,
+                sessionType: .inspection,
+                status: .active,
+                startedAt: Date(),
+                completedAt: nil,
+                meta: nil
+            )
+            let created = try await workSessionService.createWorkSession(request)
+            SessionSettingsStore.shared.setLaserGuide(sessionId: created.id, enabled: true)
+            await refreshData()
+            await MainActor.run {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                dashboardSession = created
+            }
+        } catch {
+            // No-op: session list will not change, user can retry manually
+        }
+    }
+
     private func deleteSession(_ session: WorkSession) async {
         do {
             try await workSessionService.deleteWorkSession(id: session.id)

@@ -20,19 +20,12 @@ struct MainTabView: View {
                 }
                 .tag(0)
 
-            // Spaces Tab (second)
-            SpacesView()
-                .tabItem {
-                    Label("Spaces", systemImage: "cube")
-                }
-                .tag(1)
-
             // Settings Tab
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
-                .tag(2)
+                .tag(1)
         }
     }
 }
