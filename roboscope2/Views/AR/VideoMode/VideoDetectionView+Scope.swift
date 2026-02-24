@@ -39,6 +39,7 @@ extension VideoDetectionView {
         latestMeasurement = nil
         frameAccumulator = []
         accumulatedDetections = []
+        emptyDetectionFrames = 0
         resetScope()
         pipeline.start()
     }

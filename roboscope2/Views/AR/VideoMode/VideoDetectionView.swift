@@ -29,9 +29,6 @@ struct VideoDetectionView: View {
     @State var hasFoundOrigin = false
     @State var foundSegment: LaserGuideGridSegment? = nil
     @State var latestMeasurement: LaserDotLineMeasurement? = nil
-    @State var autoScopeCandidateKey: String? = nil
-    @State var autoScopeSamples: [(t: TimeInterval, d: Float)] = []
-    @State var autoScopeLastSeenTime: TimeInterval = 0
 
     // Laser guide (same data as AR mode)
     @State var laserGuide: LaserGuide? = nil
@@ -47,6 +44,8 @@ struct VideoDetectionView: View {
     // Accumulator: ring buffer of last N frames of raw detections, merged for measurement.
     @State var frameAccumulator: [[LaserMLDetection]] = []
     @State var accumulatedDetections: [LaserMLDetection] = []
+    /// Consecutive frames without a paired dot+line.
+    @State var emptyDetectionFrames: Int = 0
 
     // ML model loading state
     @State private var modelLoadError: String? = nil
@@ -106,22 +105,24 @@ struct VideoDetectionView: View {
                 }
 
                 // —— ML Detection boxes ——
-                LaserMLDetectionOverlay(
-                    detections: filterLineOverDot(settings.showAccumulatedOverlay ? accumulatedDetections : mlDetection.detections),
-                    viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
-                    imageToViewTransform: videoImageToViewTransform,
-                    arView: nil,
-                    maxDotLineYDeltaMeters: mlDetection.maxDotLineYDeltaMeters,
-                    onDotLineMeasurement: { measurement in
-                        latestMeasurement = measurement
-                        maybeScope(measurement)
-                    },
-                    videoModeDistanceScale: settings.videoModeDistanceScale,
-                    boxColor: settings.showAccumulatedOverlay ? .blue : .green
-                )
-                .zIndex(2)
-                .onAppear { viewportSize = geometry.size }
-                .onChange(of: geometry.size) { _, v in viewportSize = v }
+                if !hasFoundOrigin && emptyDetectionFrames <= 2 * max(1, settings.videoModeAccumulatorFrames) {
+                    LaserMLDetectionOverlay(
+                        detections: filterLineOverDot(settings.showAccumulatedOverlay ? accumulatedDetections : mlDetection.detections),
+                        viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
+                        imageToViewTransform: videoImageToViewTransform,
+                        arView: nil,
+                        maxDotLineYDeltaMeters: mlDetection.maxDotLineYDeltaMeters,
+                        onDotLineMeasurement: { measurement in
+                            latestMeasurement = measurement
+                            maybeScope(measurement)
+                        },
+                        videoModeDistanceScale: settings.videoModeDistanceScale,
+                        boxColor: settings.showAccumulatedOverlay ? .blue : .green
+                    )
+                    .zIndex(2)
+                    .onAppear { viewportSize = geometry.size }
+                    .onChange(of: geometry.size) { _, v in viewportSize = v }
+                }
 
                 // —— Top bar ——
                 VStack {
@@ -269,7 +270,19 @@ struct VideoDetectionView: View {
             if acc.count > maxFrames { acc.removeFirst(acc.count - maxFrames) }
             frameAccumulator = acc
             let merged = laserDetectionMergeFrames(acc)
-            accumulatedDetections = merged
+            let mergedHasDot  = merged.contains { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
+            let mergedHasLine = merged.contains { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
+            if mergedHasDot && mergedHasLine {
+                emptyDetectionFrames = 0
+                accumulatedDetections = merged
+            } else {
+                emptyDetectionFrames += 1
+                if emptyDetectionFrames > 2 * maxFrames {
+                    accumulatedDetections = []
+                } else {
+                    accumulatedDetections = merged
+                }
+            }
 
             // --- History record (only when this frame has detections) ---
             guard !newDetections.isEmpty else { return }

@@ -466,7 +466,7 @@ extension LaserGuideARSessionView {
                     .zIndex(3)
                 }
 
-                Group {
+                if !hasAutoScoped && emptyDetectionFrames <= 2 * max(1, settings.videoModeAccumulatorFrames) {
                     LaserMLDetectionOverlay(
                         detections: filterLineOverDot(settings.showAccumulatedOverlay ? accumulatedDetections : mlDetection.detections),
                         viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
@@ -475,21 +475,13 @@ extension LaserGuideARSessionView {
                         maxDotLineYDeltaMeters: mlDetection.maxDotLineYDeltaMeters,
                         onDotLineMeasurement: { measurement in
                             latestLaserMeasurement = measurement
-
-                            // Auto-scope (debounced): require a stable match for ~1s to reduce accidental jumps.
                             maybeAutoScope(measurement)
                         },
                         boxColor: settings.showAccumulatedOverlay ? .blue : .green
                     )
-                }
-                .zIndex(2)
-                .onAppear {
-                    // Must match the actual rendered AR view size; using UIScreen bounds can drift
-                    // when presented inside a NavigationStack or with system overlays.
-                    viewportSize = geometry.size
-                }
-                .onChange(of: geometry.size) { _, newValue in
-                    viewportSize = newValue
+                    .onAppear { viewportSize = geometry.size }
+                    .onChange(of: geometry.size) { _, newValue in viewportSize = newValue }
+                    .zIndex(2)
                 }
 
                 // History panel overlay
@@ -582,7 +574,20 @@ extension LaserGuideARSessionView {
             if acc.count > maxFrames { acc.removeFirst(acc.count - maxFrames) }
             frameAccumulator = acc
             let merged = laserDetectionMergeFrames(acc)
-            accumulatedDetections = merged
+            // Track consecutive frames without a paired dot+line; clear stale boxes when exceeded.
+            let mergedHasDot  = merged.contains { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
+            let mergedHasLine = merged.contains { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
+            if mergedHasDot && mergedHasLine {
+                emptyDetectionFrames = 0
+                accumulatedDetections = merged
+            } else {
+                emptyDetectionFrames += 1
+                if emptyDetectionFrames > 2 * maxFrames {
+                    accumulatedDetections = []
+                } else {
+                    accumulatedDetections = merged
+                }
+            }
 
             // --- History record (only when this frame has detections) ---
             guard !newDetections.isEmpty else { return }

@@ -131,6 +131,10 @@ extension LaserGuideARSessionView {
         autoScopedSegment = nil
 
         // In detection mode we hide the origin gizmo + any debug detection spheres.
+        frameAccumulator = []
+        accumulatedDetections = []
+        emptyDetectionFrames = 0
+
         frameOriginAnchor?.isEnabled = false
         debugDotAnchor?.isEnabled = false
         debugLineAnchor?.isEnabled = false

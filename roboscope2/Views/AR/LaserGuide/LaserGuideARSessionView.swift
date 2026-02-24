@@ -52,6 +52,8 @@ struct LaserGuideARSessionView: View {
     // Accumulator: ring buffer of last N frames, merged for overlay + measurement.
     @State var frameAccumulator: [[LaserMLDetection]] = []
     @State var accumulatedDetections: [LaserMLDetection] = []
+    /// Consecutive frames (post-filter) that lacked both a dot AND a line.
+    @State var emptyDetectionFrames: Int = 0
     // ML model loading state for the current session's Space.
     @State var mlModelLoadError: String? = nil
     @State var isLoadingMLModel: Bool = false
