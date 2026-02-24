@@ -40,6 +40,16 @@ struct SessionsView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
+                        Text("\(allSessions.count)")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.primary.opacity(0.12))
+                            )
+                            .foregroundColor(.primary)
                         Text("Work Sessions")
                             .font(.headline)
                         if settings.videoModeEnabled {
@@ -51,22 +61,8 @@ struct SessionsView: View {
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 12) {
-                        // Sessions count pill
-                        Text("\(allSessions.count)")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.primary.opacity(0.12))
-                            )
-                            .foregroundColor(.primary)
-
-                        Button(action: { handleCreateTapped() }) {
-                            Image(systemName: "plus")
-                        }
+                    Button(action: { handleCreateTapped() }) {
+                        Image(systemName: "plus")
                     }
                 }
                 
