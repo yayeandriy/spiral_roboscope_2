@@ -52,6 +52,9 @@ struct LaserGuideARSessionView: View {
     @State var showDetectionSettings = false
     @State var showHistoryPanel = false
     @State var detectionHistory: [DetectionFrameRecord] = []
+    // Accumulator: ring buffer of last N frames, merged for overlay + measurement.
+    @State var frameAccumulator: [[LaserMLDetection]] = []
+    @State var accumulatedDetections: [LaserMLDetection] = []
 
     static func cgImageOrientation(for interfaceOrientation: UIInterfaceOrientation) -> CGImagePropertyOrientation {
         // Back camera (not mirrored). This mapping keeps Vision's orientation consistent with

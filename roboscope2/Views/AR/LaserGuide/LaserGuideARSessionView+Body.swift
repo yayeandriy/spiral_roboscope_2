@@ -312,7 +312,8 @@ extension LaserGuideARSessionView {
                         DetectionSettingsPanel(
                             mlDetection: mlDetection,
                             settings: settings,
-                            isExpanded: $showDetectionSettings
+                            isExpanded: $showDetectionSettings,
+                            isVideoMode: true
                         )
 
                         Spacer()
@@ -473,7 +474,7 @@ extension LaserGuideARSessionView {
 
                 Group {
                     LaserMLDetectionOverlay(
-                        detections: mlDetection.detections,
+                        detections: filterLineOverDot(settings.showAccumulatedOverlay ? accumulatedDetections : mlDetection.detections),
                         viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
                         imageToViewTransform: imageToViewTransform,
                         arView: arView,
@@ -548,7 +549,20 @@ extension LaserGuideARSessionView {
             )
         }
         .navigationBarBackButtonHidden()
-        .onChange(of: mlDetection.detections) { _, newDetections in
+        .onChange(of: mlDetection.detections) { _, rawDetections in
+            // Apply "line over dot" filter before any calculations.
+            let newDetections = filterLineOverDot(rawDetections)
+
+            // --- Accumulator update ---
+            let maxFrames = max(1, settings.videoModeAccumulatorFrames)
+            var acc = frameAccumulator
+            acc.append(newDetections)
+            if acc.count > maxFrames { acc.removeFirst(acc.count - maxFrames) }
+            frameAccumulator = acc
+            let merged = laserDetectionMergeFrames(acc)
+            accumulatedDetections = merged
+
+            // --- History record (only when this frame has detections) ---
             guard !newDetections.isEmpty else { return }
             let dotDetections  = newDetections.filter { $0.label == "dot"  || $0.classIndex == 0 }
             let lineDetections = newDetections.filter { $0.label == "line" || $0.classIndex == 1 }
@@ -558,16 +572,22 @@ extension LaserGuideARSessionView {
             let vp = viewportSize.width > 0 ? viewportSize : CGSize(width: 390, height: 844)
             let lineToDotRatio: Float? = {
                 guard let d = bestDot, let l = bestLine else { return nil }
-                let lineLong: Float = {
-                    let vx = abs(t.a) * l.boundingBox.width + abs(t.c) * l.boundingBox.height
-                    let vy = abs(t.b) * l.boundingBox.width + abs(t.d) * l.boundingBox.height
-                    return Float(max(vx * vp.width, vy * vp.height))
-                }()
-                let dotLong: Float = {
-                    let vx = abs(t.a) * d.boundingBox.width + abs(t.c) * d.boundingBox.height
-                    let vy = abs(t.b) * d.boundingBox.width + abs(t.d) * d.boundingBox.height
-                    return Float(max(vx * vp.width, vy * vp.height))
-                }()
+                let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
+                let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
+                guard dotLong > 0 else { return nil }
+                return lineLong / dotLong
+            }()
+            let mergedDots  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }.count
+            let mergedLines = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }.count
+            let accumulatedRatio: Float? = {
+                let mLine = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
+                    .max(by: { $0.confidence < $1.confidence })
+                let mDot  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
+                    .max(by: { $0.confidence < $1.confidence })
+                let dot = bestDot ?? mDot
+                guard let d = dot, let l = mLine else { return nil }
+                let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
+                let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
                 guard dotLong > 0 else { return nil }
                 return lineLong / dotLong
             }()
@@ -578,13 +598,27 @@ extension LaserGuideARSessionView {
                 otherCount: newDetections.filter { ($0.classIndex ?? -1) > 1 }.count,
                 distanceMeters: latestLaserMeasurement?.distanceMeters,
                 lineToDotSizeRatio: lineToDotRatio,
-                accumulatedDots: 0,
-                accumulatedLines: 0,
-                accumulatorFramesUsed: 1,
-                accumulatedLineToDotRatio: nil
+                accumulatedDots: mergedDots,
+                accumulatedLines: mergedLines,
+                accumulatorFramesUsed: acc.filter { !$0.isEmpty }.count,
+                accumulatedLineToDotRatio: accumulatedRatio
             )
             detectionHistory.append(record)
             if detectionHistory.count > 50 { detectionHistory.removeFirst(detectionHistory.count - 50) }
+        }
+    }
+
+    // MARK: - Detection helpers
+
+    /// Removes line detections that overlap any dot detection when `lineOverDotFilter` is enabled.
+    func filterLineOverDot(_ detections: [LaserMLDetection]) -> [LaserMLDetection] {
+        guard settings.lineOverDotFilter else { return detections }
+        let dots = detections.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
+        guard !dots.isEmpty else { return detections }
+        return detections.filter { det in
+            let isLine = det.classIndex == 1 || det.label.lowercased().contains("line")
+            guard isLine else { return true }
+            return !dots.contains { dot in det.boundingBox.intersects(dot.boundingBox) }
         }
     }
 }

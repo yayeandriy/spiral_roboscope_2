@@ -102,7 +102,7 @@ struct VideoDetectionView: View {
 
                 // —— ML Detection boxes ——
                 LaserMLDetectionOverlay(
-                    detections: accumulatedDetections.isEmpty ? mlDetection.detections : accumulatedDetections,
+                    detections: filterLineOverDot(settings.showAccumulatedOverlay ? accumulatedDetections : mlDetection.detections),
                     viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
                     imageToViewTransform: videoImageToViewTransform,
                     arView: nil,
@@ -124,7 +124,8 @@ struct VideoDetectionView: View {
                         DetectionSettingsPanel(
                             mlDetection: mlDetection,
                             settings: settings,
-                            isExpanded: $showDetectionSettings
+                            isExpanded: $showDetectionSettings,
+                            isVideoMode: true
                         )
                         .padding(.leading, 16)
                         .padding(.top, 56)
@@ -226,13 +227,16 @@ struct VideoDetectionView: View {
         .ignoresSafeArea(.all)
         .navigationBarBackButtonHidden()
         .onChange(of: mlDetection.detections) { _, newDetections in
+            // Apply "line over dot" filter before any calculations.
+            let newDetections = filterLineOverDot(newDetections)
+
             // --- Accumulator update (always, to age out stale frames) ---
             let maxFrames = max(1, settings.videoModeAccumulatorFrames)
             var acc = frameAccumulator
             acc.append(newDetections)
             if acc.count > maxFrames { acc.removeFirst(acc.count - maxFrames) }
             frameAccumulator = acc
-            let merged = Self.mergeDetections(from: acc)
+            let merged = laserDetectionMergeFrames(acc)
             accumulatedDetections = merged
 
             // --- History record (only when this frame has detections) ---
@@ -246,8 +250,8 @@ struct VideoDetectionView: View {
             let vp = viewportSize.width > 0 ? viewportSize : CGSize(width: 390, height: 844)
             let lineToDotRatio: Float? = {
                 guard let d = bestDot, let l = bestLine else { return nil }
-                let dotLong  = Self.longestSidePixels(d.boundingBox, transform: t, viewport: vp)
-                let lineLong = Self.longestSidePixels(l.boundingBox, transform: t, viewport: vp)
+                let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
+                let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
                 guard dotLong > 0 else { return nil }
                 return lineLong / dotLong
             }()
@@ -264,8 +268,8 @@ struct VideoDetectionView: View {
                     .max(by: { $0.confidence < $1.confidence })
                 let dot = bestDot ?? mDot
                 guard let d = dot, let l = mLine else { return nil }
-                let dotLong  = Self.longestSidePixels(d.boundingBox, transform: t, viewport: vp)
-                let lineLong = Self.longestSidePixels(l.boundingBox, transform: t, viewport: vp)
+                let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
+                let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
                 guard dotLong > 0 else { return nil }
                 return lineLong / dotLong
             }()
@@ -322,24 +326,18 @@ struct VideoDetectionView: View {
         pipeline.stop()
     }
 
-    // MARK: - Detection accumulator / merge
+    // MARK: - Detection helpers (accumulator / filter)
 
-    /// Returns the longest display-pixel side of a bounding box (given in raw buffer-normalised
-    /// coords) after accounting for the image→view orientation transform and viewport size.
-    /// This correctly handles aspect-ratio differences between the raw buffer and the display.
-    ///
-    /// For an axis-aligned bbox (w, h) and a transform with components (a,b,c,d):
-    ///   view_x_extent_normalised = |a|·w + |c|·h
-    ///   view_y_extent_normalised = |b|·w + |d|·h
-    /// Multiply by viewport pixel dimensions to get physical pixel sizes.
-    static func longestSidePixels(
-        _ bbox: CGRect,
-        transform t: CGAffineTransform,
-        viewport: CGSize
-    ) -> Float {
-        let vxNorm = abs(t.a) * bbox.width + abs(t.c) * bbox.height
-        let vyNorm = abs(t.b) * bbox.width + abs(t.d) * bbox.height
-        return Float(max(vxNorm * viewport.width, vyNorm * viewport.height))
+    /// Removes line detections that overlap any dot detection when `lineOverDotFilter` is enabled.
+    private func filterLineOverDot(_ detections: [LaserMLDetection]) -> [LaserMLDetection] {
+        guard settings.lineOverDotFilter else { return detections }
+        let dots = detections.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
+        guard !dots.isEmpty else { return detections }
+        return detections.filter { det in
+            let isLine = det.classIndex == 1 || det.label.lowercased().contains("line")
+            guard isLine else { return true }
+            return !dots.contains { dot in det.boundingBox.intersects(dot.boundingBox) }
+        }
     }
 
     /// Merges detections from multiple frames into a unified set.

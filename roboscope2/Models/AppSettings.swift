@@ -34,6 +34,8 @@ class AppSettings: ObservableObject {
         static let videoModeEnabled = "videoModeEnabled"
         static let videoModeDistanceScale = "videoModeDistanceScale"
         static let videoModeAccumulatorFrames = "videoModeAccumulatorFrames"
+        static let showAccumulatedOverlay = "showAccumulatedOverlay"
+        static let lineOverDotFilter = "lineOverDotFilter"
     }
     
     // MARK: - Scan Registration Settings
@@ -204,6 +206,17 @@ class AppSettings: ObservableObject {
         didSet { defaults.set(videoModeAccumulatorFrames, forKey: Keys.videoModeAccumulatorFrames) }
     }
 
+    /// When true the detection overlay shows accumulated (merged) boxes; per-frame boxes are hidden.
+    @Published var showAccumulatedOverlay: Bool {
+        didSet { defaults.set(showAccumulatedOverlay, forKey: Keys.showAccumulatedOverlay) }
+    }
+
+    /// When true, line detections that overlap a dot detection are excluded from
+    /// both the overlay and all calculations (accumulator, measurement).
+    @Published var lineOverDotFilter: Bool {
+        didSet { defaults.set(lineOverDotFilter, forKey: Keys.lineOverDotFilter) }
+    }
+
     // MARK: - Initialization
     
     private init() {
@@ -242,6 +255,8 @@ class AppSettings: ObservableObject {
         self.videoModeDistanceScale = vmScale > 0 ? vmScale : 5.0
         let vmFrames = defaults.integer(forKey: Keys.videoModeAccumulatorFrames)
         self.videoModeAccumulatorFrames = vmFrames > 0 ? vmFrames : 3
+        self.showAccumulatedOverlay = defaults.object(forKey: Keys.showAccumulatedOverlay) as? Bool ?? true
+        self.lineOverDotFilter = defaults.object(forKey: Keys.lineOverDotFilter) as? Bool ?? false
     }
     
     // MARK: - Preset Management

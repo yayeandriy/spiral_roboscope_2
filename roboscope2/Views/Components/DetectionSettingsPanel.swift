@@ -11,6 +11,8 @@ struct DetectionSettingsPanel: View {
     @ObservedObject var mlDetection: LaserMLDetectionService
     @ObservedObject var settings: AppSettings
     @Binding var isExpanded: Bool
+    /// When true, video-mode-only controls are shown (Acc. Overlay, Line over dot).
+    var isVideoMode: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -89,6 +91,24 @@ struct DetectionSettingsPanel: View {
                     }
                     .disabled(!mlDetection.useROI)
                     .opacity(mlDetection.useROI ? 1.0 : 0.5)
+
+                    if isVideoMode {
+                        Toggle(isOn: $settings.showAccumulatedOverlay) {
+                            Text("Acc. Overlay")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                        .toggleStyle(.switch)
+                        .tint(.orange)
+
+                        Toggle(isOn: $settings.lineOverDotFilter) {
+                            Text("Line over dot")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                        .toggleStyle(.switch)
+                        .tint(.orange)
+                    }
 
                     if let err = mlDetection.lastError, !err.isEmpty {
                         Text(err)
