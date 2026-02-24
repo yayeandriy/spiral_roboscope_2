@@ -103,6 +103,16 @@ final class LaserMLDetectionService: ObservableObject {
     /// The currently loaded model path (compiled .mlmodelc) used to build `request`.
     var requestModelPath: String? = nil
 
+    /// The model URL assigned for the current session's Space.
+    /// Must be set by the session host before detection starts.
+    var assignedModelURL: URL? = nil
+
+    /// Assign a new model URL and reload the internal Vision request on the next frame.
+    func setModelURL(_ url: URL) {
+        assignedModelURL = url
+        reloadModel()
+    }
+
     func log(_ message: String) {
         print("[LaserGuideML] \(message)")
     }
@@ -116,7 +126,7 @@ final class LaserMLDetectionService: ObservableObject {
     }
 
     func ensureRequest() -> VNCoreMLRequest? {
-        let overrideURL = AppSettings.shared.laserGuideMLModelURL
+        let overrideURL = assignedModelURL
         let desiredPath = overrideURL?.path
 
         if let request, requestModelPath == desiredPath {
@@ -357,22 +367,10 @@ final class LaserMLDetectionService: ObservableObject {
             return (try MLModel(contentsOf: overrideURL, configuration: config), overrideURL)
         }
 
-        if let direct = Bundle.main.url(forResource: "laser-pens", withExtension: "mlmodelc") {
-            return (try MLModel(contentsOf: direct, configuration: config), direct)
-        }
-
-        let candidates = (Bundle.main.urls(forResourcesWithExtension: "mlmodelc", subdirectory: nil) ?? [])
-        if let match = candidates.first(where: {
-            let name = $0.lastPathComponent.lowercased()
-            return name.contains("laser") && name.contains("pens")
-        }) {
-            return (try MLModel(contentsOf: match, configuration: config), match)
-        }
-
         throw NSError(
             domain: "LaserMLDetectionService",
             code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "No compiled model (.mlmodelc) found in app bundle. Ensure laser-pens.mlpackage is included in the app target."]
+            userInfo: [NSLocalizedDescriptionKey: "No ML model assigned for this Space. The session cannot start without a configured model URL."]
         )
     }
 

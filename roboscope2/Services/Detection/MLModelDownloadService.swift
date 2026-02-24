@@ -2,9 +2,11 @@
 //  MLModelDownloadService.swift
 //  roboscope2
 //
-//  Downloads and activates a CoreML model from a remote ZIP URL (Space.ml_model_url).
-//  Once installed the model path is persisted in AppSettings so LaserMLDetectionService
-//  picks it up automatically on the next `ensureRequest()` call.
+//  Manages per-space CoreML model downloads.
+//  No global "current model" — each Space has its own downloaded model entry
+//  stored in SpaceMLModelStore.  Models are never deleted automatically so
+//  history is preserved; a new download simply overwrites the compiled artefact
+//  for that space.
 //
 
 import Foundation
@@ -15,180 +17,153 @@ import ZIPFoundation
 // MARK: - Download state
 
 enum MLModelDownloadState: Equatable {
-    /// No remote model configured / nothing started yet.
+    /// No download activity for this space.
     case idle
-    /// Actively downloading; `progress` is 0–1 (indeterminate when -1).
+    /// Downloading the model ZIP; `progress` is 0–1 (or -1 when indeterminate).
     case downloading(progress: Double)
-    /// Unzipping + compiling.
+    /// Unzipping and compiling the model.
     case installing
-    /// A remote model is installed and active.
-    case ready(displayName: String, sourceURL: String)
+    /// A model is stored and ready.
+    case ready(modelName: String, downloadedAt: Date)
     /// Terminal error.
     case error(String)
 
     var isInProgress: Bool {
-        switch self {
-        case .downloading, .installing: return true
-        default: return false
-        }
-    }
-
-    var isReady: Bool {
-        if case .ready = self { return true }
-        return false
+        switch self { case .downloading, .installing: return true; default: return false }
     }
 
     var errorMessage: String? {
-        if case .error(let msg) = self { return msg }
-        return nil
+        if case .error(let m) = self { return m }; return nil
     }
 }
 
 // MARK: - Service
 
-/// Singleton responsible for downloading, installing, and lifecycle management of a
-/// remotely-served CoreML model ZIP. Integrates with `AppSettings` so that
-/// `LaserMLDetectionService` picks up the new model path automatically.
+/// Singleton that downloads, installs, and caches CoreML models on a per-space basis.
+/// Call `ensureModelForSpace(_:)` at session start to get a ready-to-use model URL.
 @MainActor
 final class MLModelDownloadService: ObservableObject {
 
     static let shared = MLModelDownloadService()
 
-    // MARK: Published state
+    // MARK: Published
 
-    @Published private(set) var downloadState: MLModelDownloadState = .idle
+    /// Per-space download states keyed by spaceId. Observe to drive loading UI.
+    @Published private(set) var downloadStates: [String: MLModelDownloadState] = [:]
 
     // MARK: Private
 
-    private var currentDownloadTask: Task<Void, Never>?
+    private let store = SpaceMLModelStore.shared
+    /// Active download tasks keyed by spaceId — joining avoids duplicate downloads.
+    private var activeTasks: [String: Task<URL, Error>] = [:]
 
-    private init() {
-        // Restore state from persisted settings on cold launch.
-        // Use laserGuideMLModelURL (not the raw path) so stale container UUIDs are recovered.
-        let settings = AppSettings.shared
-        if let sourceURL = settings.laserGuideMLModelSourceURL,
-           settings.laserGuideMLModelURL != nil {
-            downloadState = .ready(
-                displayName: settings.laserGuideMLModelDisplayName ?? "Remote Model",
-                sourceURL: sourceURL
-            )
-        }
-    }
+    private init() {}
 
     // MARK: - Public API
 
-    /// Called whenever a Space is opened (e.g. SpaceARView.onAppear).
-    /// Downloads and activates the model if `space.mlModelUrl` is non-nil and
-    /// differs from what is already installed.
-    func syncModelForSpace(_ space: Space) {
-        guard let urlString = space.mlModelUrl, !urlString.isEmpty else { return }
+    /// Returns the current download state for a space (idle when unknown).
+    func state(for spaceId: String) -> MLModelDownloadState {
+        downloadStates[spaceId] ?? .idle
+    }
 
-        let settings = AppSettings.shared
-
-        // Already have this exact version installed.
-        if settings.laserGuideMLModelSourceURL == urlString,
-           settings.laserGuideMLModelURL != nil {
-            downloadState = .ready(
-                displayName: settings.laserGuideMLModelDisplayName ?? "Remote Model",
-                sourceURL: urlString
-            )
-            return
+    /// Ensures the correct ML model for `space` is downloaded and compiled.
+    ///
+    /// Behaviour:
+    ///  - Throws if `space.mlModelUrl` is nil/empty.
+    ///  - Returns immediately if a stored model for this space matches the current URL.
+    ///  - Downloads, installs, and persists otherwise.
+    ///  - If a download is already in flight for this space, awaits it instead of re-starting.
+    func ensureModelForSpace(_ space: Space) async throws -> URL {
+        let spaceIdStr = space.id.uuidString
+        guard let urlString = space.mlModelUrl, !urlString.isEmpty else {
+            let msg = "Space \"\(space.name)\" has no ML model configured."
+            downloadStates[spaceIdStr] = .error(msg)
+            throw NSError(domain: "MLModelDownloadService", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: msg])
         }
 
-        let displayName = "\(space.name) Model"
-        startDownload(from: urlString, displayName: displayName)
-    }
-
-    /// Manually trigger a download from an arbitrary URL (e.g. from the Settings UI).
-    func downloadAndInstall(from urlString: String, displayName: String = "Remote Model") {
-        startDownload(from: urlString, displayName: displayName)
-    }
-
-    /// Re-download the model from the currently stored source URL, for forced refresh.
-    func redownload() {
-        guard let urlString = AppSettings.shared.laserGuideMLModelSourceURL else { return }
-        let name = AppSettings.shared.laserGuideMLModelDisplayName ?? "Remote Model"
-        startDownload(from: urlString, displayName: name)
-    }
-
-    /// Discard the downloaded model and revert to the bundled `laser-pens` model.
-    func resetToBundled() {
-        currentDownloadTask?.cancel()
-        currentDownloadTask = nil
-
-        // Remove the compiled model file from disk.
-        let settings = AppSettings.shared
-        if let path = settings.laserGuideMLModelLocalPath {
-            let url = URL(fileURLWithPath: path)
-            try? FileManager.default.removeItem(at: url)
+        // Already have a valid local copy — check both URL match and freshness.
+        if let entry = store.find(spaceId: spaceIdStr),
+           entry.sourceURL == urlString,
+           let url = store.modelURL(for: spaceIdStr) {
+            // Re-download if the Space was updated after we last downloaded the model.
+            let needsRefresh = space.updatedAt.map { $0 > entry.downloadedAt } ?? false
+            if !needsRefresh {
+                downloadStates[spaceIdStr] = .ready(modelName: entry.modelName, downloadedAt: entry.downloadedAt)
+                return url
+            }
         }
 
-        settings.laserGuideMLModelLocalPath = nil
-        settings.laserGuideMLModelDisplayName = nil
-        settings.laserGuideMLModelSourceURL = nil
+        // Join an in-flight task for the same space to avoid duplicate downloads.
+        if let existing = activeTasks[spaceIdStr] {
+            return try await existing.value
+        }
 
-        downloadState = .idle
+        // Kick off a new download task.
+        let task = Task<URL, Error> { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.performDownload(space: space, urlString: urlString)
+        }
+        activeTasks[spaceIdStr] = task
+        defer { activeTasks.removeValue(forKey: spaceIdStr) }
+
+        return try await task.value
     }
 
     // MARK: - Private helpers
 
-    private func startDownload(from urlString: String, displayName: String) {
-        guard !downloadState.isInProgress else { return }
-
+    private func performDownload(space: Space, urlString: String) async throws -> URL {
+        let spaceIdStr = space.id.uuidString
         guard let url = URL(string: urlString) else {
-            downloadState = .error("Invalid model URL: \(urlString)")
-            return
+            let msg = "Invalid model URL: \(urlString)"
+            downloadStates[spaceIdStr] = .error(msg)
+            throw URLError(.badURL, userInfo: [NSLocalizedDescriptionKey: msg])
         }
 
-        currentDownloadTask?.cancel()
-        downloadState = .downloading(progress: -1) // indeterminate
+        downloadStates[spaceIdStr] = .downloading(progress: -1)
 
-        currentDownloadTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                // ── 1. Download to temp file ────────────────────────────────
-                let (tempFileURL, _) = try await URLSession.shared.download(from: url)
+        // ── 1. Download ZIP ─────────────────────────────────────────────────
+        let (tempFileURL, _) = try await URLSession.shared.download(from: url)
 
-                guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { throw CancellationError() }
 
-                // Rename to .zip so our install helper can unzip it reliably.
-                let zipURL = tempFileURL.deletingLastPathComponent()
-                    .appendingPathComponent(tempFileURL.lastPathComponent + ".zip")
-                try? FileManager.default.moveItem(at: tempFileURL, to: zipURL)
-                let resolvedZipURL = FileManager.default.fileExists(atPath: zipURL.path) ? zipURL : tempFileURL
+        // Ensure temp file has a .zip extension for ZIPFoundation.
+        let zipURL = tempFileURL.deletingLastPathComponent()
+            .appendingPathComponent(tempFileURL.lastPathComponent + ".zip")
+        try? FileManager.default.moveItem(at: tempFileURL, to: zipURL)
+        let resolvedZipURL = FileManager.default.fileExists(atPath: zipURL.path) ? zipURL : tempFileURL
 
-                // ── 2. Install (background thread) ────────────────────────────
-                await MainActor.run { self.downloadState = .installing }
+        // ── 2. Install on a background thread ────────────────────────────────
+        downloadStates[spaceIdStr] = .installing
 
-                let (compiledURL, modelName) = try await Task.detached(priority: .userInitiated) {
-                    try MLModelDownloadService.install(zipURL: resolvedZipURL, candidateName: displayName)
-                }.value
+        let (compiledURL, modelName) = try await Task.detached(priority: .userInitiated) {
+            try MLModelDownloadService.install(zipURL: resolvedZipURL, spaceId: spaceIdStr)
+        }.value
 
-                guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { throw CancellationError() }
 
-                // ── 3. Persist to AppSettings ─────────────────────────────────
-                let settings = AppSettings.shared
-                settings.laserGuideMLModelLocalPath = compiledURL.path
-                settings.laserGuideMLModelDisplayName = modelName
-                settings.laserGuideMLModelSourceURL = urlString
+        // ── 3. Persist ───────────────────────────────────────────────────────
+        let now = Date()
+        let entry = SpaceMLModelEntry(
+            spaceId: spaceIdStr,
+            sourceURL: urlString,
+            localPath: compiledURL.path,
+            modelName: modelName,
+            downloadedAt: now
+        )
+        store.save(entry)
+        downloadStates[spaceIdStr] = .ready(modelName: modelName, downloadedAt: now)
 
-                self.downloadState = .ready(displayName: modelName, sourceURL: urlString)
-            } catch is CancellationError {
-                self.downloadState = .idle
-            } catch {
-                self.downloadState = .error(error.localizedDescription)
-            }
-        }
+        return compiledURL
     }
 
-    // MARK: - Static install helpers
+    // MARK: - Static install (background-safe)
 
-    /// Unzips the archive at `zipURL`, finds the first CoreML artefact, compiles if
-    /// necessary, and copies the result to the app's Application Support directory.
-    private nonisolated static func install(zipURL: URL, candidateName: String) throws -> (URL, String) {
+    /// Unzips the archive, finds the first CoreML artefact, compiles if necessary,
+    /// and copies the result to `Application Support/MLModels/<spaceId>/laser_guide.mlmodelc`.
+    private nonisolated static func install(zipURL: URL, spaceId: String) throws -> (URL, String) {
         let fm = FileManager.default
 
-        // ── Prepare destination directory ────────────────────────────────────
         let appSupport = try fm.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -196,17 +171,16 @@ final class MLModelDownloadService: ObservableObject {
             create: true
         )
         let modelsDir = appSupport
-            .appendingPathComponent("MLModels/LaserGuide", isDirectory: true)
+            .appendingPathComponent("MLModels/\(spaceId)", isDirectory: true)
         try fm.createDirectory(at: modelsDir, withIntermediateDirectories: true)
 
-        let dest = modelsDir.appendingPathComponent("laser_guide_remote.mlmodelc", isDirectory: true)
+        let dest = modelsDir.appendingPathComponent("laser_guide.mlmodelc", isDirectory: true)
         if fm.fileExists(atPath: dest.path) {
             try fm.removeItem(at: dest)
         }
 
-        // ── Unzip ────────────────────────────────────────────────────────────
         let tempRoot = fm.temporaryDirectory
-            .appendingPathComponent("ml_model_unzip_\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("ml_unzip_\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
         defer { try? fm.removeItem(at: zipURL) }
@@ -215,27 +189,23 @@ final class MLModelDownloadService: ObservableObject {
             try fm.unzipItem(at: zipURL, to: tempRoot)
         } catch {
             throw NSError(
-                domain: "MLModelDownloadService",
-                code: 10,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to unzip model archive: \(error.localizedDescription)"]
+                domain: "MLModelDownloadService", code: 10,
+                userInfo: [NSLocalizedDescriptionKey: "Unzip failed: \(error.localizedDescription)"]
             )
         }
 
-        // ── Find and install CoreML artefact ─────────────────────────────────
         if let modelc = findFirst(in: tempRoot, extension: "mlmodelc") {
             let name = modelc.deletingPathExtension().lastPathComponent
             try fm.copyItem(at: modelc, to: dest)
             return (dest, name)
         }
-
-        if let mlpackage = findFirst(in: tempRoot, extension: "mlpackage") {
-            let name = mlpackage.deletingPathExtension().lastPathComponent
-            let compiled = try MLModel.compileModel(at: mlpackage)
+        if let pkg = findFirst(in: tempRoot, extension: "mlpackage") {
+            let name = pkg.deletingPathExtension().lastPathComponent
+            let compiled = try MLModel.compileModel(at: pkg)
             try fm.copyItem(at: compiled, to: dest)
             try? fm.removeItem(at: compiled)
             return (dest, name)
         }
-
         if let mlmodel = findFirst(in: tempRoot, extension: "mlmodel") {
             let name = mlmodel.deletingPathExtension().lastPathComponent
             let compiled = try MLModel.compileModel(at: mlmodel)
@@ -245,21 +215,18 @@ final class MLModelDownloadService: ObservableObject {
         }
 
         throw NSError(
-            domain: "MLModelDownloadService",
-            code: 11,
-            userInfo: [NSLocalizedDescriptionKey: "The ZIP archive does not contain a CoreML model (.mlmodelc, .mlpackage, or .mlmodel)."]
+            domain: "MLModelDownloadService", code: 11,
+            userInfo: [NSLocalizedDescriptionKey: "Archive contains no CoreML model (.mlmodelc / .mlpackage / .mlmodel)."]
         )
     }
 
     private nonisolated static func findFirst(in folder: URL, extension ext: String) -> URL? {
-        let fm = FileManager.default
-        guard let enumerator = fm.enumerator(
+        guard let e = FileManager.default.enumerator(
             at: folder,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else { return nil }
-        for case let url as URL in enumerator {
-            // Skip macOS resource-fork metadata directories (__MACOSX)
+        for case let url as URL in e {
             guard !url.pathComponents.contains("__MACOSX") else { continue }
             if url.pathExtension.lowercased() == ext.lowercased() { return url }
         }

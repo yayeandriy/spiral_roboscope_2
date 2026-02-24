@@ -34,6 +34,11 @@ extension LaserGuideARSessionView {
                     // Start the ML detection pipeline.
                     pipeline.start()
 
+                    // Ensure the Space's ML model is downloaded and assign it.
+                    Task {
+                        await loadModelForSession()
+                    }
+
                     Task {
                         print("[LaserGuideSnap] Launching fetchLaserGuideIfNeeded task")
                         await fetchLaserGuideIfNeeded()
@@ -97,16 +102,6 @@ extension LaserGuideARSessionView {
                 }
                 .onChange(of: mlDetection.confidenceThreshold) { _, _ in
                     saveMLDetectionSettings()
-                }
-                .onChange(of: mlDetection.useROI) { _, _ in
-                    saveMLDetectionSettings()
-                }
-                .onChange(of: mlDetection.roiSize) { _, _ in
-                    saveMLDetectionSettings()
-                }
-                .onChange(of: settings.laserGuideMLModelLocalPath) { _, _ in
-                    // If a new model is selected (e.g. from Google Drive via Files), reload it.
-                    mlDetection.reloadModel()
                 }
                 .onDisappear {
                     pipeline.stop()
@@ -304,7 +299,7 @@ extension LaserGuideARSessionView {
                     .padding(.top, 56)
                     Spacer()
                 }
-                .zIndex(2)
+                .zIndex(5)
 
                 // Detection Settings Panel (top-left)
                 VStack {
@@ -513,6 +508,33 @@ extension LaserGuideARSessionView {
                         Spacer()
                     }
                     .zIndex(5)
+                }
+
+                // ML model loading / error HUD
+                if isLoadingMLModel || mlModelLoadError != nil {
+                    VStack(spacing: 12) {
+                        if isLoadingMLModel {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(.white)
+                            Text("Loading ML model…")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                        } else if let err = mlModelLoadError {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.yellow)
+                            Text(err)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 8)
+                        }
+                    }
+                    .padding(20)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 40)
+                    .zIndex(6)
                 }
             }
         }

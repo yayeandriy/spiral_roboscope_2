@@ -18,7 +18,6 @@ struct SessionRowView: View {
     
     @StateObject private var spaceService = SpaceService.shared
     @StateObject private var markerService = MarkerService.shared
-    @ObservedObject private var mlDownloadService = MLModelDownloadService.shared
     @State private var sessionMarkersCount: Int? = nil
     @Environment(\.colorScheme) private var colorScheme
     
@@ -100,48 +99,28 @@ struct SessionRowView: View {
 
     @ViewBuilder
     private func mlModelRow(space: Space) -> some View {
-        let installedURL = AppSettings.shared.laserGuideMLModelSourceURL
-        let modelURL = space.mlModelUrl!
-        let isInstalled = installedURL == modelURL && AppSettings.shared.laserGuideMLModelURL != nil
-        let isDownloading = mlDownloadService.downloadState.isInProgress
-
+        let entry = SpaceMLModelStore.shared.find(spaceId: space.id.uuidString)
         HStack(spacing: 8) {
-            Image(systemName: isInstalled ? "cpu.fill" : "cpu")
+            Image(systemName: entry != nil ? "cpu.fill" : "cpu")
                 .font(.caption)
-                .foregroundColor(isInstalled ? .green : .secondary)
-
-            Text(isInstalled
-                 ? (AppSettings.shared.laserGuideMLModelDisplayName ?? "ML Model")
-                 : "ML Model available")
-                .font(.caption)
-                .foregroundColor(isInstalled ? .primary : .secondary)
-
-            Spacer()
-
-            if isDownloading {
-                ProgressView()
-                    .scaleEffect(0.7)
-            } else {
-                Button {
-                    mlDownloadService.downloadAndInstall(
-                        from: modelURL,
-                        displayName: "\(space.name) Model"
-                    )
-                } label: {
-                    Text(isInstalled ? "Update" : "Download")
+                .foregroundColor(entry != nil ? .green : .secondary)
+            if let entry {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entry.modelName)
                         .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(isInstalled ? Color.orange : Color.accentColor))
+                        .foregroundColor(.primary)
+                    Text(entry.downloadedAt.formatted(.relative(presentation: .named)))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
-                .buttonStyle(.plain)
+            } else {
+                Text("Model will download at session start")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
+            Spacer()
         }
         .padding(.top, 4)
-        // Prevent tap bubbling to the card's onTapGesture (which would start AR)
-        .onTapGesture {}
     }
 
     private func fetchMarkerCount() async {

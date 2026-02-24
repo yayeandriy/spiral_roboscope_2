@@ -19,6 +19,7 @@ struct VideoDetectionView: View {
 
     @StateObject private var videoService = VideoModeService.shared
     @StateObject var settings = AppSettings.shared
+    @StateObject private var spaceService = SpaceService.shared
 
     // Detection pipeline (fresh per instance)
     @StateObject private var mlDetection = LaserMLDetectionService()
@@ -46,6 +47,10 @@ struct VideoDetectionView: View {
     // Accumulator: ring buffer of last N frames of raw detections, merged for measurement.
     @State var frameAccumulator: [[LaserMLDetection]] = []
     @State var accumulatedDetections: [LaserMLDetection] = []
+
+    // ML model loading state
+    @State private var modelLoadError: String? = nil
+    @State private var isLoadingModel: Bool = false
 
     init(session: WorkSession) {
         self.session = session
@@ -221,6 +226,33 @@ struct VideoDetectionView: View {
                     }
                     .zIndex(5)
                 }
+
+                // ML model loading / error HUD
+                if isLoadingModel || modelLoadError != nil {
+                    VStack(spacing: 12) {
+                        if isLoadingModel {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(.white)
+                            Text("Loading ML model…")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                        } else if let err = modelLoadError {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.yellow)
+                            Text(err)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 8)
+                        }
+                    }
+                    .padding(20)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 40)
+                    .zIndex(6)
+                }
             }
         }
         .ignoresSafeArea(.all)
@@ -290,6 +322,7 @@ struct VideoDetectionView: View {
         .onAppear {
             setupVideoMode()
             Task { await fetchLaserGuide() }
+            Task { await loadModelForSession() }
         }
         .onDisappear {
             teardownVideoMode()
@@ -297,6 +330,23 @@ struct VideoDetectionView: View {
     }
 
     // MARK: - Setup / teardown
+
+    @MainActor
+    private func loadModelForSession() async {
+        guard let space = spaceService.spaces.first(where: { $0.id == session.spaceId }) else {
+            modelLoadError = "Space not found for this session."
+            return
+        }
+        isLoadingModel = true
+        modelLoadError = nil
+        do {
+            let url = try await MLModelDownloadService.shared.ensureModelForSpace(space)
+            mlDetection.setModelURL(url)
+        } catch {
+            modelLoadError = error.localizedDescription
+        }
+        isLoadingModel = false
+    }
 
     private func setupVideoMode() {
         videoService.setupPlayer()

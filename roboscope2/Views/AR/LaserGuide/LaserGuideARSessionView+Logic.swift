@@ -36,6 +36,25 @@ extension LaserGuideARSessionView {
         isSessionActive = true
     }
 
+    /// Downloads (or reuses) the Space's ML model and assigns it to `mlDetection`.
+    /// Sets `isLoadingModel` / `modelLoadError` for UI feedback.
+    @MainActor
+    func loadModelForSession() async {
+        guard let space = spaceService.spaces.first(where: { $0.id == session.spaceId }) else {
+            mlModelLoadError = "Space not found for this session."
+            return
+        }
+        isLoadingMLModel = true
+        mlModelLoadError = nil
+        do {
+            let url = try await MLModelDownloadService.shared.ensureModelForSpace(space)
+            mlDetection.setModelURL(url)
+        } catch {
+            mlModelLoadError = error.localizedDescription
+        }
+        isLoadingMLModel = false
+    }
+
     @MainActor
     func fetchLaserGuideIfNeeded() async {
         guard laserGuide == nil else { return }

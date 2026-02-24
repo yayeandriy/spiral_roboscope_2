@@ -28,9 +28,6 @@ class AppSettings: ObservableObject {
         static let registrationPreset = "registrationPreset"
         static let laserGuideAutoRestartDistanceMeters = "laserGuideAutoRestartDistanceMeters"
         static let laserGuideAutoScopeStableSeconds = "laserGuideAutoScopeStableSeconds"
-        static let laserGuideMLModelLocalPath = "laserGuideMLModelLocalPath"
-        static let laserGuideMLModelDisplayName = "laserGuideMLModelDisplayName"
-        static let laserGuideMLModelSourceURL = "laserGuideMLModelSourceURL"
         static let videoModeEnabled = "videoModeEnabled"
         static let videoModeDistanceScale = "videoModeDistanceScale"
         static let videoModeAccumulatorFrames = "videoModeAccumulatorFrames"
@@ -130,62 +127,6 @@ class AppSettings: ObservableObject {
         }
     }
 
-    /// Optional local filesystem path to a compiled CoreML model (.mlmodelc) used for LaserGuide ML detection.
-    /// When nil, the bundled `laser-pens` model is used.
-    @Published var laserGuideMLModelLocalPath: String? {
-        didSet {
-            if let laserGuideMLModelLocalPath {
-                defaults.set(laserGuideMLModelLocalPath, forKey: Keys.laserGuideMLModelLocalPath)
-            } else {
-                defaults.removeObject(forKey: Keys.laserGuideMLModelLocalPath)
-            }
-        }
-    }
-
-    /// Display name for the selected LaserGuide ML model.
-    @Published var laserGuideMLModelDisplayName: String? {
-        didSet {
-            if let laserGuideMLModelDisplayName {
-                defaults.set(laserGuideMLModelDisplayName, forKey: Keys.laserGuideMLModelDisplayName)
-            } else {
-                defaults.removeObject(forKey: Keys.laserGuideMLModelDisplayName)
-            }
-        }
-    }
-
-    /// Original remote URL from which the currently active model was downloaded.
-    /// Used to detect when the API serves a newer version.
-    @Published var laserGuideMLModelSourceURL: String? {
-        didSet {
-            if let laserGuideMLModelSourceURL {
-                defaults.set(laserGuideMLModelSourceURL, forKey: Keys.laserGuideMLModelSourceURL)
-            } else {
-                defaults.removeObject(forKey: Keys.laserGuideMLModelSourceURL)
-            }
-        }
-    }
-
-    var laserGuideMLModelURL: URL? {
-        guard let path = laserGuideMLModelLocalPath, !path.isEmpty else { return nil }
-        let url = URL(fileURLWithPath: path)
-        if FileManager.default.fileExists(atPath: url.path) { return url }
-
-        // Absolute path is stale (app container UUID changed after reinstall/update).
-        // Recover by finding the "MLModels/..." portion and re-rooting it under the
-        // current Application Support directory, then persist the corrected path.
-        guard let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first else { return nil }
-
-        let components = url.pathComponents
-        guard let idx = components.firstIndex(of: "MLModels") else { return nil }
-        let recovered = components[idx...].reduce(appSupport) { $0.appendingPathComponent($1) }
-        guard FileManager.default.fileExists(atPath: recovered.path) else { return nil }
-
-        DispatchQueue.main.async { self.laserGuideMLModelLocalPath = recovered.path }
-        return recovered
-    }
-
     // MARK: - Video Mode
 
     /// When true, LaserGuide session runs detection against uploaded video footage instead of live AR camera.
@@ -247,9 +188,6 @@ class AppSettings: ObservableObject {
         let stableSeconds = defaults.double(forKey: Keys.laserGuideAutoScopeStableSeconds)
         self.laserGuideAutoScopeStableSeconds = stableSeconds > 0 ? stableSeconds : 1.0
 
-        self.laserGuideMLModelLocalPath = defaults.string(forKey: Keys.laserGuideMLModelLocalPath)
-        self.laserGuideMLModelDisplayName = defaults.string(forKey: Keys.laserGuideMLModelDisplayName)
-        self.laserGuideMLModelSourceURL = defaults.string(forKey: Keys.laserGuideMLModelSourceURL)
         self.videoModeEnabled = defaults.object(forKey: Keys.videoModeEnabled) as? Bool ?? false
         let vmScale = defaults.float(forKey: Keys.videoModeDistanceScale)
         self.videoModeDistanceScale = vmScale > 0 ? vmScale : 5.0
