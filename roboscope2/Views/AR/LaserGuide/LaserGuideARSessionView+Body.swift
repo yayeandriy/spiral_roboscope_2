@@ -312,8 +312,7 @@ extension LaserGuideARSessionView {
                         DetectionSettingsPanel(
                             mlDetection: mlDetection,
                             settings: settings,
-                            isExpanded: $showDetectionSettings,
-                            isVideoMode: true
+                            isExpanded: $showDetectionSettings
                         )
 
                         Spacer()

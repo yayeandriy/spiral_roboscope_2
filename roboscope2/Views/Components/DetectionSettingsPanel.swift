@@ -11,8 +11,6 @@ struct DetectionSettingsPanel: View {
     @ObservedObject var mlDetection: LaserMLDetectionService
     @ObservedObject var settings: AppSettings
     @Binding var isExpanded: Bool
-    /// When true, video-mode-only controls are shown (Acc. Overlay, Line over dot).
-    var isVideoMode: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -54,88 +52,50 @@ struct DetectionSettingsPanel: View {
             // Settings panel
             if isExpanded {
                 VStack(alignment: .leading, spacing: 12) {
+
+                    // Accumulator frame count
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("Confidence")
+                            Text("Acc Frames")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.white.opacity(0.9))
                             Spacer()
-                            Text(String(format: "%.2f", mlDetection.confidenceThreshold))
+                            Text("\(settings.videoModeAccumulatorFrames)")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.green)
+                                .foregroundColor(.orange)
                         }
-                        Slider(value: $mlDetection.confidenceThreshold, in: 0.05...0.95, step: 0.05)
-                            .tint(.green)
+                        Slider(
+                            value: Binding(
+                                get: { Double(settings.videoModeAccumulatorFrames) },
+                                set: { settings.videoModeAccumulatorFrames = Int($0.rounded()) }
+                            ),
+                            in: 1...10,
+                            step: 1
+                        )
+                        .tint(.orange)
                     }
 
-                    Toggle(isOn: $mlDetection.useROI) {
-                        Text("Use ROI")
+                    Toggle(isOn: $settings.showAccumulatedOverlay) {
+                        Text("Acc. Overlay")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
                     }
                     .toggleStyle(.switch)
-                    .tint(.green)
+                    .tint(.orange)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("ROI Size")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.white.opacity(0.9))
-                            Spacer()
-                            Text(String(format: "%.2f", mlDetection.roiSize))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.green)
-                        }
-                        Slider(value: $mlDetection.roiSize, in: 0.20...1.00, step: 0.05)
-                            .tint(.green)
+                    Toggle(isOn: $settings.lineOverDotFilter) {
+                        Text("Line over dot")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white.opacity(0.9))
                     }
-                    .disabled(!mlDetection.useROI)
-                    .opacity(mlDetection.useROI ? 1.0 : 0.5)
-
-                    if isVideoMode {
-                        Toggle(isOn: $settings.showAccumulatedOverlay) {
-                            Text("Acc. Overlay")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                        .toggleStyle(.switch)
-                        .tint(.orange)
-
-                        Toggle(isOn: $settings.lineOverDotFilter) {
-                            Text("Line over dot")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                        .toggleStyle(.switch)
-                        .tint(.orange)
-                    }
+                    .toggleStyle(.switch)
+                    .tint(.orange)
 
                     if let err = mlDetection.lastError, !err.isEmpty {
                         Text(err)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.red)
                             .lineLimit(3)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Auto-scope Stable")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.white.opacity(0.9))
-                            Spacer()
-                            Text(String(format: "%.1fs", settings.laserGuideAutoScopeStableSeconds))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.green)
-                        }
-                        Slider(
-                            value: Binding(
-                                get: { settings.laserGuideAutoScopeStableSeconds },
-                                set: { settings.laserGuideAutoScopeStableSeconds = $0 }
-                            ),
-                            in: 0.2...3.0,
-                            step: 0.1
-                        )
-                        .tint(.green)
                     }
                 }
                 .padding(12)

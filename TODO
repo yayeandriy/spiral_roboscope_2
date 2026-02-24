@@ -26,10 +26,11 @@ Todo:
   ✔ Always ml model on @done(26-02-24 00:09)
   Improvements and tests:
     ✔ Show acc box @done(26-02-24 12:19)
-    ☐ Add acc support into Normal Mode
+    ✔ Add acc support into Normal Mode @done(26-02-24 12:30)
     ☐ Improve UI/UX
-       ☐ MLModel loading 
-       ☐ Vide/Normal mode indicator
+      ☐ Detection param settings panel
+      ☐ MLModel loading 
+      ☐ Vide/Normal mode indicator
     ☐ Pen model tests
 
 

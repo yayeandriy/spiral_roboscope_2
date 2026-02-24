@@ -124,8 +124,7 @@ struct VideoDetectionView: View {
                         DetectionSettingsPanel(
                             mlDetection: mlDetection,
                             settings: settings,
-                            isExpanded: $showDetectionSettings,
-                            isVideoMode: true
+                            isExpanded: $showDetectionSettings
                         )
                         .padding(.leading, 16)
                         .padding(.top, 56)
