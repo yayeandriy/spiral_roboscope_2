@@ -14,16 +14,22 @@ Todo:
 ---------------------------------------------------------------------------------------
 
 2.0.9:
-  ☐ Model API
+  ✔ Model API @done(26-02-24 00:09)
     iOS APP: Implement new feature: Dynamic update ml model:
       ✔ API now has new field: Space: ml_model_url — there is url to *.zip with mlcore model @done(26-02-23 16:20)
       ✔ We need check if it not null and upload it and use instead that on which emdebed now dynamically @done(26-02-23 16:20)
       ✔ ZIP foundation already there @done(26-02-23 16:20)
       ✔ For reference see roboscope_monorepo @done(26-02-23 16:20)
       ✔ Add to Settings abilty to manage ml models (see, laod, update) @done(26-02-23 16:20)
-  ☐ Video mode
-  ☐ Frame merge
-  ☐ Always ml model on 
+  ✔ Video mode @done(26-02-24 00:09)
+  ✔ Frame merge @done(26-02-24 00:09)
+  ✔ Always ml model on @done(26-02-24 00:09)
+  Improvements and tests:
+    ☐ Show acc box
+    ☐ Pen model tests
+
+
+
 
 Distance match tolerance: laserGuideDistanceToleranceMeters (currently 0.03)
 Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)
