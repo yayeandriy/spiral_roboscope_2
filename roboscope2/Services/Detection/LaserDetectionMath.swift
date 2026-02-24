@@ -105,13 +105,60 @@ func laserDetectionUnionMerge(
     return clusters.compactMap { cluster -> LaserMLDetection? in
         guard let best = cluster.max(by: { $0.confidence < $1.confidence }) else { return nil }
         let unionBox = cluster.dropFirst().reduce(cluster[0].boundingBox) { $0.union($1.boundingBox) }
+        // Pool all mask points from the cluster and refit an oriented quad via PCA.
+        let pooled = cluster.compactMap { $0.maskPoints }.flatMap { $0 }
+        let quad = pooled.count >= 8 ? orientedQuadFromMaskPoints(pooled) : nil
         return LaserMLDetection(
             boundingBox: unionBox,
-            orientedQuad: nil,
+            orientedQuad: quad,
+            maskPoints: pooled.isEmpty ? nil : pooled,
             classIndex: best.classIndex,
             label: best.label,
             confidence: best.confidence,
             timestamp: best.timestamp
         )
     }
+}
+
+// MARK: - Oriented quad fitting
+
+/// Fits an oriented bounding quad to a cloud of points in normalised image coordinates
+/// using PCA on the point covariance matrix. Used by the accumulator to produce
+/// shape-aligned boxes for merged multi-frame clusters.
+func orientedQuadFromMaskPoints(_ points: [CGPoint]) -> LaserMLOrientedQuad? {
+    guard points.count >= 4 else { return nil }
+    var sumX: Double = 0, sumY: Double = 0
+    for p in points { sumX += Double(p.x); sumY += Double(p.y) }
+    let n = Double(points.count)
+    let meanX = sumX / n
+    let meanY = sumY / n
+    var covXX: Double = 0, covYY: Double = 0, covXY: Double = 0
+    for p in points {
+        let dx = Double(p.x) - meanX
+        let dy = Double(p.y) - meanY
+        covXX += dx * dx; covYY += dy * dy; covXY += dx * dy
+    }
+    covXX /= n; covYY /= n; covXY /= n
+    let theta = 0.5 * atan2(2.0 * covXY, covXX - covYY)
+    let cosT = cos(theta), sinT = sin(theta)
+    var minU = Double.greatestFiniteMagnitude, maxU = -Double.greatestFiniteMagnitude
+    var minV = Double.greatestFiniteMagnitude, maxV = -Double.greatestFiniteMagnitude
+    for p in points {
+        let dx = Double(p.x) - meanX
+        let dy = Double(p.y) - meanY
+        let u =  dx * cosT + dy * sinT
+        let v = -dx * sinT + dy * cosT
+        if u < minU { minU = u }; if u > maxU { maxU = u }
+        if v < minV { minV = v }; if v > maxV { maxV = v }
+    }
+    func corner(u: Double, v: Double) -> CGPoint {
+        CGPoint(x: meanX + u * cosT - v * sinT,
+                y: meanY + u * sinT + v * cosT)
+    }
+    return LaserMLOrientedQuad(
+        p1: corner(u: minU, v: minV),
+        p2: corner(u: maxU, v: minV),
+        p3: corner(u: maxU, v: maxV),
+        p4: corner(u: minU, v: maxV)
+    )
 }

@@ -26,7 +26,7 @@ extension LaserMLDetectionService {
         scale: CGFloat,
         xPadding: CGFloat,
         yPadding: CGFloat
-    ) -> LaserMLOrientedQuad? {
+    ) -> (quad: LaserMLOrientedQuad, maskPoints: [CGPoint])? {
         guard proto.dataType == .float32 else { return nil }
         guard proto.shape.count == 4 else { return nil }
         guard maskCoefficients.count > 0 else { return nil }
@@ -221,6 +221,25 @@ extension LaserMLDetectionService {
         let r3 = mapNormalizedPointFromOrientedToRaw(f3, orientation: orientation)
         let r4 = mapNormalizedPointFromOrientedToRaw(f4, orientation: orientation)
 
-        return LaserMLOrientedQuad(p1: r1, p2: r2, p3: r3, p4: r4)
+        let quad = LaserMLOrientedQuad(p1: r1, p2: r2, p3: r3, p4: r4)
+
+        // Subsample mask points (proto pixel coords) → raw normalized image coords.
+        // Cap at 128 points for the accumulator to stay cheap.
+        let sampleEvery = max(1, points.count / 128)
+        let rawMaskPoints: [CGPoint] = Swift.stride(from: 0, to: points.count, by: sampleEvery).map { i in
+            let pt = points[i]
+            let mx = (pt.x / CGFloat(width)) * inputSize.width
+            let my = (pt.y / CGFloat(height)) * inputSize.height
+            let imgX = (mx - xPadding) / scale
+            let imgY = (my - yPadding) / scale
+            let orientedInROI = CGPoint(x: imgX / orientedImageSize.width, y: imgY / orientedImageSize.height)
+            let fullOriented = CGPoint(
+                x: roi.minX + orientedInROI.x * roi.width,
+                y: roi.minY + orientedInROI.y * roi.height
+            )
+            return Self.mapNormalizedPointFromOrientedToRaw(fullOriented, orientation: orientation)
+        }
+
+        return (quad: quad, maskPoints: rawMaskPoints)
     }
 }

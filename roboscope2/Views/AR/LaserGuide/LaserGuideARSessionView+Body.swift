@@ -478,7 +478,8 @@ extension LaserGuideARSessionView {
 
                             // Auto-scope (debounced): require a stable match for ~1s to reduce accidental jumps.
                             maybeAutoScope(measurement)
-                        }
+                        },
+                        boxColor: settings.showAccumulatedOverlay ? .blue : .green
                     )
                 }
                 .zIndex(2)

@@ -43,6 +43,9 @@ struct LaserMLDetection: Identifiable, Equatable {
     let boundingBox: CGRect
     /// Optional rotated quad in normalized image coordinates.
     let orientedQuad: LaserMLOrientedQuad?
+    /// Sampled mask-positive points in raw normalized image coordinates (0..1).
+    /// Used by the multi-frame accumulator to refit an oriented quad after merging clusters.
+    let maskPoints: [CGPoint]?
     /// Raw class index from the model output (when available).
     let classIndex: Int?
     let label: String
@@ -52,6 +55,7 @@ struct LaserMLDetection: Identifiable, Equatable {
     init(
         boundingBox: CGRect,
         orientedQuad: LaserMLOrientedQuad? = nil,
+        maskPoints: [CGPoint]? = nil,
         classIndex: Int? = nil,
         label: String,
         confidence: Float,
@@ -59,6 +63,7 @@ struct LaserMLDetection: Identifiable, Equatable {
     ) {
         self.boundingBox = boundingBox
         self.orientedQuad = orientedQuad
+        self.maskPoints = maskPoints
         self.classIndex = classIndex
         self.label = label
         self.confidence = confidence

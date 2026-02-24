@@ -20,6 +20,8 @@ struct LaserMLDetectionOverlay: View {
     /// Scale factor applied to normalised image-space distance to produce fake "world" metres
     /// in Video Mode (when arView is nil). Default 5.0 — adjust in Settings to match your guide.
     var videoModeDistanceScale: Float = 5.0
+    /// Colour used for bounding-box strokes and label text. Defaults to green (per-frame); pass .blue for accumulated boxes.
+    var boxColor: Color = .green
 
     var body: some View {
         GeometryReader { geometry in
@@ -34,12 +36,12 @@ struct LaserMLDetectionOverlay: View {
                             path.addLine(to: mapped.p4)
                             path.closeSubpath()
                         }
-                        .stroke(Color.green, lineWidth: 2)
+                        .stroke(boxColor, lineWidth: 2)
                         .overlay(alignment: .topLeading) {
                             let labelRect = boundingRect(for: [mapped.p1, mapped.p2, mapped.p3, mapped.p4])
                             Text("\(detection.label) \(String(format: "%.0f%%", detection.confidence * 100))")
                                 .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.green)
+                                .foregroundColor(boxColor)
                                 .padding(4)
                                 .background(Color.black.opacity(0.6))
                                 .cornerRadius(4)
@@ -48,13 +50,13 @@ struct LaserMLDetectionOverlay: View {
                     } else {
                         let rect = mappedRect(detection.boundingBox, viewSize: geometry.size)
                         Rectangle()
-                            .stroke(Color.green, lineWidth: 2)
+                            .stroke(boxColor, lineWidth: 2)
                             .frame(width: rect.width, height: rect.height)
                             .position(x: rect.midX, y: rect.midY)
                             .overlay(alignment: .topLeading) {
                                 Text("\(detection.label) \(String(format: "%.0f%%", detection.confidence * 100))")
                                     .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.green)
+                                    .foregroundColor(boxColor)
                                     .padding(4)
                                     .background(Color.black.opacity(0.6))
                                     .cornerRadius(4)

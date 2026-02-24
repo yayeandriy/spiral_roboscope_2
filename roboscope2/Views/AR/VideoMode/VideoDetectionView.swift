@@ -116,7 +116,8 @@ struct VideoDetectionView: View {
                         latestMeasurement = measurement
                         maybeScope(measurement)
                     },
-                    videoModeDistanceScale: settings.videoModeDistanceScale
+                    videoModeDistanceScale: settings.videoModeDistanceScale,
+                    boxColor: settings.showAccumulatedOverlay ? .blue : .green
                 )
                 .zIndex(2)
                 .onAppear { viewportSize = geometry.size }
@@ -458,9 +459,12 @@ struct VideoDetectionView: View {
         return clusters.compactMap { cluster -> LaserMLDetection? in
             guard let best = cluster.max(by: { $0.confidence < $1.confidence }) else { return nil }
             let unionBox = cluster.dropFirst().reduce(cluster[0].boundingBox) { $0.union($1.boundingBox) }
+            let pooled = cluster.compactMap { $0.maskPoints }.flatMap { $0 }
+            let quad = pooled.count >= 8 ? orientedQuadFromMaskPoints(pooled) : nil
             return LaserMLDetection(
                 boundingBox: unionBox,
-                orientedQuad: nil,
+                orientedQuad: quad,
+                maskPoints: pooled.isEmpty ? nil : pooled,
                 classIndex: best.classIndex,
                 label: best.label,
                 confidence: best.confidence,

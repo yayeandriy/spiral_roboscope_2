@@ -22,6 +22,7 @@ extension LaserMLDetectionService {
         let classIndex: Int
         let score: Float
         let orientedQuad: LaserMLOrientedQuad?
+        let maskPoints: [CGPoint]?
     }
 
     func decodeYOLOLikeDetections(
@@ -162,8 +163,9 @@ extension LaserMLDetectionService {
             let normRectRaw = Self.mapNormalizedRectFromOrientedToRaw(normRectOriented, orientation: orientation)
 
             let orientedQuad: LaserMLOrientedQuad?
-            if let proto, maskCoeffLen > 0, maskCoeffs.count == maskCoeffLen {
-                orientedQuad = Self.computeOrientedQuadFromProtoMask(
+            let maskPoints: [CGPoint]?
+            if let proto, maskCoeffLen > 0, maskCoeffs.count == maskCoeffLen,
+               let seg = Self.computeOrientedQuadFromProtoMask(
                     proto: proto,
                     maskCoefficients: maskCoeffs,
                     modelRect: modelRect,
@@ -175,12 +177,15 @@ extension LaserMLDetectionService {
                     scale: scale,
                     xPadding: xPadding,
                     yPadding: yPadding
-                )
+               ) {
+                orientedQuad = seg.quad
+                maskPoints = seg.maskPoints
             } else {
                 orientedQuad = nil
+                maskPoints = nil
             }
 
-            candidates.append(DecodeCandidate(rect: normRectRaw, classIndex: bestClass, score: bestScore, orientedQuad: orientedQuad))
+            candidates.append(DecodeCandidate(rect: normRectRaw, classIndex: bestClass, score: bestScore, orientedQuad: orientedQuad, maskPoints: maskPoints))
         }
 
         // Per-class NMS: suppress overlapping boxes of the same class with IoU > threshold.
@@ -201,6 +206,7 @@ extension LaserMLDetectionService {
             return LaserMLDetection(
                 boundingBox: $0.rect,
                 orientedQuad: $0.orientedQuad,
+                maskPoints: $0.maskPoints,
                 classIndex: $0.classIndex,
                 label: label,
                 confidence: $0.score,
