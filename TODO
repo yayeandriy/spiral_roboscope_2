@@ -38,7 +38,9 @@ Todo:
   Paper model tests:
     ✔ Accum boxes improvement @done(26-02-24 16:41)
     ✔ Fix: Origin placement @done(26-02-24 17:20)
-
+  Button fixes:
+    ☐ Restart placing
+    ☐ Exit (cross button)
 
 
 

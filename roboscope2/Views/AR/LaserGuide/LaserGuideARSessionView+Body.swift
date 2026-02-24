@@ -287,11 +287,23 @@ extension LaserGuideARSessionView {
                         .buttonStyle(.plain)
                         .lgCircle(tint: showHistoryPanel ? .green : .white)
 
-                        Button { dismiss() } label: {
-                            Image(systemName: "xmark")
+                        Menu {
+                            Button(role: .destructive) {
+                                dismiss()
+                            } label: {
+                                Label("Close Session", systemImage: "xmark")
+                            }
+                            Button {
+                                enterDetectionMode()
+                            } label: {
+                                Label("Restart Placing", systemImage: "arrow.counterclockwise")
+                            }
+                        } label: {
+                            Image(systemName: "checkmark")
                                 .font(.system(size: 15, weight: .semibold))
                                 .frame(width: 44, height: 44)
                         }
+                        .menuStyle(.button)
                         .buttonStyle(.plain)
                         .lgCircle(tint: .white)
                     }
@@ -417,30 +429,6 @@ extension LaserGuideARSessionView {
                     .padding(.bottom, 50)
                 }
                 .animation(.easeInOut(duration: 0.2), value: markerService.selectedMarkerID)
-
-                // Restart detection button (moved to bottom-left corner; replaces the old distance badge position)
-                if hasAutoScoped {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Button {
-                                enterDetectionMode()
-                            } label: {
-                                Image(systemName: "arrow.counterclockwise")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .frame(width: 44, height: 36)
-                            }
-                            .buttonStyle(.plain)
-                            .lgCapsule(tint: .white)
-
-                            Spacer()
-                        }
-                        .padding(.leading, 16)
-                        .padding(.bottom, 50)
-                    }
-                    .zIndex(3)
-                }
 
                 // Snapped segment (x/z) display (bottom-right, only after auto-scope)
                 if hasAutoScoped, let seg = autoScopedSegment {
