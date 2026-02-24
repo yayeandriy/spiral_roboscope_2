@@ -36,7 +36,20 @@ struct SessionsView: View {
         NavigationView {
             VStack { sessionsList }
             .navigationTitle("Work Sessions")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Text("Work Sessions")
+                            .font(.headline)
+                        if settings.videoModeEnabled {
+                            Image(systemName: "video.fill")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
                         // Sessions count pill

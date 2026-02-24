@@ -29,9 +29,13 @@ Todo:
     ✔ Add acc support into Normal Mode @done(26-02-24 12:30)
     Improve UI/UX:
       ✔ Detection param settings panel @done(26-02-24 12:33)
-      ☐ MLModel loading 
+      ✔ MLModel loading @done(26-02-24 13:33)
+      ✔ Remove Spaces @done(26-02-24 13:43)
+        ✔ In creating the Session: @done(26-02-24 13:43)
+          ✔ Remove selection of the spaces if there single Space aviable @done(26-02-24 13:43)
+          ✔ Remove all unneeded settings @done(26-02-24 13:43)
+
       ☐ Video/Normal mode indicator
-      ☐ Remove Spaces
     ☐ Pen model tests
 
 
