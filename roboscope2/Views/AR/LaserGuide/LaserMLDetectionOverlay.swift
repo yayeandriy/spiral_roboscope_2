@@ -22,6 +22,10 @@ struct LaserMLDetectionOverlay: View {
     var videoModeDistanceScale: Float = 5.0
     /// Colour used for bounding-box strokes and label text. Defaults to green (per-frame); pass .blue for accumulated boxes.
     var boxColor: Color = .green
+    /// When set, measurement and auto-scope callbacks use these detections instead of `detections`.
+    /// Use to decouple the drawn (accumulated) boxes from the scoping signal (per-frame) so the
+    /// auto-scope stability window is not disrupted by accumulator sliding-window jitter.
+    var scopingDetections: [LaserMLDetection]? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -67,10 +71,16 @@ struct LaserMLDetectionOverlay: View {
             }
             .allowsHitTesting(false)
             .onChange(of: detections) { _, newDetections in
+                // If scopingDetections is provided, it drives measurement; ignore drawable-only changes.
+                guard scopingDetections == nil else { return }
                 measureDistanceBetweenDotAndLine(newDetections, viewSize: geometry.size)
             }
+            .onChange(of: scopingDetections) { _, newScoping in
+                guard let newScoping else { return }
+                measureDistanceBetweenDotAndLine(newScoping, viewSize: geometry.size)
+            }
             .onChange(of: maxDotLineYDeltaMeters) { _, _ in
-                measureDistanceBetweenDotAndLine(detections, viewSize: geometry.size)
+                measureDistanceBetweenDotAndLine(scopingDetections ?? detections, viewSize: geometry.size)
             }
         }
     }

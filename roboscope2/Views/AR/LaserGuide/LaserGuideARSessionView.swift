@@ -39,9 +39,6 @@ struct LaserGuideARSessionView: View {
     @State var lastLaserGuideSnapTime: TimeInterval = 0
     @State var latestLaserMeasurement: LaserDotLineMeasurement? = nil
     @State var hasAutoScoped: Bool = false
-    @State var autoScopeCandidateKey: String? = nil
-    @State var autoScopeSamples: [(t: TimeInterval, d: Float)] = []
-    @State var autoScopeLastSeenTime: TimeInterval = 0
     @State var autoScopedDotWorld: SIMD3<Float>? = nil
     @State var autoScopedAtTime: TimeInterval = 0
     @State var autoScopedDotLocalZ: Float? = nil
@@ -78,19 +75,9 @@ struct LaserGuideARSessionView: View {
 
     let laserGuideDistanceToleranceMeters: Float = 0.03
     let laserGuideSnapCooldownSeconds: TimeInterval = 0.6
-    let autoScopeAllowedJitterMeters: Float = 0.01
-    let autoScopeAllowedGapSeconds: TimeInterval = 0.25
-    let autoScopeMinSamples: Int = 8
-
-    var autoScopeStableSeconds: TimeInterval {
-        settings.laserGuideAutoScopeStableSeconds
-    }
 
     var locatingDistanceText: String {
         if let d = latestLaserMeasurement?.distanceMeters {
-            return String(format: "%.2f m", d)
-        }
-        if let d = autoScopeSamples.last?.d {
             return String(format: "%.2f m", d)
         }
         return "--"

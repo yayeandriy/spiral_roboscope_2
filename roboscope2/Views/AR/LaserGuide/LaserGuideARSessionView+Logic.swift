@@ -117,12 +117,6 @@ extension LaserGuideARSessionView {
         }
     }
 
-    func resetAutoScopeStability() {
-        autoScopeCandidateKey = nil
-        autoScopeSamples = []
-        autoScopeLastSeenTime = 0
-    }
-
     func enterDetectionMode() {
         // Restart AR tracking so detection restarts in a fresh AR world.
         captureSession.restart()
@@ -135,7 +129,6 @@ extension LaserGuideARSessionView {
         autoScopedDotLocalZ = nil
         autoScopeRestartThresholdZMeters = nil
         autoScopedSegment = nil
-        resetAutoScopeStability()
 
         // In detection mode we hide the origin gizmo + any debug detection spheres.
         frameOriginAnchor?.isEnabled = false

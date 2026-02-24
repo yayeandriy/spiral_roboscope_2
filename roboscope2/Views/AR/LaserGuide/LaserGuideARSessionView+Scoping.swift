@@ -16,47 +16,13 @@ extension LaserGuideARSessionView {
 
     func maybeAutoScope(_ measurement: LaserDotLineMeasurement?) {
         guard !hasAutoScoped else { return }
+        guard let measurement else { return }
+
+        // Match measurement against any known segment; snap immediately if within tolerance.
+        guard let candidate = candidateSegment(for: measurement.distanceMeters),
+              candidate.delta <= laserGuideDistanceToleranceMeters else { return }
 
         let now = CACurrentMediaTime()
-
-        // Allow occasional missed frames without resetting immediately.
-        if measurement == nil {
-            if autoScopeLastSeenTime > 0, now - autoScopeLastSeenTime > autoScopeAllowedGapSeconds {
-                resetAutoScopeStability()
-            }
-            return
-        }
-
-        guard let measurement else { return }
-        autoScopeLastSeenTime = now
-
-        // Must match a segment within tolerance; otherwise reset stability window.
-        guard let candidate = candidateSegment(for: measurement.distanceMeters), candidate.delta <= laserGuideDistanceToleranceMeters else {
-            resetAutoScopeStability()
-            return
-        }
-
-        // Segment must remain consistent during the stability window.
-        if autoScopeCandidateKey != candidate.key {
-            autoScopeCandidateKey = candidate.key
-            autoScopeSamples = []
-        }
-
-        autoScopeSamples.append((t: now, d: measurement.distanceMeters))
-        autoScopeSamples = autoScopeSamples.filter { now - $0.t <= autoScopeStableSeconds }
-
-        // Need enough coverage across the window.
-        guard autoScopeSamples.count >= autoScopeMinSamples else { return }
-        guard let first = autoScopeSamples.first, let last = autoScopeSamples.last else { return }
-        guard last.t - first.t >= autoScopeStableSeconds * 0.9 else { return }
-
-        // Require distances to be stable (within a small jitter band).
-        let distances = autoScopeSamples.map { $0.d }
-        let minD = distances.min() ?? measurement.distanceMeters
-        let maxD = distances.max() ?? measurement.distanceMeters
-        guard (maxD - minD) <= (autoScopeAllowedJitterMeters * 2) else { return }
-
-        // If stable, snap (subject to cooldown) and stop detection.
         if let snappedSegment = applyLaserGuideIfPossible(measurement) {
             autoScopedDotWorld = measurement.dotWorld
             autoScopedAtTime = now
@@ -84,7 +50,6 @@ extension LaserGuideARSessionView {
             }
 
             pipeline.stop()
-            resetAutoScopeStability()
         }
     }
 
@@ -128,10 +93,22 @@ extension LaserGuideARSessionView {
         // 1. Direction vector R = N - D (from dot to line)
         let R = lineWorld - dotWorld
         let R_xz = SIMD2<Float>(R.x, R.z)
-        let r = normalize(R_xz)  // normalized direction in XZ plane
+        var r = normalize(R_xz)  // normalized direction in XZ plane
 
         print("[LaserGuideSnap]   R (dot→line): \(R)")
         print("[LaserGuideSnap]   r (normalized XZ): \(r)")
+
+        // Ensure the frame's +Z points AWAY from the camera (into the scene).
+        // In ARKit the camera looks down its local -Z, so the "forward" direction in world
+        // space is -(camera.transform.columns.2).xyz.
+        if let cameraTransform = arView?.session.currentFrame?.camera.transform {
+            let camForward = SIMD2<Float>(-cameraTransform.columns.2.x, -cameraTransform.columns.2.z)
+            if dot(r, camForward) < 0 {
+                // r is pointing toward the camera — flip it so +Z goes into the scene.
+                r = -r
+                print("[LaserGuideSnap]   r flipped to agree with camera forward")
+            }
+        }
 
         // 2. Distance d = |S| = magnitude of segment position
         let S = SIMD2<Float>(Float(segment.x), Float(segment.z))
