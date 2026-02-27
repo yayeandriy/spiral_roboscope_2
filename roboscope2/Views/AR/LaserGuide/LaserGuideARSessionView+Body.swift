@@ -274,19 +274,6 @@ extension LaserGuideARSessionView {
 
                         Spacer(minLength: 8)
 
-                        // History toggle button
-                        Button {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                showHistoryPanel.toggle()
-                            }
-                        } label: {
-                            Image(systemName: showHistoryPanel ? "clock.fill" : "clock")
-                                .font(.system(size: 15, weight: .semibold))
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                        .lgCircle(tint: showHistoryPanel ? .green : .white)
-
                         Menu {
                             Button(role: .destructive) {
                                 dismiss()
@@ -300,8 +287,8 @@ extension LaserGuideARSessionView {
                             }
                         } label: {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 15, weight: .semibold))
-                                .frame(width: 44, height: 44)
+                                .font(.system(size: 22, weight: .semibold))
+                                .frame(width: 66, height: 66)
                         }
                         .menuStyle(.button)
                         .buttonStyle(.plain)
@@ -313,22 +300,146 @@ extension LaserGuideARSessionView {
                 }
                 .zIndex(5)
 
-                // Detection Settings Panel (top-left)
+                // Detection settings / origin indicator (bottom-left)
                 VStack {
-                    HStack {
-                        DetectionSettingsPanel(
-                            mlDetection: mlDetection,
-                            settings: settings,
-                            isExpanded: $showDetectionSettings
-                        )
-
+                    Spacer()
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            // Expanded panel (floats above button)
+                            if showDetectionSettings {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    if !hasAutoScoped {
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                HStack {
+                                                    Text("Acc Frames")
+                                                        .font(.system(size: 12, weight: .medium))
+                                                        .foregroundColor(.white.opacity(0.9))
+                                                    Spacer()
+                                                    Text("\(settings.videoModeAccumulatorFrames)")
+                                                        .font(.system(size: 11, weight: .semibold))
+                                                        .foregroundColor(.orange)
+                                                }
+                                                Slider(
+                                                    value: Binding(
+                                                        get: { Double(settings.videoModeAccumulatorFrames) },
+                                                        set: { settings.videoModeAccumulatorFrames = Int($0.rounded()) }
+                                                    ),
+                                                    in: 1...10,
+                                                    step: 1
+                                                )
+                                                .tint(.orange)
+                                            }
+                                            Toggle(isOn: $settings.showAccumulatedOverlay) {
+                                                Text("Acc. Overlay")
+                                                    .font(.system(size: 12, weight: .medium))
+                                                    .foregroundColor(.white.opacity(0.9))
+                                            }
+                                            .toggleStyle(.switch)
+                                            .tint(.orange)
+                                            Toggle(isOn: $settings.lineOverDotFilter) {
+                                                Text("Line over dot")
+                                                    .font(.system(size: 12, weight: .medium))
+                                                    .foregroundColor(.white.opacity(0.9))
+                                            }
+                                            .toggleStyle(.switch)
+                                            .tint(.orange)
+                                            if let err = mlDetection.lastError, !err.isEmpty {
+                                                Text(err)
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundColor(.red)
+                                                    .lineLimit(3)
+                                            }
+                                        }
+                                        Divider()
+                                            .background(Color.white.opacity(0.15))
+                                            .padding(.vertical, 8)
+                                    }
+                                    if let seg = autoScopedSegment {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "scope")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.green)
+                                            Text("x: \(String(format: "%.2f", seg.x))  z: \(String(format: "%.2f", seg.z))")
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundColor(.white)
+                                        }
+                                        .padding(.bottom, 8)
+                                    }
+                                    // Compact detection history
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Frame history")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundColor(.white.opacity(0.5))
+                                            .padding(.bottom, 2)
+                                        if detectionHistory.isEmpty {
+                                            Text("No frames yet")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.white.opacity(0.4))
+                                        } else {
+                                            ForEach(Array(detectionHistory.suffix(12).reversed().enumerated()), id: \.offset) { _, rec in
+                                                HStack(spacing: 6) {
+                                                    Circle()
+                                                        .fill(rec.dots > 0 && rec.lines > 0 ? Color.green : Color.orange)
+                                                        .frame(width: 5, height: 5)
+                                                    Text("d:\(rec.dots) l:\(rec.lines)")
+                                                        .font(.system(size: 10, weight: .medium))
+                                                        .foregroundColor(.white.opacity(0.8))
+                                                    if let d = rec.distanceMeters {
+                                                        Text(String(format: "%.2fm", d))
+                                                            .font(.system(size: 10))
+                                                            .foregroundColor(.yellow)
+                                                    }
+                                                    if let r = rec.lineToDotSizeRatio {
+                                                        Text(String(format: "r:%.1f", r))
+                                                            .font(.system(size: 10))
+                                                            .foregroundColor(.white.opacity(0.4))
+                                                    }
+                                                    Spacer()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                .padding(12)
+                                .frame(width: 240)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(.ultraThinMaterial)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .strokeBorder(
+                                                    LinearGradient(
+                                                        colors: [.white.opacity(0.35), .white.opacity(0.1)],
+                                                        startPoint: .topLeading,
+                                                        endPoint: .bottomTrailing
+                                                    ),
+                                                    lineWidth: 1
+                                                )
+                                        )
+                                )
+                                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottomLeading)))
+                            }
+                            // Bottom-left circle button
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                    showDetectionSettings.toggle()
+                                }
+                            } label: {
+                                Image(systemName: hasAutoScoped ? "scope" : "slider.horizontal.3")
+                                    .font(.system(size: 22, weight: .semibold))
+                                    .frame(width: 66, height: 66)
+                            }
+                            .buttonStyle(.plain)
+                            .lgCircle(tint: hasAutoScoped ? .green : (showDetectionSettings ? .orange : .white))
+                        }
                         Spacer()
                     }
                     .padding(.leading, 16)
-                    .padding(.top, 120)
-
-                    Spacer()
+                    .padding(.bottom, 50)
                 }
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showDetectionSettings)
+                .animation(.easeInOut(duration: 0.3), value: hasAutoScoped)
                 .zIndex(4)
 
                 if isRegistering {
@@ -386,16 +497,30 @@ extension LaserGuideARSessionView {
                                     .lgCircle(tint: .white)
                                 } else {
                                     // Locating badge (replaces plus button until auto-scope)
-                                    VStack(spacing: 2) {
-                                        Text("Locating...")
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundColor(.white)
-                                        Text(locatingDistanceText)
-                                            .font(.system(size: 12, weight: .semibold))
-                                            .foregroundColor(.yellow)
+                                    ZStack {
+                                        VStack(spacing: 2) {
+                                            Text(originStabilityProgress > 0 ? "Locking..." : "Locating...")
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundColor(originStabilityProgress > 0 ? .green : .white)
+                                            Text(locatingDistanceText)
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundColor(.yellow)
+                                        }
+                                        // Circular stability progress ring — only visible while counting down.
+                                        if originStabilityProgress > 0 {
+                                            Circle()
+                                                .trim(from: 0, to: originStabilityProgress)
+                                                .stroke(
+                                                    Color.green,
+                                                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                                                )
+                                                .rotationEffect(.degrees(-90))
+                                                .frame(width: 72, height: 72)
+                                                .animation(.linear(duration: 0.1), value: originStabilityProgress)
+                                        }
                                     }
                                     .frame(width: 120, height: 80)
-                                    .lgCapsule(tint: .white)
+                                    .lgCapsule(tint: originStabilityProgress > 0 ? .green : .white)
                                 }
                             }
                         } else {
@@ -430,30 +555,6 @@ extension LaserGuideARSessionView {
                 }
                 .animation(.easeInOut(duration: 0.2), value: markerService.selectedMarkerID)
 
-                // Snapped segment (x/z) display (bottom-right, only after auto-scope)
-                if hasAutoScoped, let seg = autoScopedSegment {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("x: \(String(format: "%.2f", seg.x))")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.white)
-                                Text("z: \(String(format: "%.2f", seg.z))")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.white)
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .lgCapsule(tint: .white)
-                        }
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 50)
-                    }
-                    .zIndex(3)
-                }
-
                 if !hasAutoScoped && emptyDetectionFrames <= 2 * max(1, settings.videoModeAccumulatorFrames) {
                     LaserMLDetectionOverlay(
                         detections: filterLineOverDot(settings.showAccumulatedOverlay ? accumulatedDetections : mlDetection.detections),
@@ -470,25 +571,6 @@ extension LaserGuideARSessionView {
                     .onAppear { viewportSize = geometry.size }
                     .onChange(of: geometry.size) { _, newValue in viewportSize = newValue }
                     .zIndex(2)
-                }
-
-                // History panel overlay
-                if showHistoryPanel {
-                    VStack {
-                        Spacer().frame(height: 120)
-                        VideoDetectionHistoryPanel(
-                            records: detectionHistory,
-                            onClose: {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                    showHistoryPanel = false
-                                }
-                            }
-                        )
-                        .padding(.horizontal, 16)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                        Spacer()
-                    }
-                    .zIndex(5)
                 }
 
                 // ML model loading / error HUD

@@ -11,18 +11,43 @@ import ARKit
 import UIKit
 import Combine
 import QuartzCore
+import AudioToolbox
 
 extension LaserGuideARSessionView {
 
     func maybeAutoScope(_ measurement: LaserDotLineMeasurement?) {
         guard !hasAutoScoped else { return }
-        guard let measurement else { return }
 
-        // Match measurement against any known segment; snap immediately if within tolerance.
-        guard let candidate = candidateSegment(for: measurement.distanceMeters),
-              candidate.delta <= laserGuideDistanceToleranceMeters else { return }
+        // Reset stability when there is no measurement or the distance is out of tolerance.
+        guard let measurement,
+              let candidate = candidateSegment(for: measurement.distanceMeters),
+              candidate.delta <= laserGuideDistanceToleranceMeters else {
+            if originStabilityStartTime != 0 {
+                originStabilityStartTime = 0
+                originStabilityProgress = 0
+            }
+            return
+        }
 
         let now = CACurrentMediaTime()
+
+        // Start the stability clock on the first in-tolerance frame.
+        if originStabilityStartTime == 0 {
+            originStabilityStartTime = now
+            print("[LaserGuideSnap] Stability clock started, candidate delta=\(String(format: "%.3f", candidate.delta))m")
+        }
+
+        let elapsed = now - originStabilityStartTime
+        let required: TimeInterval = 1.0
+        originStabilityProgress = min(1.0, elapsed / required)
+
+        // Require 1 second of continuous stability before placing origin.
+        guard elapsed >= required else { return }
+
+        // Reset stability state before placing.
+        originStabilityStartTime = 0
+        originStabilityProgress = 0
+
         if let snappedSegment = applyLaserGuideIfPossible(measurement) {
             autoScopedDotWorld = measurement.dotWorld
             autoScopedAtTime = now
@@ -37,6 +62,11 @@ extension LaserGuideARSessionView {
             autoScopeRestartThresholdZMeters = computeAutoRestartThresholdZ(for: snappedSegment)
 
             hasAutoScoped = true
+
+            // Strong haptic + sound feedback so the operator feels the snap.
+            let haptic = UINotificationFeedbackGenerator()
+            haptic.notificationOccurred(.success)
+            AudioServicesPlaySystemSound(1519)
 
             // After auto-scope, show origin gizmo again.
             frameOriginAnchor?.isEnabled = true

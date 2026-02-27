@@ -134,6 +134,8 @@ extension LaserGuideARSessionView {
         frameAccumulator = []
         accumulatedDetections = []
         emptyDetectionFrames = 0
+        originStabilityStartTime = 0
+        originStabilityProgress = 0
 
         frameOriginAnchor?.isEnabled = false
         debugDotAnchor?.isEnabled = false

@@ -47,13 +47,17 @@ struct LaserGuideARSessionView: View {
     @State var debugDotAnchor: AnchorEntity? = nil
     @State var debugLineAnchor: AnchorEntity? = nil
     @State var showDetectionSettings = false
-    @State var showHistoryPanel = false
     @State var detectionHistory: [DetectionFrameRecord] = []
     // Accumulator: ring buffer of last N frames, merged for overlay + measurement.
     @State var frameAccumulator: [[LaserMLDetection]] = []
     @State var accumulatedDetections: [LaserMLDetection] = []
     /// Consecutive frames (post-filter) that lacked both a dot AND a line.
     @State var emptyDetectionFrames: Int = 0
+    // Origin placement stability delay (Normal Mode).
+    /// `CACurrentMediaTime()` timestamp of when the current in-tolerance stable match began; 0 = not tracking.
+    @State var originStabilityStartTime: TimeInterval = 0
+    /// Progress 0…1 toward the required 1-second stability window. Drives the badge progress arc.
+    @State var originStabilityProgress: Double = 0
     // ML model loading state for the current session's Space.
     @State var mlModelLoadError: String? = nil
     @State var isLoadingMLModel: Bool = false

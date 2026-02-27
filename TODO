@@ -39,9 +39,11 @@ Todo:
     ✔ Accum boxes improvement @done(26-02-24 16:41)
     ✔ Fix: Origin placement @done(26-02-24 17:20)
   Button fixes:
-    ☐ Restart placing
-    ☐ Exit (cross button)
+    ✔ Restart placing @done(26-02-25 11:48)
+    ✔ Exit (cross button) @done(26-02-25 11:48)
 
+  Origin placement improvemnet:
+    ✔ Delay: 1s stability before origin placement @done(26-02-27)
 
 
 
