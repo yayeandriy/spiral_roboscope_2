@@ -494,6 +494,7 @@ extension SpatialMarkerService {
         allNodes[j] = newWorld[1]
         lastWorldNodePositions = newWorld
         applyNodePositions(markerIndex: markerIdx, newNodePositions: allNodes)
+        refreshHandlers(markerIndex: markerIdx)
     }
 
     /// Update the moving edge using a one-finger drag translation in screen space.
@@ -533,11 +534,41 @@ extension SpatialMarkerService {
         allNodes[j] = newWorld[1]
         lastWorldNodePositions = newWorld
         applyNodePositions(markerIndex: markerIdx, newNodePositions: allNodes)
+        refreshHandlers(markerIndex: markerIdx)
     }
     
     /// End edge movement and return the modified marker for persistence
     func endMoveSelectedEdge() -> (UUID, Int64, [SIMD3<Float>])? {
         return stopMovingMarker()
+    }
+
+    /// Recalculate handler positions for the currently selected edge of a marker
+    private func refreshHandlers(markerIndex: Int) {
+        guard markerIndex < markers.count,
+              let selEdge = selectedEdgeIndex,
+              markers[markerIndex].id == selectedMarkerID else { return }
+        let marker = markers[markerIndex]
+        let anchorEntity = marker.anchorEntity
+        let pairs = [(0,1),(1,2),(2,3),(3,0)]
+        let (i, j) = pairs[selEdge]
+        let pA = marker.nodes[i]
+        let pB = marker.nodes[j]
+        let mid = (pA + pB) / 2
+        let dir = normalize(pB - pA)
+        var perp = SIMD3<Float>(dir.z, 0, -dir.x)
+        if simd_length(perp) < 0.0001 { perp = SIMD3<Float>(1, 0, 0) }
+        perp = normalize(perp)
+        let gap: Float = 0.008
+        for (side, name) in [(-1, "handler_a"), (1, "handler_b")] {
+            if let handle = anchorEntity.children.first(where: { $0.name == name }) {
+                handle.position = mid + perp * gap * Float(side)
+                let yAxis = SIMD3<Float>(0, 1, 0)
+                let crossVal = cross(yAxis, dir)
+                if simd_length(crossVal) > 0.0001 {
+                    handle.orientation = simd_quatf(angle: acos(dot(yAxis, dir)), axis: normalize(crossVal))
+                }
+            }
+        }
     }
 }
 

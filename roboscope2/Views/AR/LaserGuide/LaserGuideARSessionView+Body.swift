@@ -199,22 +199,38 @@ extension LaserGuideARSessionView {
                 .allowsHitTesting(!showActionsDialog)
                 .edgesIgnoringSafeArea(.all)
 
-                // Target overlay (switch to crosshair in manual placement mode)
-                TargetOverlayView(style: manualPlacementState == .inactive ? .brackets : .cross)
-                    .padding(.top, 40)
-                    .allowsHitTesting(false)
-                    .zIndex(1)
+                // Target overlay — only in marker placement mode
+                if hasAutoScoped {
+                    TargetOverlayView(style: manualPlacementState == .inactive ? .brackets : .cross)
+                        .padding(.top, 40)
+                        .allowsHitTesting(false)
+                        .zIndex(1)
+                }
 
-                // Top controls
+                // Top controls — simplified
                 VStack {
                     HStack(spacing: 12) {
-                        Button {
-                            showActionsDialog = true
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 36)
+                        Spacer(minLength: 8)
+
+                        // Marker count badge (only after origin placed) — tappable for delete all
+                        if hasAutoScoped {
+                            Menu {
+                                Button(role: .destructive) {
+                                    clearAllMarkersPersisted()
+                                } label: {
+                                    Label("Delete All Markers", systemImage: "trash")
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.white)
+                                    Text("\(markerService.markers.count)")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.white)
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 12)
                                         .fill(.ultraThinMaterial)
@@ -230,35 +246,8 @@ extension LaserGuideARSessionView {
                                                 )
                                         )
                                 )
+                            }
                         }
-
-                        Spacer(minLength: 8)
-
-                        HStack(spacing: 6) {
-                            Image(systemName: "mappin.circle.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                            Text("\(markerService.markers.count)")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(.ultraThinMaterial)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .strokeBorder(
-                                            LinearGradient(
-                                                colors: [.white.opacity(0.35), .white.opacity(0.1)],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            ),
-                                            lineWidth: 1
-                                        )
-                                )
-                        )
 
                         Spacer(minLength: 8)
 
@@ -300,147 +289,102 @@ extension LaserGuideARSessionView {
                 }
                 .zIndex(5)
 
-                // Detection settings / origin indicator (bottom-left)
-                VStack {
-                    Spacer()
-                    HStack(alignment: .bottom) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            // Expanded panel (floats above button)
-                            if showDetectionSettings {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    if !hasAutoScoped {
-                                        VStack(alignment: .leading, spacing: 12) {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                HStack {
-                                                    Text("Acc Frames")
-                                                        .font(.system(size: 12, weight: .medium))
-                                                        .foregroundColor(.white.opacity(0.9))
-                                                    Spacer()
-                                                    Text("\(settings.videoModeAccumulatorFrames)")
-                                                        .font(.system(size: 11, weight: .semibold))
-                                                        .foregroundColor(.orange)
-                                                }
-                                                Slider(
-                                                    value: Binding(
-                                                        get: { Double(settings.videoModeAccumulatorFrames) },
-                                                        set: { settings.videoModeAccumulatorFrames = Int($0.rounded()) }
-                                                    ),
-                                                    in: 1...10,
-                                                    step: 1
-                                                )
-                                                .tint(.orange)
-                                            }
-                                            Toggle(isOn: $settings.showAccumulatedOverlay) {
-                                                Text("Acc. Overlay")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                            }
-                                            .toggleStyle(.switch)
-                                            .tint(.orange)
-                                            Toggle(isOn: $settings.lineOverDotFilter) {
-                                                Text("Line over dot")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(.white.opacity(0.9))
-                                            }
-                                            .toggleStyle(.switch)
-                                            .tint(.orange)
-                                            if let err = mlDetection.lastError, !err.isEmpty {
-                                                Text(err)
-                                                    .font(.system(size: 11, weight: .semibold))
-                                                    .foregroundColor(.red)
-                                                    .lineLimit(3)
-                                            }
-                                        }
-                                        Divider()
-                                            .background(Color.white.opacity(0.15))
-                                            .padding(.vertical, 8)
-                                    }
-                                    if let seg = autoScopedSegment {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "scope")
-                                                .font(.system(size: 11))
-                                                .foregroundColor(.green)
-                                            Text("x: \(String(format: "%.2f", seg.x))  z: \(String(format: "%.2f", seg.z))")
-                                                .font(.system(size: 12, weight: .semibold))
-                                                .foregroundColor(.white)
-                                        }
-                                        .padding(.bottom, 8)
-                                    }
-                                    // Compact detection history
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Frame history")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundColor(.white.opacity(0.5))
-                                            .padding(.bottom, 2)
-                                        if detectionHistory.isEmpty {
-                                            Text("No frames yet")
-                                                .font(.system(size: 11))
-                                                .foregroundColor(.white.opacity(0.4))
-                                        } else {
-                                            ForEach(Array(detectionHistory.suffix(12).reversed().enumerated()), id: \.offset) { _, rec in
-                                                HStack(spacing: 6) {
-                                                    Circle()
-                                                        .fill(rec.dots > 0 && rec.lines > 0 ? Color.green : Color.orange)
-                                                        .frame(width: 5, height: 5)
-                                                    Text("d:\(rec.dots) l:\(rec.lines)")
-                                                        .font(.system(size: 10, weight: .medium))
-                                                        .foregroundColor(.white.opacity(0.8))
-                                                    if let d = rec.distanceMeters {
-                                                        Text(String(format: "%.2fm", d))
-                                                            .font(.system(size: 10))
-                                                            .foregroundColor(.yellow)
-                                                    }
-                                                    if let r = rec.lineToDotSizeRatio {
-                                                        Text(String(format: "r:%.1f", r))
-                                                            .font(.system(size: 10))
-                                                            .foregroundColor(.white.opacity(0.4))
-                                                    }
-                                                    Spacer()
-                                                }
-                                            }
-                                        }
-                                    }
+                // Origin placement mode: full-width locating badge with Vision/Manual toggle
+                if !hasAutoScoped {
+                    VStack {
+                        Spacer()
+                        VStack(spacing: 10) {
+                            // Status
+                            HStack(spacing: 10) {
+                                if originStabilityProgress > 0 {
+                                    Circle()
+                                        .trim(from: 0, to: originStabilityProgress)
+                                        .stroke(Color.green, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                                        .rotationEffect(.degrees(-90))
+                                        .frame(width: 22, height: 22)
+                                        .animation(.linear(duration: 0.1), value: originStabilityProgress)
                                 }
-                                .padding(12)
-                                .frame(width: 240)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(.ultraThinMaterial)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 16)
-                                                .strokeBorder(
-                                                    LinearGradient(
-                                                        colors: [.white.opacity(0.35), .white.opacity(0.1)],
-                                                        startPoint: .topLeading,
-                                                        endPoint: .bottomTrailing
-                                                    ),
-                                                    lineWidth: 1
-                                                )
+                                Text(originStabilityProgress > 0 ? "Locking..." : "Locating Origin")
+                                    .font(.system(size: 17, weight: .bold))
+                                    .foregroundColor(originStabilityProgress > 0 ? .green : .white)
+                            }
+
+                            // Description and distance only in Vision mode
+                            if manualPlacementState == .inactive {
+                                Text("Point camera at the floor and move slowly.\nThe origin will lock automatically when detected.")
+                                    .font(.system(size: 13, weight: .regular))
+                                    .foregroundColor(.white.opacity(0.75))
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if !locatingDistanceText.isEmpty {
+                                    Text(locatingDistanceText)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.yellow)
+                                }
+                            }
+
+                            // Vision / Manual toggle
+                            HStack(spacing: 0) {
+                                Button {
+                                    if manualPlacementState != .inactive {
+                                        cancelManualTwoPointsMode()
+                                        enterDetectionMode()  // restart detection
+                                    }
+                                } label: {
+                                    Text("Vision")
+                                        .font(.system(size: 14, weight: manualPlacementState == .inactive ? .bold : .regular))
+                                        .foregroundColor(manualPlacementState == .inactive ? .black : .white.opacity(0.7))
+                                        .padding(.vertical, 10)
+                                        .frame(maxWidth: .infinity)
+                                        .background(
+                                            manualPlacementState == .inactive
+                                                ? Color.white
+                                                : Color.white.opacity(0.1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                                Button {
+                                    if manualPlacementState == .inactive { enterManualTwoPointsMode() }
+                                } label: {
+                                    Text("Manual")
+                                        .font(.system(size: 14, weight: manualPlacementState != .inactive ? .bold : .regular))
+                                        .foregroundColor(manualPlacementState != .inactive ? .black : .white.opacity(0.7))
+                                        .padding(.vertical, 10)
+                                        .frame(maxWidth: .infinity)
+                                        .background(
+                                            manualPlacementState != .inactive
+                                                ? Color.white
+                                                : Color.white.opacity(0.1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .padding(18)
+                        .padding(.horizontal, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(.ultraThinMaterial)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .strokeBorder(
+                                            LinearGradient(
+                                                colors: [.white.opacity(0.3), .white.opacity(0.08)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            ),
+                                            lineWidth: 1
                                         )
                                 )
-                                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .bottomLeading)))
-                            }
-                            // Bottom-left circle button
-                            Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    showDetectionSettings.toggle()
-                                }
-                            } label: {
-                                Image(systemName: hasAutoScoped ? "scope" : "slider.horizontal.3")
-                                    .font(.system(size: 22, weight: .semibold))
-                                    .frame(width: 66, height: 66)
-                            }
-                            .buttonStyle(.plain)
-                            .lgCircle(tint: hasAutoScoped ? .green : (showDetectionSettings ? .orange : .white))
-                        }
-                        Spacer()
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 50)
                     }
-                    .padding(.leading, 16)
-                    .padding(.bottom, 50)
+                    .zIndex(4)
                 }
-                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showDetectionSettings)
-                .animation(.easeInOut(duration: 0.3), value: hasAutoScoped)
-                .zIndex(4)
+
+                // Removed detection settings / frame history panel
 
                 if isRegistering {
                     registrationProgressOverlay
@@ -500,33 +444,8 @@ extension LaserGuideARSessionView {
                                     }
                                     .buttonStyle(.plain)
                                     .lgCircle(tint: .white)
-                                } else {
-                                    // Locating badge (replaces plus button until auto-scope)
-                                    ZStack {
-                                        VStack(spacing: 2) {
-                                            Text(originStabilityProgress > 0 ? "Locking..." : "Locating...")
-                                                .font(.system(size: 14, weight: .semibold))
-                                                .foregroundColor(originStabilityProgress > 0 ? .green : .white)
-                                            Text(locatingDistanceText)
-                                                .font(.system(size: 12, weight: .semibold))
-                                                .foregroundColor(.yellow)
-                                        }
-                                        // Circular stability progress ring — only visible while counting down.
-                                        if originStabilityProgress > 0 {
-                                            Circle()
-                                                .trim(from: 0, to: originStabilityProgress)
-                                                .stroke(
-                                                    Color.green,
-                                                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                                                )
-                                                .rotationEffect(.degrees(-90))
-                                                .frame(width: 72, height: 72)
-                                                .animation(.linear(duration: 0.1), value: originStabilityProgress)
-                                        }
-                                    }
-                                    .frame(width: 120, height: 80)
-                                    .lgCapsule(tint: originStabilityProgress > 0 ? .green : .white)
                                 }
+                                // Old locating badge removed — now shown as full-width badge above
                             }
                         } else {
                             VStack(spacing: 10) {
@@ -556,7 +475,7 @@ extension LaserGuideARSessionView {
                         Spacer()
                     }
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 50)
+                    .padding(.bottom, manualPlacementState != .inactive ? 280 : 50)
                 }
                 .animation(.easeInOut(duration: 0.2), value: markerService.selectedMarkerID)
 

@@ -202,33 +202,57 @@ extension SpatialMarkerService {
         guard index < markers.count else { return }
         let marker = markers[index]
         let anchorEntity = marker.anchorEntity
-        let nodeColor: UIColor = (isSelected || isInTarget) ? .systemBlue : .black
+
+        // Radius: thicker when selected
+        let nodeRadius: Float = isSelected ? 0.015 : 0.01
+        let edgeRadius: Float = isSelected ? 0.0008 : 0.0005
+        let nodeColor: UIColor = isSelected || isInTarget
+            ? .white
+            : UIColor(white: 0.5, alpha: 1.0)
+
         for nodeIndex in 0..<4 {
             if let nodeEntity = anchorEntity.children.first(where: { $0.name == "node_\(nodeIndex)" }) as? ModelEntity {
+                nodeEntity.model?.mesh = .generateSphere(radius: nodeRadius)
                 nodeEntity.model?.materials = [UnlitMaterial(color: nodeColor)]
             }
         }
         let edgeNodePairs = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        let selEdge = (isSelected && markers[index].id == selectedMarkerID) ? selectedEdgeIndex : nil
         for (edgeIndex, (i, j)) in edgeNodePairs.enumerated() {
             if let edgeEntity = anchorEntity.children.first(where: { $0.name == "edge_\(i)_\(j)" }) as? ModelEntity {
                 let edgeColor: UIColor
-                if isSelected, let selEdge = selectedEdgeIndex, markers[index].id == selectedMarkerID, edgeIndex == selEdge {
-                    edgeColor = .systemRed
+                let thisEdgeRadius: Float
+                if selEdge == edgeIndex {
+                    edgeColor = .white
+                    thisEdgeRadius = edgeRadius * 2.5  // selected edge — thickest
                 } else if isSelected || isInTarget || edgesInTarget.contains(edgeIndex) {
-                    edgeColor = .systemBlue
+                    edgeColor = UIColor(white: 0.85, alpha: 1.0)
+                    thisEdgeRadius = edgeRadius
                 } else {
-                    edgeColor = UIColor(red: 0.5, green: 0.8, blue: 1.0, alpha: 1.0)
+                    edgeColor = UIColor(white: 0.6, alpha: 1.0)
+                    thisEdgeRadius = edgeRadius
                 }
-                let edgeMaterial = UnlitMaterial(color: edgeColor)
-                edgeEntity.model?.materials = [edgeMaterial]
+                // Rebuild edge mesh with correct radius
+                let start = marker.nodes[i]
+                let end = marker.nodes[j]
+                let mid = (start + end) / 2
+                let dir = end - start
+                let len = simd_length(dir)
+                edgeEntity.model?.mesh = .generateCylinder(height: len, radius: thisEdgeRadius)
+                edgeEntity.position = mid
+                let up = normalize(dir)
+                let yAxis = SIMD3<Float>(0, 1, 0)
+                let crossVal = cross(yAxis, up)
+                if simd_length(crossVal) > 0.0001 {
+                    edgeEntity.orientation = simd_quatf(angle: acos(dot(yAxis, up)), axis: normalize(crossVal))
+                }
+                edgeEntity.model?.materials = [UnlitMaterial(color: edgeColor)]
             }
         }
 
-        // Edge selection handlers: two short parallel lines at the edge midpoint
+        // Edge selection handlers
         let handlerNames = ["handler_a", "handler_b"]
         let existingHandlers = anchorEntity.children.filter { handlerNames.contains($0.name) }
-
-        let selEdge = (isSelected && markers[index].id == selectedMarkerID) ? selectedEdgeIndex : nil
 
         if let edgeIdx = selEdge {
             let (i, j) = edgeNodePairs[edgeIdx]
@@ -237,7 +261,6 @@ extension SpatialMarkerService {
             let mid = (pA + pB) / 2
             let dir = normalize(pB - pA)
 
-            // Perpendicular in horizontal (XZ) plane
             var perp = SIMD3<Float>(dir.z, 0, -dir.x)
             if simd_length(perp) < 0.0001 { perp = SIMD3<Float>(1, 0, 0) }
             perp = normalize(perp)
@@ -245,7 +268,7 @@ extension SpatialMarkerService {
             let handleLen: Float = 0.025
             let handleRadius: Float = 0.001
             let gap: Float = 0.008
-            let handleMat = UnlitMaterial(color: .systemRed)
+            let handleMat = UnlitMaterial(color: .white)
 
             for side in [-1, 1] {
                 let offset = perp * gap * Float(side)
@@ -255,26 +278,19 @@ extension SpatialMarkerService {
                     materials: [handleMat]
                 )
                 handle.position = handlePos
-                // Orient cylinder along the edge direction
                 let yAxis = SIMD3<Float>(0, 1, 0)
                 let crossVal = cross(yAxis, dir)
                 if simd_length(crossVal) > 0.0001 {
-                    let axis = normalize(crossVal)
-                    let angle = acos(dot(yAxis, dir))
-                    handle.orientation = simd_quatf(angle: angle, axis: axis)
+                    handle.orientation = simd_quatf(angle: acos(dot(yAxis, dir)), axis: normalize(crossVal))
                 }
                 handle.name = handlerNames[side > 0 ? 1 : 0]
-                // Remove old handler if replacing
                 if let old = existingHandlers.first(where: { $0.name == handle.name }) {
                     anchorEntity.removeChild(old)
                 }
                 anchorEntity.addChild(handle)
             }
         } else {
-            // Remove handlers when edge is no longer selected
-            for h in existingHandlers {
-                anchorEntity.removeChild(h)
-            }
+            for h in existingHandlers { anchorEntity.removeChild(h) }
         }
     }
 }
