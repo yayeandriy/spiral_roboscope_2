@@ -58,9 +58,16 @@ extension ARSessionView {
         let yTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
         yTip.position = SIMD3<Float>(0, axisLength, 0)
         
-        let zTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
-        zTip.position = SIMD3<Float>(0, 0, axisLength)
-        
+        // Z-axis arrow only (no dot)
+        let arrowHeight: Float = 0.05
+        let arrowRadius: Float = 0.018
+        let zArrow = ModelEntity(
+            mesh: .generateCone(height: arrowHeight, radius: arrowRadius),
+            materials: [axisMaterial]
+        )
+        zArrow.position = SIMD3<Float>(0, 0, axisLength + arrowHeight / 2)
+        zArrow.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+
         // Center dot (slightly larger)
         let centerDot = ModelEntity(mesh: .generateSphere(radius: dotRadius * 1.4), materials: [axisMaterial])
         
@@ -70,7 +77,7 @@ extension ARSessionView {
         anchor.addChild(zAxis)
         anchor.addChild(xTip)
         anchor.addChild(yTip)
-        anchor.addChild(zTip)
+        anchor.addChild(zArrow)
         anchor.addChild(centerDot)
         
         // Add to scene
@@ -80,64 +87,28 @@ extension ARSessionView {
     
     /// Drop FrameOrigin on the floor at screen center using raycast
     func dropFrameOriginOnFloor() {
-        guard let arView = arView else {
-            
-            return
-        }
+        guard let arView = arView else { return }
         
-        // Raycast from screen center downward to find floor
         let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
         
-        // Try raycasting to existing horizontal planes (floor detection)
-        if let query = arView.makeRaycastQuery(
-            from: screenCenter,
-            allowing: .existingPlaneGeometry,
-            alignment: .horizontal
-        ) {
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: .horizontal) {
             let results = arView.session.raycast(query)
-            
             if let firstResult = results.first {
-                // Found a horizontal plane (floor)
-                let hitTransform = firstResult.worldTransform
-                
-                // Update the frame origin transform
-                frameOriginTransform = hitTransform
-                
-                // Update the visual gizmo
-                placeFrameOriginGizmo(at: hitTransform)
-                
-                // Update all existing markers to new coordinate system
+                frameOriginTransform = firstResult.worldTransform
+                placeFrameOriginGizmo(at: firstResult.worldTransform)
                 updateMarkersForNewFrameOrigin()
-                
-                // NOTE: Reference model anchor is automatically updated via frameOriginTransform didSet
-                
                 return
             }
         }
-        
-        // Fallback: raycast to estimated plane if no detected planes yet
-        if let query = arView.makeRaycastQuery(
-            from: screenCenter,
-            allowing: .estimatedPlane,
-            alignment: .horizontal
-        ) {
+        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: .horizontal) {
             let results = arView.session.raycast(query)
-            
             if let firstResult = results.first {
-                let hitTransform = firstResult.worldTransform
-                
-                frameOriginTransform = hitTransform
-                placeFrameOriginGizmo(at: hitTransform)
+                frameOriginTransform = firstResult.worldTransform
+                placeFrameOriginGizmo(at: firstResult.worldTransform)
                 updateMarkersForNewFrameOrigin()
-                
-                // NOTE: Reference model anchor is automatically updated via frameOriginTransform didSet
-                
                 return
             }
         }
-        
-        // No floor found
-        
     }
 
     /// Start auto-dropping the FrameOrigin with retries until a plane is found or attempts are exhausted
@@ -246,15 +217,22 @@ extension LaserGuideARSessionView {
         zAxis.position = SIMD3<Float>(0, 0, axisLength/2)
         zAxis.orientation = simd_quatf(angle: .pi/2, axis: SIMD3<Float>(1, 0, 0))
 
-        // Dots at axis tips
+        // Dots at X and Y tips; Z gets an arrow
         let xTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
         xTip.position = SIMD3<Float>(axisLength, 0, 0)
 
         let yTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
         yTip.position = SIMD3<Float>(0, axisLength, 0)
 
-        let zTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
-        zTip.position = SIMD3<Float>(0, 0, axisLength)
+        // Z-axis arrow only (no dot)
+        let arrowHeight: Float = 0.05
+        let arrowRadius: Float = 0.018
+        let zArrow = ModelEntity(
+            mesh: .generateCone(height: arrowHeight, radius: arrowRadius),
+            materials: [axisMaterial]
+        )
+        zArrow.position = SIMD3<Float>(0, 0, axisLength + arrowHeight / 2)
+        zArrow.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
 
         // Center dot (slightly larger)
         let centerDot = ModelEntity(mesh: .generateSphere(radius: dotRadius * 1.4), materials: [axisMaterial])
@@ -265,7 +243,7 @@ extension LaserGuideARSessionView {
         anchor.addChild(zAxis)
         anchor.addChild(xTip)
         anchor.addChild(yTip)
-        anchor.addChild(zTip)
+        anchor.addChild(zArrow)
         anchor.addChild(centerDot)
 
         // Add to scene
