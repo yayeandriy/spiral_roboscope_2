@@ -78,10 +78,12 @@ final class SpatialMarkerService: ObservableObject {
         let anchorEntity = AnchorEntity(world: .zero)
         anchorEntity.isEnabled = markersVisible
         
+        let markerMaterial = UnlitMaterial(color: .white)
+
         // Nodes
         for (index, position) in points.enumerated() {
             let nodeMesh = MeshResource.generateSphere(radius: 0.01)
-            let nodeEntity = ModelEntity(mesh: nodeMesh, materials: [OriginMaterials.markerNodeSphere])
+            let nodeEntity = ModelEntity(mesh: nodeMesh, materials: [markerMaterial])
             nodeEntity.position = position
             nodeEntity.name = "node_\(index)"
             anchorEntity.addChild(nodeEntity)
@@ -96,7 +98,7 @@ final class SpatialMarkerService: ObservableObject {
             let direction = end - start
             let length = simd_length(direction)
             let edgeMesh = MeshResource.generateCylinder(height: length, radius: 0.0005)
-            let edgeEntity = ModelEntity(mesh: edgeMesh, materials: [UnlitMaterial(color: UIColor(red: 0.5, green: 0.8, blue: 1.0, alpha: 1.0))])
+            let edgeEntity = ModelEntity(mesh: edgeMesh, materials: [markerMaterial])
             edgeEntity.position = midpoint
             let up = normalize(direction)
             let defaultUp = SIMD3<Float>(0, 1, 0)
