@@ -401,6 +401,18 @@ extension ARSessionView {
 
         if manualPlacementState == .placeSecond, let p1 = manualFirstPoint {
             updateMeasurementVisuals(from: p1, to: hitPos)
+        } else if manualPlacementState == .readyToApply, let p1 = manualFirstPoint, let p2 = manualSecondPoint {
+            // Keep badge anchored to the fixed line as camera moves
+            refreshMeasurementBadgeScreenPosition(from: p1, to: p2)
+        }
+    }
+
+    private func refreshMeasurementBadgeScreenPosition(from: SIMD3<Float>, to: SIMD3<Float>) {
+        guard let arView, let frame = arView.session.currentFrame else { return }
+        let mid = (from + to) / 2
+        let badgeWorld = SIMD3<Float>(mid.x, mid.y + 0.05, mid.z)
+        if let screenPt = projectWorldToScreen(worldPosition: badgeWorld, frame: frame, arView: arView) {
+            measurementBadgeScreenPoint = screenPt
         }
     }
 
