@@ -187,6 +187,8 @@ extension LaserGuideARSessionView {
 
     func placeManualPoint(_ position: SIMD3<Float>, alignment: ARRaycastQuery.TargetAlignment, isFirst: Bool) {
         guard let arView = arView else { return }
+        print("[RefCross] placing \(isFirst ? "first" : "second") at world=\(position)")
+
         var t = matrix_identity_float4x4
         t.columns.3 = SIMD4<Float>(position.x, position.y, position.z, 1)
 
@@ -200,20 +202,19 @@ extension LaserGuideARSessionView {
 
         let anchor = AnchorEntity(world: t)
 
-        let disk = ManualPointHelpers.makePointDisk(name: isFirst ? "manual_point_1" : "manual_point_2")
-        anchor.addChild(disk)
-
-        let lineColor: UIColor = isFirst
-            ? UIColor(red: 1.0, green: 0.85, blue: 0.2, alpha: 1.0)
-            : UIColor(red: 0.3, green: 0.6, blue: 1.0, alpha: 1.0)
-        let verticalLine = ManualPointHelpers.makeDottedVerticalLine(
-            basePosition: .zero,
-            height: 0.30,
-            color: lineColor
+        let color: UIColor = isFirst
+            ? UIColor(red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0)
+            : UIColor(red: 0.2, green: 0.4, blue: 1.0, alpha: 1.0)
+        let cross = ManualPointHelpers.makeReferenceCross(
+            name: isFirst ? "manual_point_1" : "manual_point_2",
+            color: color
         )
-        anchor.addChild(verticalLine)
+        print("[RefCross] cross child count: \(cross.children.count)")
+        anchor.addChild(cross)
 
         arView.scene.addAnchor(anchor)
+        print("[RefCross] anchor added to scene, world pos: \(anchor.position(relativeTo: nil))")
+
         if isFirst {
             if let old = manualFirstAnchor { arView.scene.removeAnchor(old) }
             manualFirstAnchor = anchor
@@ -430,19 +431,18 @@ extension LaserGuideARSessionView {
         arView.scene.addAnchor(lineAnchor)
         measurementLineAnchor = lineAnchor
 
-        // Screen-space badge only
-        let mid = (from + to) / 2
-        let badgeWorld = SIMD3<Float>(mid.x, mid.y + 0.05, mid.z)
+        // Screen-space badge: Z at first ref + segment length
+        let firstBadgeWorld = SIMD3<Float>(from.x, from.y + 0.15, from.z)
         if let frame = arView.session.currentFrame,
-           let screenPt = projectWorldToScreen(worldPosition: badgeWorld, frame: frame, arView: arView) {
+           let screenPt = projectWorldToScreen(worldPosition: firstBadgeWorld, frame: frame, arView: arView) {
             measurementBadgeScreenPoint = screenPt
         }
         if distance < 0.01 {
-            measurementDistanceText = "0 cm"
+            measurementDistanceText = "Z: 0 cm"
         } else if distance < 1.0 {
-            measurementDistanceText = String(format: "%.0f cm", distance * 100)
+            measurementDistanceText = "Z: \(String(format: "%.0f", distance * 100)) cm"
         } else {
-            measurementDistanceText = String(format: "%.2f m", distance)
+            measurementDistanceText = "Z: \(String(format: "%.2f", distance))m"
         }
     }
 

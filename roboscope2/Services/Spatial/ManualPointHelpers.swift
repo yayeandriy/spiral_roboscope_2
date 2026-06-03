@@ -119,15 +119,50 @@ enum ManualPointHelpers {
         return root
     }
 
-    // MARK: - Point disk (7 cm solid white)
+    // MARK: - Reference crosses (50cm, 3D, dashed)
 
-    static func makePointDisk(name: String) -> ModelEntity {
-        let disk = ModelEntity(
-            mesh: .generateCylinder(height: 0.001, radius: 0.035),  // 7 cm diameter
-            materials: [UnlitMaterial(color: .white)]
-        )
-        disk.name = name
-        disk.generateCollisionShapes(recursive: false)
-        return disk
+    static func makeReferenceCross(name: String, color: UIColor) -> ModelEntity {
+        let root = ModelEntity()
+        root.name = name
+
+        let armLen: Float = 0.25
+        let segLen: Float = 0.025
+        let gapLen: Float = 0.012
+        let step = segLen + gapLen
+        let lineRadius: Float = 0.0015
+        let yOffset: Float = 0.005
+
+        func addArm(axis: SIMD3<Float>) {
+            for sign in [-1, 1] {
+                var dist = step / 2
+                var segIndex = 0
+                let maxSegs = Int(armLen / step)
+                while dist < armLen {
+                    let t = Float(segIndex) / Float(max(maxSegs - 1, 1))
+                    let alpha: CGFloat = CGFloat(1.0 - t * 0.7)
+                    let mat = UnlitMaterial(color: color.withAlphaComponent(alpha))
+                    let seg = ModelEntity(
+                        mesh: .generateCylinder(height: segLen, radius: lineRadius),
+                        materials: [mat]
+                    )
+                    seg.position = axis * Float(sign) * dist + SIMD3<Float>(0, yOffset, 0)
+                    if abs(axis.x) > 0.99 {
+                        seg.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 0, 1))
+                    } else if abs(axis.z) > 0.99 {
+                        seg.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+                    }
+                    root.addChild(seg)
+                    dist += step
+                    segIndex += 1
+                }
+            }
+        }
+
+        addArm(axis: SIMD3<Float>(1, 0, 0))  // X
+        addArm(axis: SIMD3<Float>(0, 1, 0))  // Y
+        addArm(axis: SIMD3<Float>(0, 0, 1))  // Z
+
+        root.generateCollisionShapes(recursive: true)
+        return root
     }
 }

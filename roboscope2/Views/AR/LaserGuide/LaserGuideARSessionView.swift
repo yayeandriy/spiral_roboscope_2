@@ -157,6 +157,10 @@ struct LaserGuideARSessionView: View {
     @State var measurementDistanceText: String? = nil
     @State var measurementBadgeScreenPoint: CGPoint? = nil
     @State var lastEdgeCheckTime: TimeInterval = 0
+    @State var originZBadgeText: String? = nil
+    @State var originZBadgeScreenPoint: CGPoint? = nil
+    @State var refZBadgeText: String? = nil
+    @State var refZBadgeScreenPoint: CGPoint? = nil
 
     // Reference model state
     @State var showReferenceModel = false
@@ -199,8 +203,41 @@ struct LaserGuideARSessionView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(Color.black.opacity(0.75), in: Capsule())
-            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
             .position(position)
             .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    func originZBadgeLabel(text: String, position: CGPoint) -> some View {
+        Text(text)
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundColor(.black)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.green.opacity(0.85), in: Capsule())
+            .position(position)
+            .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    func refZBadgeLabel(text: String, position: CGPoint) -> some View {
+        Text(text)
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.red.opacity(0.85), in: Capsule())
+            .position(position)
+            .allowsHitTesting(false)
+    }
+
+    func refreshRefZBadgePosition() {
+        guard let arView, let frame = arView.session.currentFrame,
+              let dotAnchor = debugDotAnchor else { return }
+        let dotWorld = dotAnchor.position(relativeTo: nil)
+        let badgeWorld = SIMD3<Float>(dotWorld.x, dotWorld.y + 0.15, dotWorld.z)
+        if let sp = projectWorldToScreen(worldPosition: badgeWorld, frame: frame, arView: arView) {
+            refZBadgeScreenPoint = sp
+        }
     }
 }

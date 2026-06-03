@@ -138,8 +138,10 @@ extension LaserGuideARSessionView {
         originStabilityProgress = 0
 
         frameOriginAnchor?.isEnabled = false
-        debugDotAnchor?.isEnabled = false
-        debugLineAnchor?.isEnabled = false
+        originZBadgeText = nil
+        originZBadgeScreenPoint = nil
+        refZBadgeText = nil
+        refZBadgeScreenPoint = nil
 
         Task { @MainActor in
             markerService.setMarkersVisible(false)

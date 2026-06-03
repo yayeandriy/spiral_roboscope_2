@@ -216,24 +216,18 @@ extension ARSessionView {
 
         let anchor = AnchorEntity(world: t)
 
-        // 7 cm solid white disk
-        let disk = ManualPointHelpers.makePointDisk(name: isFirst ? "manual_point_1" : "manual_point_2")
-        anchor.addChild(disk)
-
-        // Dotted vertical line (yellow for first, blue for second)
-        let lineColor: UIColor = isFirst
-            ? UIColor(red: 1.0, green: 0.85, blue: 0.2, alpha: 1.0)  // yellow
-            : UIColor(red: 0.3, green: 0.6, blue: 1.0, alpha: 1.0)    // blue
-        let verticalLine = ManualPointHelpers.makeDottedVerticalLine(
-            basePosition: .zero,
-            height: 0.30,
-            color: lineColor
+        // Dashed cross reference (1m, red/blue)
+        let color: UIColor = isFirst
+            ? UIColor(red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0)
+            : UIColor(red: 0.2, green: 0.4, blue: 1.0, alpha: 1.0)
+        let cross = ManualPointHelpers.makeReferenceCross(
+            name: isFirst ? "manual_point_1" : "manual_point_2",
+            color: color
         )
-        anchor.addChild(verticalLine)
+        anchor.addChild(cross)
 
         arView.scene.addAnchor(anchor)
         if isFirst {
-            // Remove old first anchor + vertical
             if let old = manualFirstAnchor { arView.scene.removeAnchor(old) }
             manualFirstAnchor = anchor
         } else {
@@ -241,7 +235,6 @@ extension ARSessionView {
             manualSecondAnchor = anchor
         }
 
-        // Haptic feedback
         let haptic = UIImpactFeedbackGenerator(style: .medium)
         haptic.impactOccurred()
     }
@@ -442,29 +435,26 @@ extension ARSessionView {
 
         let distance = simd_distance(from, to)
 
-        // Remove old 3D line
         if let a = measurementLineAnchor { arView.scene.removeAnchor(a) }
 
-        // Measurement line (3D)
         let line = ManualPointHelpers.makeMeasurementLine(from: from, to: to)
         let lineAnchor = AnchorEntity(world: .zero)
         lineAnchor.addChild(line)
         arView.scene.addAnchor(lineAnchor)
         measurementLineAnchor = lineAnchor
 
-        // Screen-space badge only (no 3D badge — telescope_3 pattern)
-        let mid = (from + to) / 2
-        let badgeWorld = SIMD3<Float>(mid.x, mid.y + 0.05, mid.z)
+        // Screen-space badge: Z label at first reference
+        let firstBadgeWorld = SIMD3<Float>(from.x, from.y + 0.15, from.z)
         if let frame = arView.session.currentFrame,
-           let screenPt = projectWorldToScreen(worldPosition: badgeWorld, frame: frame, arView: arView) {
+           let screenPt = projectWorldToScreen(worldPosition: firstBadgeWorld, frame: frame, arView: arView) {
             measurementBadgeScreenPoint = screenPt
         }
         if distance < 0.01 {
-            measurementDistanceText = "0 cm"
+            measurementDistanceText = "Z: 0 cm"
         } else if distance < 1.0 {
-            measurementDistanceText = String(format: "%.0f cm", distance * 100)
+            measurementDistanceText = "Z: \(String(format: "%.0f", distance * 100)) cm"
         } else {
-            measurementDistanceText = String(format: "%.2f m", distance)
+            measurementDistanceText = "Z: \(String(format: "%.2f", distance))m"
         }
     }
 
