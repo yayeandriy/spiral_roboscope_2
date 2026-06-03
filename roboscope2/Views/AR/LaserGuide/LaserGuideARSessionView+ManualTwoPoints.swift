@@ -12,40 +12,38 @@ import ARKit
 extension LaserGuideARSessionView {
     // MARK: - Manual Two-Point Placement
     func enterManualTwoPointsMode() {
-        // Clean any existing helper anchors from prior runs
         removeManualAnchors()
 
-        // If we have preserved points from an earlier two-point setup, restore them
         if let p1 = preservedFirstPoint, let p2 = preservedSecondPoint {
-            // Restore positions into current editing state
             manualFirstPoint = p1
             manualSecondPoint = p2
             manualFirstPreferredAlignment = preservedFirstPreferredAlignment ?? .horizontal
             manualSecondPreferredAlignment = preservedSecondPreferredAlignment ?? .horizontal
 
-            // Recreate spheres at preserved positions for editing
-            placeManualPoint(p1, color: .red, isFirst: true)
-            placeManualPoint(p2, color: .blue, isFirst: false)
+            placeManualPoint(p1, alignment: manualFirstPreferredAlignment ?? .horizontal, isFirst: true)
+            placeManualPoint(p2, alignment: manualSecondPreferredAlignment ?? .horizontal, isFirst: false)
+            updateMeasurementVisuals(from: p1, to: p2)
             manualPlacementState = .readyToApply
         } else {
-            // No preserved points: start fresh placement flow
             manualFirstPoint = nil
             manualSecondPoint = nil
             manualFirstPreferredAlignment = nil
             manualSecondPreferredAlignment = nil
             manualPlacementState = .placeFirst
         }
-        // Hide markers and gizmo
+
         markerService.setMarkersVisible(false)
         frameOriginAnchor?.isEnabled = false
         selectedManualPointIndex = nil
+
+        startReticleTracking()
     }
 
     func cancelManualTwoPointsMode() {
         manualPlacementState = .inactive
-        // Remove helper anchors
+        stopReticleTracking()
         removeManualAnchors()
-        // Show markers and gizmo again
+        removeMeasurementVisuals()
         markerService.setMarkersVisible(true)
         frameOriginAnchor?.isEnabled = true
         selectedManualPointIndex = nil
@@ -65,16 +63,19 @@ extension LaserGuideARSessionView {
         switch manualPlacementState {
         case .placeFirst:
             if let (p, align) = prioritizedRaycastFromCenter() {
-                placeManualPoint(p, color: .red, isFirst: true)
+                placeManualPoint(p, alignment: align, isFirst: true)
                 manualFirstPoint = p
                 manualFirstPreferredAlignment = align
                 manualPlacementState = .placeSecond
             }
         case .placeSecond:
             if let (p, align) = prioritizedRaycastFromCenter() {
-                placeManualPoint(p, color: .blue, isFirst: false)
+                placeManualPoint(p, alignment: align, isFirst: false)
                 manualSecondPoint = p
                 manualSecondPreferredAlignment = align
+                if let p1 = manualFirstPoint {
+                    updateMeasurementVisuals(from: p1, to: p)
+                }
                 manualPlacementState = .readyToApply
             }
         case .readyToApply:
@@ -184,18 +185,45 @@ extension LaserGuideARSessionView {
         return nil
     }
 
-    func placeManualPoint(_ position: SIMD3<Float>, color: UIColor, isFirst: Bool) {
+    func placeManualPoint(_ position: SIMD3<Float>, alignment: ARRaycastQuery.TargetAlignment, isFirst: Bool) {
         guard let arView = arView else { return }
         var t = matrix_identity_float4x4
         t.columns.3 = SIMD4<Float>(position.x, position.y, position.z, 1)
+
+        switch alignment {
+        case .horizontal: break
+        case .vertical:
+            t = t * float4x4(simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(1, 0, 0)))
+        case .any: break
+        @unknown default: break
+        }
+
         let anchor = AnchorEntity(world: t)
-        let sphere = ModelEntity(mesh: .generateSphere(radius: 0.02), materials: [SimpleMaterial(color: color, isMetallic: false)])
-        sphere.name = isFirst ? "manual_point_1" : "manual_point_2"
-        // Enable hit-testing against the sphere to improve selection robustness
-        sphere.generateCollisionShapes(recursive: true)
-        anchor.addChild(sphere)
+
+        let disk = ManualPointHelpers.makePointDisk(name: isFirst ? "manual_point_1" : "manual_point_2")
+        anchor.addChild(disk)
+
+        let lineColor: UIColor = isFirst
+            ? UIColor(red: 1.0, green: 0.85, blue: 0.2, alpha: 1.0)
+            : UIColor(red: 0.3, green: 0.6, blue: 1.0, alpha: 1.0)
+        let verticalLine = ManualPointHelpers.makeDottedVerticalLine(
+            basePosition: .zero,
+            height: 0.30,
+            color: lineColor
+        )
+        anchor.addChild(verticalLine)
+
         arView.scene.addAnchor(anchor)
-        if isFirst { manualFirstAnchor = anchor } else { manualSecondAnchor = anchor }
+        if isFirst {
+            if let old = manualFirstAnchor { arView.scene.removeAnchor(old) }
+            manualFirstAnchor = anchor
+        } else {
+            if let old = manualSecondAnchor { arView.scene.removeAnchor(old) }
+            manualSecondAnchor = anchor
+        }
+
+        let haptic = UIImpactFeedbackGenerator(style: .medium)
+        haptic.impactOccurred()
     }
 
     func removeManualAnchors() {
@@ -203,6 +231,15 @@ extension LaserGuideARSessionView {
         if let a = manualSecondAnchor { arView?.scene.removeAnchor(a) }
         manualFirstAnchor = nil
         manualSecondAnchor = nil
+    }
+
+    func removeMeasurementVisuals() {
+        if let a = measurementLineAnchor { arView?.scene.removeAnchor(a) }
+        if let a = measurementBadgeAnchor { arView?.scene.removeAnchor(a) }
+        measurementLineAnchor = nil
+        measurementBadgeAnchor = nil
+        measurementDistanceText = nil
+        measurementBadgeScreenPoint = nil
     }
 
     func applyManualTwoPointOrigin() {
@@ -238,12 +275,11 @@ extension LaserGuideARSessionView {
 
     /// Clear both points and restart Two Point placement from the first point
     func clearTwoPointPlacement() {
-        // Stop any movement
         endManualPointMove()
         selectedManualPointIndex = nil
-        // Remove helper anchors (and spheres)
+        stopReticleTracking()
         removeManualAnchors()
-        // Reset current and preserved state so re-entry starts fresh
+        removeMeasurementVisuals()
         manualFirstPoint = nil
         manualSecondPoint = nil
         manualFirstPreferredAlignment = nil
@@ -252,8 +288,8 @@ extension LaserGuideARSessionView {
         preservedSecondPoint = nil
         preservedFirstPreferredAlignment = nil
         preservedSecondPreferredAlignment = nil
-        // Go back to placing the first point
         manualPlacementState = .placeFirst
+        startReticleTracking()
     }
 
     // MARK: - Manual point selection + moving
@@ -308,15 +344,91 @@ extension LaserGuideARSessionView {
     }
 
     func updateManualPointColors() {
-        func setColor(anchor: AnchorEntity?, normalColor: UIColor, selected: Bool) {
-            guard let anchor = anchor else { return }
-            if let sphere = anchor.children.first(where: { $0.name.hasPrefix("manual_point_") }) as? ModelEntity {
-                let color = selected ? UIColor.black : normalColor
-                sphere.model?.materials = [SimpleMaterial(color: color, isMetallic: false)]
-            }
+        // Disks are now solid white UnlitMaterial — no per-point colour coding.
+    }
+
+    // MARK: - Reticle tracking
+
+    func startReticleTracking() {
+        guard reticleTimer == nil else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
+            updateReticle()
         }
-        setColor(anchor: manualFirstAnchor, normalColor: .red, selected: selectedManualPointIndex == 1)
-        setColor(anchor: manualSecondAnchor, normalColor: .blue, selected: selectedManualPointIndex == 2)
+        RunLoop.main.add(timer, forMode: .common)
+        reticleTimer = timer
+    }
+
+    func stopReticleTracking() {
+        reticleTimer?.invalidate()
+        reticleTimer = nil
+        if let a = reticleAnchor {
+            arView?.scene.removeAnchor(a)
+            reticleAnchor = nil
+        }
+    }
+
+    func updateReticle() {
+        guard let arView else { return }
+        if let a = reticleAnchor { arView.scene.removeAnchor(a); reticleAnchor = nil }
+
+        // Crosshair is offset from screen center — apply visual correction
+        let crossCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY + 40)
+        guard let hitPos = raycast(from: crossCenter) else { return }
+
+        let anchor = AnchorEntity(world: hitPos)
+        anchor.addChild(ManualPointHelpers.makeReticleDot())
+        arView.scene.addAnchor(anchor)
+        reticleAnchor = anchor
+
+        if manualPlacementState == .placeSecond, let p1 = manualFirstPoint {
+            updateMeasurementVisuals(from: p1, to: hitPos)
+        }
+    }
+
+    private func raycast(from screenPoint: CGPoint) -> SIMD3<Float>? {
+        guard let arView else { return nil }
+        if let query = arView.makeRaycastQuery(from: screenPoint, allowing: .existingPlaneGeometry, alignment: .any),
+           let first = arView.session.raycast(query).first {
+            let t = first.worldTransform
+            return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+        }
+        if let query = arView.makeRaycastQuery(from: screenPoint, allowing: .estimatedPlane, alignment: .any),
+           let first = arView.session.raycast(query).first {
+            let t = first.worldTransform
+            return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+        }
+        return nil
+    }
+
+    // MARK: - Measurement visuals
+
+    func updateMeasurementVisuals(from: SIMD3<Float>, to: SIMD3<Float>) {
+        guard let arView else { return }
+
+        let distance = simd_distance(from, to)
+
+        if let a = measurementLineAnchor { arView.scene.removeAnchor(a) }
+
+        let line = ManualPointHelpers.makeMeasurementLine(from: from, to: to)
+        let lineAnchor = AnchorEntity(world: .zero)
+        lineAnchor.addChild(line)
+        arView.scene.addAnchor(lineAnchor)
+        measurementLineAnchor = lineAnchor
+
+        // Screen-space badge only
+        let mid = (from + to) / 2
+        let badgeWorld = SIMD3<Float>(mid.x, mid.y + 0.05, mid.z)
+        if let frame = arView.session.currentFrame,
+           let screenPt = projectWorldToScreen(worldPosition: badgeWorld, frame: frame, arView: arView) {
+            measurementBadgeScreenPoint = screenPt
+        }
+        if distance < 0.01 {
+            measurementDistanceText = "0 cm"
+        } else if distance < 1.0 {
+            measurementDistanceText = String(format: "%.0f cm", distance * 100)
+        } else {
+            measurementDistanceText = String(format: "%.2f m", distance)
+        }
     }
 
     func startManualPointMove() {

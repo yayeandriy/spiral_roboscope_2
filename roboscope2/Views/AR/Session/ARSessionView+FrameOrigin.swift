@@ -22,59 +22,47 @@ extension ARSessionView {
         // Create anchor at the transformed origin
         let anchor = AnchorEntity(world: transform)
         
-        // Create coordinate axes (RealityKit version)
-        let axisLength: Float = 0.5  // 50cm axes
-        let axisRadius: Float = 0.01  // 1cm thick
+        // White axes — thin lines with dots at tips
+        let axisLength: Float = 0.5     // 50cm axes
+        let axisRadius: Float = 0.0015  // ~1.5mm thin
+        let dotRadius: Float = 0.015    // small dots at axis tips
+        let axisMaterial = UnlitMaterial(color: .white)
         
-        // X-axis (Red)
+        // X-axis
         let xAxis = ModelEntity(
             mesh: .generateCylinder(height: axisLength, radius: axisRadius),
-            materials: [SimpleMaterial(color: .red, isMetallic: false)]
+            materials: [axisMaterial]
         )
         xAxis.position = SIMD3<Float>(axisLength/2, 0, 0)
         xAxis.orientation = simd_quatf(angle: .pi/2, axis: SIMD3<Float>(0, 0, 1))
         
-        // Y-axis (Green)
+        // Y-axis
         let yAxis = ModelEntity(
             mesh: .generateCylinder(height: axisLength, radius: axisRadius),
-            materials: [SimpleMaterial(color: .green, isMetallic: false)]
+            materials: [axisMaterial]
         )
         yAxis.position = SIMD3<Float>(0, axisLength/2, 0)
         
-        // Z-axis (Blue)
+        // Z-axis
         let zAxis = ModelEntity(
             mesh: .generateCylinder(height: axisLength, radius: axisRadius),
-            materials: [SimpleMaterial(color: .blue, isMetallic: false)]
+            materials: [axisMaterial]
         )
         zAxis.position = SIMD3<Float>(0, 0, axisLength/2)
         zAxis.orientation = simd_quatf(angle: .pi/2, axis: SIMD3<Float>(1, 0, 0))
         
-        // Add axis labels with spheres at the tips
-        let sphereRadius: Float = 0.03
-        
-        let xTip = ModelEntity(
-            mesh: .generateSphere(radius: sphereRadius),
-            materials: [SimpleMaterial(color: .red, isMetallic: false)]
-        )
+        // Dots at axis tips
+        let xTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
         xTip.position = SIMD3<Float>(axisLength, 0, 0)
         
-        let yTip = ModelEntity(
-            mesh: .generateSphere(radius: sphereRadius),
-            materials: [SimpleMaterial(color: .green, isMetallic: false)]
-        )
+        let yTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
         yTip.position = SIMD3<Float>(0, axisLength, 0)
         
-        let zTip = ModelEntity(
-            mesh: .generateSphere(radius: sphereRadius),
-            materials: [SimpleMaterial(color: .blue, isMetallic: false)]
-        )
+        let zTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
         zTip.position = SIMD3<Float>(0, 0, axisLength)
         
-        // Center sphere (white/yellow to mark origin)
-        let centerSphere = ModelEntity(
-            mesh: .generateSphere(radius: sphereRadius * 1.5),
-            materials: [SimpleMaterial(color: .yellow, isMetallic: false)]
-        )
+        // Center dot (slightly larger)
+        let centerDot = ModelEntity(mesh: .generateSphere(radius: dotRadius * 1.4), materials: [axisMaterial])
         
         // Add all components to anchor
         anchor.addChild(xAxis)
@@ -83,13 +71,11 @@ extension ARSessionView {
         anchor.addChild(xTip)
         anchor.addChild(yTip)
         anchor.addChild(zTip)
-        anchor.addChild(centerSphere)
+        anchor.addChild(centerDot)
         
         // Add to scene
         arView.scene.addAnchor(anchor)
         frameOriginAnchor = anchor
-        
-        
     }
     
     /// Drop FrameOrigin on the floor at screen center using raycast
@@ -231,59 +217,47 @@ extension LaserGuideARSessionView {
         let pos = anchor.position(relativeTo: nil)
         print("[LaserGuideSnap] placeFrameOriginGizmo: worldPosition=\(pos)")
 
-        // Create coordinate axes (RealityKit version)
-        let axisLength: Float = 0.5  // 50cm axes
-        let axisRadius: Float = 0.01  // 1cm thick
+        // White axes — thin lines with dots at tips
+        let axisLength: Float = 0.5     // 50cm axes
+        let axisRadius: Float = 0.0015  // ~1.5mm thin
+        let dotRadius: Float = 0.015    // small dots at axis tips
+        let axisMaterial = UnlitMaterial(color: .white)
 
-        // X-axis (Red)
+        // X-axis
         let xAxis = ModelEntity(
             mesh: .generateCylinder(height: axisLength, radius: axisRadius),
-            materials: [SimpleMaterial(color: .red, isMetallic: false)]
+            materials: [axisMaterial]
         )
         xAxis.position = SIMD3<Float>(axisLength/2, 0, 0)
         xAxis.orientation = simd_quatf(angle: .pi/2, axis: SIMD3<Float>(0, 0, 1))
 
-        // Y-axis (Green)
+        // Y-axis
         let yAxis = ModelEntity(
             mesh: .generateCylinder(height: axisLength, radius: axisRadius),
-            materials: [SimpleMaterial(color: .green, isMetallic: false)]
+            materials: [axisMaterial]
         )
         yAxis.position = SIMD3<Float>(0, axisLength/2, 0)
 
-        // Z-axis (Blue)
+        // Z-axis
         let zAxis = ModelEntity(
             mesh: .generateCylinder(height: axisLength, radius: axisRadius),
-            materials: [SimpleMaterial(color: .blue, isMetallic: false)]
+            materials: [axisMaterial]
         )
         zAxis.position = SIMD3<Float>(0, 0, axisLength/2)
         zAxis.orientation = simd_quatf(angle: .pi/2, axis: SIMD3<Float>(1, 0, 0))
 
-        // Add axis labels with spheres at the tips
-        let sphereRadius: Float = 0.03
-
-        let xTip = ModelEntity(
-            mesh: .generateSphere(radius: sphereRadius),
-            materials: [SimpleMaterial(color: .red, isMetallic: false)]
-        )
+        // Dots at axis tips
+        let xTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
         xTip.position = SIMD3<Float>(axisLength, 0, 0)
 
-        let yTip = ModelEntity(
-            mesh: .generateSphere(radius: sphereRadius),
-            materials: [SimpleMaterial(color: .green, isMetallic: false)]
-        )
+        let yTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
         yTip.position = SIMD3<Float>(0, axisLength, 0)
 
-        let zTip = ModelEntity(
-            mesh: .generateSphere(radius: sphereRadius),
-            materials: [SimpleMaterial(color: .blue, isMetallic: false)]
-        )
+        let zTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
         zTip.position = SIMD3<Float>(0, 0, axisLength)
 
-        // Center sphere (white/yellow to mark origin)
-        let centerSphere = ModelEntity(
-            mesh: .generateSphere(radius: sphereRadius * 1.5),
-            materials: [SimpleMaterial(color: .yellow, isMetallic: false)]
-        )
+        // Center dot (slightly larger)
+        let centerDot = ModelEntity(mesh: .generateSphere(radius: dotRadius * 1.4), materials: [axisMaterial])
 
         // Add all components to anchor
         anchor.addChild(xAxis)
@@ -292,7 +266,7 @@ extension LaserGuideARSessionView {
         anchor.addChild(xTip)
         anchor.addChild(yTip)
         anchor.addChild(zTip)
-        anchor.addChild(centerSphere)
+        anchor.addChild(centerDot)
 
         // Add to scene
         arView.scene.addAnchor(anchor)

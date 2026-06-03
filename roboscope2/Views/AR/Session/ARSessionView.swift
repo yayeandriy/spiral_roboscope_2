@@ -78,6 +78,16 @@ struct ARSessionView: View {
     @State var manualPointMoveTimer: Timer? = nil
     @State var fixedManualMoveScreenPoint: CGPoint? = nil // Fixed screen point captured at movement start
     
+    // Reticle + measurement visuals for two-point placement
+    @State var reticleAnchor: AnchorEntity? = nil
+    @State var reticleTimer: Timer? = nil
+    @State var firstVerticalAnchor: AnchorEntity? = nil
+    @State var secondVerticalAnchor: AnchorEntity? = nil
+    @State var measurementLineAnchor: AnchorEntity? = nil
+    @State var measurementBadgeAnchor: AnchorEntity? = nil
+    @State var measurementDistanceText: String? = nil
+    @State var measurementBadgeScreenPoint: CGPoint? = nil
+    
     // Reference model state
     @State var showReferenceModel = false
     @State var referenceModelAnchor: AnchorEntity?
@@ -342,6 +352,12 @@ struct ARSessionView: View {
                 registrationProgressOverlay
                     .zIndex(3)
             }
+
+            // Measurement badge (screen-space, like telescope_3 TRLabelOverlay)
+            if let distText = measurementDistanceText, let screenPt = measurementBadgeScreenPoint {
+                measurementBadgeLabel(text: distText, position: screenPt)
+                    .zIndex(4)
+            }
             
             // Model loading indicator
             if isLoadingModel {
@@ -529,5 +545,20 @@ struct ARSessionView: View {
     // MARK: - Coordinate System Transformation moved to extension
     
     // MARK: - Model Management moved to extension
+
+    // MARK: - Measurement Badge Overlay (screen-space, telescope_3 pattern)
+
+    @ViewBuilder
+    private func measurementBadgeLabel(text: String, position: CGPoint) -> some View {
+        Text(text)
+            .font(.system(size: 17, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.75), in: Capsule())
+            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+            .position(position)
+            .allowsHitTesting(false)
+    }
 }
 

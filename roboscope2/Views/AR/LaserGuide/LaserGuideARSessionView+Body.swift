@@ -446,6 +446,11 @@ extension LaserGuideARSessionView {
                     registrationProgressOverlay
                         .zIndex(3)
                 }
+                // Measurement badge (screen-space)
+                if let distText = measurementDistanceText, let screenPt = measurementBadgeScreenPoint {
+                    measurementBadgeLabel(text: distText, position: screenPt)
+                        .zIndex(5)
+                }
                 if isLoadingModel {
                     modelLoadingOverlay
                         .zIndex(3)

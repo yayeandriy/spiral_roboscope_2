@@ -205,11 +205,14 @@ extension LaserGuideARSessionView {
             arView.scene.removeAnchor(existing)
         }
 
-        // Create new sphere at position
+        // Create new sphere at position — glow Metal shader
         let anchor = AnchorEntity(world: position)
+        let material: CustomMaterial = (color == UIColor.systemRed || color == .red)
+            ? OriginMaterials.debugDotSphere
+            : OriginMaterials.debugLineSphere
         let sphere = ModelEntity(
             mesh: .generateSphere(radius: 0.03),
-            materials: [SimpleMaterial(color: color, isMetallic: false)]
+            materials: [material]
         )
         anchor.addChild(sphere)
         arView.scene.addAnchor(anchor)

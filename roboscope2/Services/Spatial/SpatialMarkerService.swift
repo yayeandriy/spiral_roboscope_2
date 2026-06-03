@@ -81,7 +81,7 @@ final class SpatialMarkerService: ObservableObject {
         // Nodes
         for (index, position) in points.enumerated() {
             let nodeMesh = MeshResource.generateSphere(radius: 0.01)
-            let nodeEntity = ModelEntity(mesh: nodeMesh, materials: [UnlitMaterial(color: .black)])
+            let nodeEntity = ModelEntity(mesh: nodeMesh, materials: [OriginMaterials.markerNodeSphere])
             nodeEntity.position = position
             nodeEntity.name = "node_\(index)"
             anchorEntity.addChild(nodeEntity)
