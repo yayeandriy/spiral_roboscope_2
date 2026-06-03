@@ -17,6 +17,7 @@ class AppSettings: ObservableObject {
     // MARK: - UserDefaults Keys
     
     private enum Keys {
+        static let apiEnvironment = "apiEnvironment"
         static let modelPointsSampleCount = "modelPointsSampleCount"
         static let scanPointsSampleCount = "scanPointsSampleCount"
         static let maxICPIterations = "maxICPIterations"
@@ -158,6 +159,25 @@ class AppSettings: ObservableObject {
         didSet { defaults.set(lineOverDotFilter, forKey: Keys.lineOverDotFilter) }
     }
 
+    // MARK: - API Environment
+
+    enum APIEnvironmentSetting: String, CaseIterable {
+        case dev
+        case prod
+
+        var displayName: String {
+            switch self {
+            case .dev: return "Development"
+            case .prod: return "Production"
+            }
+        }
+    }
+
+    /// Which API environment the app talks to.
+    @Published var apiEnvironment: APIEnvironmentSetting {
+        didSet { defaults.set(apiEnvironment.rawValue, forKey: Keys.apiEnvironment) }
+    }
+
     // MARK: - Initialization
     
     private init() {
@@ -195,6 +215,18 @@ class AppSettings: ObservableObject {
         self.videoModeAccumulatorFrames = vmFrames > 0 ? vmFrames : 3
         self.showAccumulatedOverlay = defaults.object(forKey: Keys.showAccumulatedOverlay) as? Bool ?? true
         self.lineOverDotFilter = defaults.object(forKey: Keys.lineOverDotFilter) as? Bool ?? false
+
+        // API environment: default to dev in DEBUG, prod otherwise (first launch only).
+        if let raw = defaults.string(forKey: Keys.apiEnvironment),
+           let env = APIEnvironmentSetting(rawValue: raw) {
+            self.apiEnvironment = env
+        } else {
+            #if DEBUG
+            self.apiEnvironment = .dev
+            #else
+            self.apiEnvironment = .prod
+            #endif
+        }
     }
     
     // MARK: - Preset Management

@@ -23,12 +23,11 @@ struct roboscope2App: App {
             return
         }
 
-        // Configure API environment based on build configuration
+        // API environment is now persisted in AppSettings (defaults to dev in DEBUG, prod otherwise).
+        // AppSettings.init reads the stored value; APIConfiguration reads it lazily.
         #if DEBUG
-        APIConfiguration.shared.useDevelopment()
         APIConfiguration.shared.enableLogging = true
         #else
-        APIConfiguration.shared.useProduction()
         APIConfiguration.shared.enableLogging = false
         #endif
 

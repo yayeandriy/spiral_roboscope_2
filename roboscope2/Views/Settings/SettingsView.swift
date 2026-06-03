@@ -164,6 +164,32 @@ struct SettingsView: View {
                     Text("Recommended settings for best performance")
                 }
                 
+                // API Environment Section
+                Section {
+                    Picker("API Environment", selection: $settings.apiEnvironment) {
+                        ForEach(AppSettings.APIEnvironmentSetting.allCases, id: \.self) { env in
+                            Text(env.displayName).tag(env)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    HStack {
+                        Text("Base URL")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(APIConfiguration.shared.baseURL)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                } header: {
+                    Text("API")
+                } footer: {
+                    Text("Switch between development and production API servers. Changes take effect immediately.")
+                }
+
                 // Debug Settings
                 Section {
                     Toggle(isOn: $settings.showPerformanceLogs) {

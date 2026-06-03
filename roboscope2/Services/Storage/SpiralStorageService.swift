@@ -14,7 +14,8 @@ class SpiralStorageService {
     
     // MARK: - Configuration
     
-    private let baseURL = "https://spiralstorage-production.up.railway.app"
+    private let baseURL = "https://storage.spiral.technology"
+    private let apiKey = "6c48c8e1fa1d492d41240d6c16dea704d2ac37ffbd75cefc0c6d5b7b927924c1"
     private let chunkSize = 5 * 1024 * 1024 // 5MB chunks for multipart upload
     
     // Singleton instance
@@ -55,11 +56,8 @@ class SpiralStorageService {
     }
     
     struct CompleteUploadResponse: Codable {
-        let objectUrl: String
-        
-        enum CodingKeys: String, CodingKey {
-            case objectUrl = "object_url"
-        }
+        let url: String
+        let key: String
     }
     
     // MARK: - Upload Progress
@@ -166,10 +164,11 @@ class SpiralStorageService {
         numberOfParts: Int
     ) async throws -> CreateUploadResponse {
         
-        let url = URL(string: "\(baseURL)/r2/multipart/create")!
+        let url = URL(string: "\(baseURL)/v1/multipart/create")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         request.timeoutInterval = 30
         
         let body: [String: Any] = [
@@ -273,10 +272,11 @@ class SpiralStorageService {
         parts: [CompletedPart]
     ) async throws -> String {
         
-        let url = URL(string: "\(baseURL)/r2/multipart/complete")!
+        let url = URL(string: "\(baseURL)/v1/multipart/complete")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         request.timeoutInterval = 60
         
         let body: [String: Any] = [
@@ -307,7 +307,7 @@ class SpiralStorageService {
             from: data
         )
         
-        return completeResponse.objectUrl
+        return completeResponse.url
     }
     
     private func abortMultipartUpload(
@@ -315,10 +315,11 @@ class SpiralStorageService {
         uploadId: String
     ) async throws {
         
-        let url = URL(string: "\(baseURL)/r2/multipart/abort")!
+        let url = URL(string: "\(baseURL)/v1/multipart/abort")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         request.timeoutInterval = 30
         
         let body: [String: String] = [
