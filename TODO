@@ -50,4 +50,5 @@ Todo:
 Distance match tolerance: laserGuideDistanceToleranceMeters (currently 0.03)
 Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)
 
-☐ the measurment pill should stay on the line after second point is placed (not it loose)
+✔ the measurment pill should stay on the line after second point is placed (not it loose) @done(26-06-03 17:27)
+☐ Origin: make a Z end (one which was blue before) as arrow

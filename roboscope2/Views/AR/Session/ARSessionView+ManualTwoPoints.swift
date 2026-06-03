@@ -91,17 +91,23 @@ extension ARSessionView {
         }
     }
 
+    /// The screen point where the crosshair lives (offset from screen center).
+    private func crossCenter() -> CGPoint {
+        guard let arView else { return .zero }
+        return CGPoint(x: arView.bounds.midX, y: arView.bounds.midY + 40)
+    }
+
     func raycastFromScreenCenter() -> SIMD3<Float>? {
         guard let arView = arView else { return nil }
-        let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
-        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: .any) {
+        let pt = crossCenter()
+        if let query = arView.makeRaycastQuery(from: pt, allowing: .existingPlaneGeometry, alignment: .any) {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
-        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: .any) {
+        if let query = arView.makeRaycastQuery(from: pt, allowing: .estimatedPlane, alignment: .any) {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
@@ -114,9 +120,8 @@ extension ARSessionView {
     /// Raycast helper with explicit alignment preference. Used by placement and as a fallback.
     func raycastFromScreenCenter(preferredAlignment: ARRaycastQuery.TargetAlignment) -> SIMD3<Float>? {
         guard let arView = arView else { return nil }
-        let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
-        // Prefer existing plane geometry for stability
-        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: preferredAlignment) {
+        let pt = crossCenter()
+        if let query = arView.makeRaycastQuery(from: pt, allowing: .existingPlaneGeometry, alignment: preferredAlignment) {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
@@ -125,7 +130,7 @@ extension ARSessionView {
             }
         }
         // Then fall back to estimated plane with the same alignment
-        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: preferredAlignment) {
+        if let query = arView.makeRaycastQuery(from: pt, allowing: .estimatedPlane, alignment: preferredAlignment) {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
@@ -134,7 +139,7 @@ extension ARSessionView {
             }
         }
         // Last resort: existing any, then estimated any
-        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: .any) {
+        if let query = arView.makeRaycastQuery(from: pt, allowing: .existingPlaneGeometry, alignment: .any) {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
@@ -142,7 +147,7 @@ extension ARSessionView {
                 return SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
             }
         }
-        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: .any) {
+        if let query = arView.makeRaycastQuery(from: pt, allowing: .estimatedPlane, alignment: .any) {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
@@ -157,8 +162,8 @@ extension ARSessionView {
     /// Movement-focused raycast: prefer existing plane geometry only; skip if no stable surface under crosshair.
     func raycastFromCenterForMove(preferredAlignment: ARRaycastQuery.TargetAlignment) -> SIMD3<Float>? {
         guard let arView = arView else { return nil }
-        let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
-        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: preferredAlignment) {
+        let pt = crossCenter()
+        if let query = arView.makeRaycastQuery(from: pt, allowing: .existingPlaneGeometry, alignment: preferredAlignment) {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
@@ -167,7 +172,7 @@ extension ARSessionView {
             }
         }
         // Optional: if needed, allow any alignment on existing planes
-        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .existingPlaneGeometry, alignment: .any) {
+        if let query = arView.makeRaycastQuery(from: pt, allowing: .existingPlaneGeometry, alignment: .any) {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
@@ -176,7 +181,7 @@ extension ARSessionView {
             }
         }
         // As a fallback, allow estimated plane with preferred alignment (comment out if too jittery)
-        if let query = arView.makeRaycastQuery(from: screenCenter, allowing: .estimatedPlane, alignment: preferredAlignment) {
+        if let query = arView.makeRaycastQuery(from: pt, allowing: .estimatedPlane, alignment: preferredAlignment) {
             let results = arView.session.raycast(query)
             if let first = results.first {
                 let t = first.worldTransform
@@ -390,9 +395,7 @@ extension ARSessionView {
         guard let arView else { return }
         if let a = reticleAnchor { arView.scene.removeAnchor(a); reticleAnchor = nil }
 
-        // Crosshair is offset from screen center — apply visual correction
-        let crossCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY + 40)
-        guard let hitPos = raycast(from: crossCenter) else { return }
+        guard let hitPos = raycast(from: crossCenter()) else { return }
 
         let anchor = AnchorEntity(world: hitPos)
         anchor.addChild(ManualPointHelpers.makeReticleDot())
