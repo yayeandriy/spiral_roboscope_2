@@ -10,12 +10,14 @@ import SwiftUI
 struct TargetOverlayView: View {
     enum Style { case brackets, cross }
     let style: Style
+    let color: Color
     let targetSize: CGFloat = 150
     let cornerLength: CGFloat = 20
     let cornerWidth: CGFloat = 4
 
-    init(style: Style = .brackets) {
+    init(style: Style = .brackets, color: Color = .white) {
         self.style = style
+        self.color = color
     }
     
     var body: some View {
@@ -29,7 +31,7 @@ struct TargetOverlayView: View {
                 if style == .brackets {
                     ForEach(0..<4) { index in
                         CornerBracket(length: cornerLength, width: cornerWidth)
-                            .stroke(Color.white, lineWidth: cornerWidth)
+                            .stroke(color, lineWidth: cornerWidth)
                             .frame(width: cornerLength, height: cornerLength)
                             .rotationEffect(.degrees(Double(index * 90)))
                             .position(
@@ -44,14 +46,14 @@ struct TargetOverlayView: View {
                         path.move(to: CGPoint(x: centerX - crossLength/2, y: centerY))
                         path.addLine(to: CGPoint(x: centerX + crossLength/2, y: centerY))
                     }
-                    .stroke(Color.white.opacity(0.95), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .stroke(color.opacity(0.95), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                     Path { path in
                         path.move(to: CGPoint(x: centerX, y: centerY - crossLength/2))
                         path.addLine(to: CGPoint(x: centerX, y: centerY + crossLength/2))
                     }
-                    .stroke(Color.white.opacity(0.95), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .stroke(color.opacity(0.95), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                     Circle()
-                        .fill(Color.white.opacity(0.95))
+                        .fill(color.opacity(0.95))
                         .frame(width: 4, height: 4)
                         .position(x: centerX, y: centerY)
                 }

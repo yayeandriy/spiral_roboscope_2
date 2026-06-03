@@ -146,6 +146,15 @@ extension LaserGuideARSessionView {
                                 if self.viewportSize.width > 0 && self.viewportSize.height > 0 {
                                     self.imageToViewTransform = frame.displayTransform(for: interfaceOrientation, viewportSize: self.viewportSize)
                                 }
+
+                                // Check if target crosses an object edge (throttled ~4x/sec)
+                                if self.hasAutoScoped && self.manualPlacementState == .inactive {
+                                    let now = CACurrentMediaTime()
+                                    if now - self.lastEdgeCheckTime > 0.25 {
+                                        self.lastEdgeCheckTime = now
+                                        self.markerService.updateTargetEdgeState(targetCorners: self.getTargetRectCorners())
+                                    }
+                                }
                             }
                         }.store(in: &cancellables)
                     }
@@ -199,9 +208,12 @@ extension LaserGuideARSessionView {
                 .allowsHitTesting(!showActionsDialog)
                 .edgesIgnoringSafeArea(.all)
 
-                // Target overlay — only in marker placement mode
+                // Target overlay — only in marker placement mode, red if crossing edge
                 if hasAutoScoped {
-                    TargetOverlayView(style: manualPlacementState == .inactive ? .brackets : .cross)
+                    TargetOverlayView(
+                        style: manualPlacementState == .inactive ? .brackets : .cross,
+                        color: markerService.targetCrossesEdge ? .red : .white
+                    )
                         .padding(.top, 40)
                         .allowsHitTesting(false)
                         .zIndex(1)

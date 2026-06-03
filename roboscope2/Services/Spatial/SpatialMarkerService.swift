@@ -24,6 +24,9 @@ final class SpatialMarkerService: ObservableObject {
     @Published var selectedMarkerID: UUID?
     var markerEdgesInTarget: [UUID: Set<Int>] = [:] // Stores which edges (0-3) are in target for each marker
     var selectedEdgeIndex: Int? // Edge index (0-3) for currently selected marker
+
+    /// True when the target area crosses an object edge — UI should warn the user.
+    @Published var targetCrossesEdge: Bool = false
     
     // Moving state
     var movingMarkerIndex: Int?
@@ -207,90 +210,115 @@ final class SpatialMarkerService: ObservableObject {
         }
     }
     
-    /// Place a marker by raycasting from target corners
+    /// Place a marker by raycasting from target corners.
+    /// Handles object edges by snapping background corners to the foreground plane.
     func placeMarker(targetCorners: [CGPoint]) {
-                guard let arView = arView,
-                            let frame = arView.session.currentFrame else {
-                        return
-                }
-        
-        // First, raycast from the center to establish a reference plane and distance
-        let screenCenter = CGPoint(
-            x: (targetCorners[0].x + targetCorners[2].x) / 2,
-            y: (targetCorners[0].y + targetCorners[2].y) / 2
-        )
-        
-        guard let centerResult = arView.raycast(from: screenCenter, allowing: .estimatedPlane, alignment: .any).first else {
-            return
-        }
-        
-        let centerPosition = SIMD3<Float>(
-            centerResult.worldTransform.columns.3.x,
-            centerResult.worldTransform.columns.3.y,
-            centerResult.worldTransform.columns.3.z
-        )
-        
-        // Calculate the camera position
-        let cameraTransform = frame.camera.transform
-        let cameraPosition = SIMD3<Float>(
-            cameraTransform.columns.3.x,
-            cameraTransform.columns.3.y,
-            cameraTransform.columns.3.z
-        )
-        
-    // Calculate the reference distance from camera to center (unused, kept for potential UX)
-    _ = simd_distance(cameraPosition, centerPosition)
-        
-        // Now raycast from each corner and use actual hit positions
-        var hitPoints: [SIMD3<Float>] = []
-        
-        for corner in targetCorners {
-            let results = arView.raycast(from: corner, allowing: .estimatedPlane, alignment: .any)
-            
-            if let firstResult = results.first {
-                let worldPosition = SIMD3<Float>(
-                    firstResult.worldTransform.columns.3.x,
-                    firstResult.worldTransform.columns.3.y,
-                    firstResult.worldTransform.columns.3.z
-                )
-                hitPoints.append(worldPosition)
-            } else {
-                return
-            }
-        }
-        
-        // Need 4 hit points for a valid marker
-        guard hitPoints.count == 4 else {
-            return
-        }
-        
-        // Create spatial marker from computed points
-        _ = addMarker(points: hitPoints)
+        guard let arView = arView,
+              let frame = arView.session.currentFrame else { return }
+
+        guard let points = raycastMarkerCorners(targetCorners: targetCorners, arView: arView, camera: frame.camera) else { return }
+        _ = addMarker(points: points)
     }
-    
+
     /// Place a marker and return the created SpatialMarker (for persistence)
     @discardableResult
     func placeMarkerReturningSpatial(targetCorners: [CGPoint]) -> SpatialMarker? {
-      guard let arView = arView,
-          let _ = arView.session.currentFrame else { return nil }
-        // Reuse the standard placement logic
-        // First, raycast center to ensure session has a reference (not strictly needed here)
-        let screenCenter = CGPoint(
-            x: (targetCorners[0].x + targetCorners[2].x) / 2,
-            y: (targetCorners[0].y + targetCorners[2].y) / 2
-        )
-        guard let _ = arView.raycast(from: screenCenter, allowing: .estimatedPlane, alignment: .any).first else {
-            return nil
+        guard let arView = arView,
+              let frame = arView.session.currentFrame else { return nil }
+
+        guard let points = raycastMarkerCorners(targetCorners: targetCorners, arView: arView, camera: frame.camera) else { return nil }
+        return addMarker(points: points)
+    }
+
+    /// Raycasts 4 target corners. Returns nil if any corner misses or crosses an object edge.
+    private func raycastMarkerCorners(targetCorners: [CGPoint], arView: ARView, camera: ARCamera) -> [SIMD3<Float>]? {
+        guard targetCorners.count == 4 else { return nil }
+
+        // Simple raycast — all 4 must hit
+        var hitPoints: [SIMD3<Float>] = []
+        for corner in targetCorners {
+            let results = arView.raycast(from: corner, allowing: .estimatedPlane, alignment: .any)
+            if let first = results.first {
+                let pos = SIMD3<Float>(first.worldTransform.columns.3.x,
+                                       first.worldTransform.columns.3.y,
+                                       first.worldTransform.columns.3.z)
+                hitPoints.append(pos)
+            } else {
+                return nil
+            }
+        }
+
+        if checkEdgeCrossing(hitPoints) { return nil }
+        return hitPoints
+    }
+
+    /// Returns true if the 4 corners span an object edge (one corner on a different surface).
+    func checkEdgeCrossing(_ points: [SIMD3<Float>]) -> Bool {
+        guard points.count == 4 else { return false }
+        var bestOutlierRes: Float = 0
+        for skip in 0..<4 {
+            let subset = (0..<4).filter { $0 != skip }.map { points[$0] }
+            let (subCenter, subNormal) = fitPlane(points: subset)
+            let outlierRes = abs(dot(points[skip] - subCenter, subNormal))
+            if outlierRes > bestOutlierRes { bestOutlierRes = outlierRes }
+        }
+        let crosses = bestOutlierRes > 0.10  // 10cm — filters floor noise, catches real edges
+        if crosses {
+            print("[EdgeCheck] crossing detected — best outlier residual=\(bestOutlierRes)m")
+        }
+        return crosses
+    }
+
+    /// Checks if the given target corners cross an object edge, updates targetCrossesEdge.
+    func updateTargetEdgeState(targetCorners: [CGPoint]) {
+        guard let arView, let frame = arView.session.currentFrame else {
+            targetCrossesEdge = false
+            return
         }
         var hitPoints: [SIMD3<Float>] = []
         for corner in targetCorners {
             let results = arView.raycast(from: corner, allowing: .estimatedPlane, alignment: .any)
             if let first = results.first {
-                let pos = SIMD3<Float>(first.worldTransform.columns.3.x, first.worldTransform.columns.3.y, first.worldTransform.columns.3.z)
+                let pos = SIMD3<Float>(first.worldTransform.columns.3.x,
+                                       first.worldTransform.columns.3.y,
+                                       first.worldTransform.columns.3.z)
                 hitPoints.append(pos)
-            } else { return nil }
+            }
         }
-        return addMarker(points: hitPoints)
+        // Edge also indicated when corners miss (partial hits)
+        if hitPoints.count < 4 {
+            targetCrossesEdge = hitPoints.count > 0
+        } else {
+            targetCrossesEdge = checkEdgeCrossing(hitPoints)
+        }
+    }
+
+    // MARK: - Plane helpers
+
+    private func fitPlane(points: [SIMD3<Float>]) -> (center: SIMD3<Float>, normal: SIMD3<Float>) {
+        let center = points.reduce(.zero, +) / Float(points.count)
+        // Simple: use cross product of two vectors from first point
+        if points.count >= 3 {
+            let v1 = points[1] - points[0]
+            let v2 = points[2] - points[0]
+            var normal = cross(v1, v2)
+            if simd_length(normal) < 0.0001 { normal = SIMD3<Float>(0, 1, 0) }
+            else { normal = normalize(normal) }
+            return (center, normal)
+        }
+        // 2 points: plane normal perpendicular to the line, roughly horizontal
+        let dir = normalize(points[1] - points[0])
+        let up = SIMD3<Float>(0, 1, 0)
+        var normal = cross(dir, up)
+        if simd_length(normal) < 0.0001 { normal = SIMD3<Float>(1, 0, 0) }
+        else { normal = normalize(normal) }
+        return (center, normal)
+    }
+
+    private func projectOntoPlane(point: SIMD3<Float>, planeCenter: SIMD3<Float>, planeNormal: SIMD3<Float>) -> SIMD3<Float> {
+        let toPoint = point - planeCenter
+        let dist = dot(toPoint, planeNormal)
+        return point - planeNormal * dist
     }
     
     /// Clear all markers

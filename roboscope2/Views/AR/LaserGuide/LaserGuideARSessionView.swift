@@ -156,6 +156,7 @@ struct LaserGuideARSessionView: View {
     @State var measurementBadgeAnchor: AnchorEntity? = nil
     @State var measurementDistanceText: String? = nil
     @State var measurementBadgeScreenPoint: CGPoint? = nil
+    @State var lastEdgeCheckTime: TimeInterval = 0
 
     // Reference model state
     @State var showReferenceModel = false

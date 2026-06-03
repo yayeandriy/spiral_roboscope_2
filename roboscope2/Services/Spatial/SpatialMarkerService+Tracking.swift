@@ -199,7 +199,7 @@ extension SpatialMarkerService {
     }
 
     private func updateMarkerColorWithEdges(index: Int, isSelected: Bool, isInTarget: Bool, edgesInTarget: Set<Int>) {
-        guard index < markers.count else { return }
+        guard index < markers.count, markers[index].nodes.count == 4 else { return }
         let marker = markers[index]
         let anchorEntity = marker.anchorEntity
 

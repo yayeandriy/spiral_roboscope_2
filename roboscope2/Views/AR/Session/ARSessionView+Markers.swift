@@ -316,6 +316,16 @@ extension LaserGuideARSessionView {
         return CGRect(x: centerX - expanded/2, y: targetY - expanded/2, width: expanded, height: expanded)
     }
 
+    func getTargetRectCorners() -> [CGPoint] {
+        let r = getTargetRect()
+        return [
+            CGPoint(x: r.minX, y: r.minY),
+            CGPoint(x: r.maxX, y: r.minY),
+            CGPoint(x: r.maxX, y: r.maxY),
+            CGPoint(x: r.minX, y: r.maxY)
+        ]
+    }
+
     func checkMarkersInTarget() {
         let rect = getTargetRect()
         markerService.updateMarkersInTarget(targetRect: rect)

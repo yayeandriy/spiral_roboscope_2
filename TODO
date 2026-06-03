@@ -53,4 +53,12 @@ Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)
 ✔ the measurment pill should stay on the line after second point is placed (not it loose) @done(26-06-03 17:27)
 ✔ Origin: make a Z end (one which was blue before) as arrow @started(26-06-03 17:44) @done(26-06-03 17:52) @lasted(8m9s)
 
-☐ FIX: start marker placement after manual orogin placement
+✔ FIX: start marker placement after manual orogin placement @done(26-06-03 19:15)
+
+✔ when we in manual placement its buttons are overlapped by the info badge — place them closer to top @done(26-06-03 19:15)
+
+
+☐ imporvement: marker placement on the edge @started(26-06-03 19:35)
+☐ lets indicate to user when the potential marker is crossing the object edge — so it would be clear why marker is not placed and what to do
+☐ fix: Vision Placement
+☐ refactor and especially AR performance audit and imporvements
