@@ -223,5 +223,58 @@ extension SpatialMarkerService {
                 edgeEntity.model?.materials = [edgeMaterial]
             }
         }
+
+        // Edge selection handlers: two short parallel lines at the edge midpoint
+        let handlerNames = ["handler_a", "handler_b"]
+        let existingHandlers = anchorEntity.children.filter { handlerNames.contains($0.name) }
+
+        let selEdge = (isSelected && markers[index].id == selectedMarkerID) ? selectedEdgeIndex : nil
+
+        if let edgeIdx = selEdge {
+            let (i, j) = edgeNodePairs[edgeIdx]
+            let pA = marker.nodes[i]
+            let pB = marker.nodes[j]
+            let mid = (pA + pB) / 2
+            let dir = normalize(pB - pA)
+
+            // Perpendicular in horizontal (XZ) plane
+            var perp = SIMD3<Float>(dir.z, 0, -dir.x)
+            if simd_length(perp) < 0.0001 { perp = SIMD3<Float>(1, 0, 0) }
+            perp = normalize(perp)
+
+            let handleLen: Float = 0.025
+            let handleRadius: Float = 0.001
+            let gap: Float = 0.008
+            let handleMat = UnlitMaterial(color: .systemRed)
+
+            for side in [-1, 1] {
+                let offset = perp * gap * Float(side)
+                let handlePos = mid + offset
+                let handle = ModelEntity(
+                    mesh: .generateCylinder(height: handleLen, radius: handleRadius),
+                    materials: [handleMat]
+                )
+                handle.position = handlePos
+                // Orient cylinder along the edge direction
+                let yAxis = SIMD3<Float>(0, 1, 0)
+                let crossVal = cross(yAxis, dir)
+                if simd_length(crossVal) > 0.0001 {
+                    let axis = normalize(crossVal)
+                    let angle = acos(dot(yAxis, dir))
+                    handle.orientation = simd_quatf(angle: angle, axis: axis)
+                }
+                handle.name = handlerNames[side > 0 ? 1 : 0]
+                // Remove old handler if replacing
+                if let old = existingHandlers.first(where: { $0.name == handle.name }) {
+                    anchorEntity.removeChild(old)
+                }
+                anchorEntity.addChild(handle)
+            }
+        } else {
+            // Remove handlers when edge is no longer selected
+            for h in existingHandlers {
+                anchorEntity.removeChild(h)
+            }
+        }
     }
 }
