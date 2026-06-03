@@ -263,6 +263,11 @@ extension LaserGuideARSessionView {
         placeFrameOriginGizmo(at: transform)
         updateMarkersForNewFrameOrigin()
 
+        // Origin is placed — switch to marker placement mode
+        hasAutoScoped = true
+        frameOriginAnchor?.isEnabled = true
+        markerService.setMarkersVisible(true)
+
         // Exit manual mode and restore UI
         cancelManualTwoPointsMode()
 
