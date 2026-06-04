@@ -251,25 +251,13 @@ final class SpatialMarkerService: ObservableObject {
             }
         }
 
-        if checkEdgeCrossing(hitPoints) { return nil }
+        if ARGeometryUtils.checkEdgeCrossing(hitPoints) { return nil }
         return hitPoints
     }
 
     /// Returns true if the 4 corners span an object edge (one corner on a different surface).
     func checkEdgeCrossing(_ points: [SIMD3<Float>]) -> Bool {
-        guard points.count == 4 else { return false }
-        var bestOutlierRes: Float = 0
-        for skip in 0..<4 {
-            let subset = (0..<4).filter { $0 != skip }.map { points[$0] }
-            let (subCenter, subNormal) = fitPlane(points: subset)
-            let outlierRes = abs(dot(points[skip] - subCenter, subNormal))
-            if outlierRes > bestOutlierRes { bestOutlierRes = outlierRes }
-        }
-        let crosses = bestOutlierRes > 0.10  // 10cm — filters floor noise, catches real edges
-        if crosses {
-            print("[EdgeCheck] crossing detected — best outlier residual=\(bestOutlierRes)m")
-        }
-        return crosses
+        ARGeometryUtils.checkEdgeCrossing(points)
     }
 
     /// Checks if the given target corners cross an object edge, updates targetCrossesEdge.
@@ -296,32 +284,10 @@ final class SpatialMarkerService: ObservableObject {
         }
     }
 
-    // MARK: - Plane helpers
+    // MARK: - Plane helpers (delegated to ARGeometryUtils)
 
     private func fitPlane(points: [SIMD3<Float>]) -> (center: SIMD3<Float>, normal: SIMD3<Float>) {
-        let center = points.reduce(.zero, +) / Float(points.count)
-        // Simple: use cross product of two vectors from first point
-        if points.count >= 3 {
-            let v1 = points[1] - points[0]
-            let v2 = points[2] - points[0]
-            var normal = cross(v1, v2)
-            if simd_length(normal) < 0.0001 { normal = SIMD3<Float>(0, 1, 0) }
-            else { normal = normalize(normal) }
-            return (center, normal)
-        }
-        // 2 points: plane normal perpendicular to the line, roughly horizontal
-        let dir = normalize(points[1] - points[0])
-        let up = SIMD3<Float>(0, 1, 0)
-        var normal = cross(dir, up)
-        if simd_length(normal) < 0.0001 { normal = SIMD3<Float>(1, 0, 0) }
-        else { normal = normalize(normal) }
-        return (center, normal)
-    }
-
-    private func projectOntoPlane(point: SIMD3<Float>, planeCenter: SIMD3<Float>, planeNormal: SIMD3<Float>) -> SIMD3<Float> {
-        let toPoint = point - planeCenter
-        let dist = dot(toPoint, planeNormal)
-        return point - planeNormal * dist
+        ARGeometryUtils.fitPlane(points: points)
     }
     
     /// Clear all markers
@@ -335,30 +301,9 @@ final class SpatialMarkerService: ObservableObject {
         markers.removeAll()
     }
 
-    /// Project a world position to screen coordinates
+    /// Project a world position to screen coordinates (delegates to ARGeometryUtils).
     func projectWorldToScreen(worldPosition: SIMD3<Float>, frame: ARFrame, arView: ARView) -> CGPoint? {
-        let camera = frame.camera
-        
-        // Convert world position to camera space
-        let viewMatrix = camera.viewMatrix(for: .portrait)
-        let projectionMatrix = camera.projectionMatrix(for: .portrait, viewportSize: arView.bounds.size, zNear: 0.001, zFar: 1000)
-        
-        // Transform to homogeneous coordinates
-        let worldPos4 = SIMD4<Float>(worldPosition.x, worldPosition.y, worldPosition.z, 1.0)
-        
-        // Apply view and projection matrices
-        let viewPos = viewMatrix * worldPos4
-        let projPos = projectionMatrix * viewPos
-        
-        // Perspective divide
-        guard projPos.w != 0 else { return nil }
-        let ndcPos = SIMD3<Float>(projPos.x / projPos.w, projPos.y / projPos.w, projPos.z / projPos.w)
-        
-        // Convert from NDC (-1 to 1) to screen coordinates
-        let screenX = (ndcPos.x + 1.0) * 0.5 * Float(arView.bounds.width)
-        let screenY = (1.0 - ndcPos.y) * 0.5 * Float(arView.bounds.height)
-        
-        return CGPoint(x: CGFloat(screenX), y: CGFloat(screenY))
+        ARGeometryUtils.projectWorldToScreen(worldPosition: worldPosition, frame: frame, arView: arView)
     }
 }
 

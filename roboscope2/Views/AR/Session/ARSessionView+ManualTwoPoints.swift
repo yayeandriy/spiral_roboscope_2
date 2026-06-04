@@ -584,22 +584,7 @@ extension ARSessionView {
     }
 
     func projectWorldToScreen(worldPosition: SIMD3<Float>, frame: ARFrame, arView: ARView) -> CGPoint? {
-        let camera = frame.camera
-        // Use the current interface orientation instead of hard-coding portrait
-        let orientation = arView.window?.windowScene?.interfaceOrientation ?? .portrait
-        let viewMatrix = camera.viewMatrix(for: orientation)
-        let projectionMatrix = camera.projectionMatrix(for: orientation, viewportSize: arView.bounds.size, zNear: 0.001, zFar: 1000)
-        let worldPos4 = SIMD4<Float>(worldPosition.x, worldPosition.y, worldPosition.z, 1.0)
-        let viewPos = viewMatrix * worldPos4
-        // Discard points behind the camera
-        if viewPos.z > 0 { return nil }
-        let projPos = projectionMatrix * viewPos
-        guard projPos.w != 0 else { return nil }
-        let ndcX = projPos.x / projPos.w
-        let ndcY = projPos.y / projPos.w
-        let screenX = (ndcX + 1.0) * 0.5 * Float(arView.bounds.width)
-        let screenY = (1.0 - ndcY) * 0.5 * Float(arView.bounds.height)
-        return CGPoint(x: CGFloat(screenX), y: CGFloat(screenY))
+        ARGeometryUtils.projectWorldToScreen(worldPosition: worldPosition, frame: frame, arView: arView)
     }
 }
 
