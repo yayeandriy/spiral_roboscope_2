@@ -231,13 +231,25 @@ struct LaserGuideARSessionView: View {
             .allowsHitTesting(false)
     }
 
-    func refreshRefZBadgePosition() {
-        guard let arView, let frame = arView.session.currentFrame,
-              let dotAnchor = debugDotAnchor else { return }
-        let dotWorld = dotAnchor.position(relativeTo: nil)
-        let badgeWorld = SIMD3<Float>(dotWorld.x, dotWorld.y + 0.15, dotWorld.z)
-        if let sp = projectWorldToScreen(worldPosition: badgeWorld, frame: frame, arView: arView) {
-            refZBadgeScreenPoint = sp
+    func refreshBadgePositions() {
+        guard let arView, let frame = arView.session.currentFrame else { return }
+
+        // Refresh ref Z badge (red, at dot reference cross)
+        if refZBadgeText != nil, let dotAnchor = debugDotAnchor {
+            let dotWorld = dotAnchor.position(relativeTo: nil)
+            let badgeWorld = SIMD3<Float>(dotWorld.x, dotWorld.y + 0.15, dotWorld.z)
+            if let sp = projectWorldToScreen(worldPosition: badgeWorld, frame: frame, arView: arView) {
+                refZBadgeScreenPoint = sp
+            }
+        }
+
+        // Refresh origin Z badge (green, at frame origin)
+        if originZBadgeText != nil, let originAnchor = frameOriginAnchor {
+            let originWorld = originAnchor.position(relativeTo: nil)
+            let badgeWorld = SIMD3<Float>(originWorld.x, originWorld.y + 0.08, originWorld.z)
+            if let sp = projectWorldToScreen(worldPosition: badgeWorld, frame: frame, arView: arView) {
+                originZBadgeScreenPoint = sp
+            }
         }
     }
 }

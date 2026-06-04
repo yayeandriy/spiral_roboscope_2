@@ -142,6 +142,11 @@ extension LaserGuideARSessionView {
                                 // After auto-scope, monitor how far the user moves away from the scoped dot.
                                 self.maybeReturnToDetectionIfUserMovedAway(frame)
 
+                                // Keep Z-distance badges pinned to world positions as camera moves.
+                                if self.hasAutoScoped {
+                                    self.refreshBadgePositions()
+                                }
+
                                 // Map normalized image coordinates -> normalized view coordinates.
                                 if self.viewportSize.width > 0 && self.viewportSize.height > 0 {
                                     self.imageToViewTransform = frame.displayTransform(for: interfaceOrientation, viewportSize: self.viewportSize)
@@ -323,7 +328,7 @@ extension LaserGuideARSessionView {
 
                             // Description and distance only in Vision mode
                             if manualPlacementState == .inactive {
-                                Text("Point camera at the floor and move slowly.\nThe origin will lock automatically when detected.")
+                                Text("Point camera at the area you want to map.\nThe origin will lock automatically when detected.")
                                     .font(.system(size: 13, weight: .regular))
                                     .foregroundColor(.white.opacity(0.75))
                                     .multilineTextAlignment(.center)
@@ -407,6 +412,16 @@ extension LaserGuideARSessionView {
                     measurementBadgeLabel(text: distText, position: screenPt)
                         .zIndex(5)
                 }
+                // Origin Z badge (green, at frame origin)
+                if let zText = originZBadgeText, let screenPt = originZBadgeScreenPoint {
+                    originZBadgeLabel(text: zText, position: screenPt)
+                        .zIndex(5)
+                }
+                // Reference Z badge (red, at dot reference cross)
+                if let zText = refZBadgeText, let screenPt = refZBadgeScreenPoint {
+                    refZBadgeLabel(text: zText, position: screenPt)
+                        .zIndex(5)
+                }
                 if isLoadingModel {
                     modelLoadingOverlay
                         .zIndex(3)
@@ -448,14 +463,32 @@ extension LaserGuideARSessionView {
                         if manualPlacementState == .inactive {
                             HStack(spacing: 20) {
                                 if hasAutoScoped {
-                                    // Add marker button (only after origin has auto-scoped)
-                                    Button { createAndPersistMarker() } label: {
-                                        Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
-                                            .font(.system(size: 36))
-                                            .frame(width: 80, height: 80)
+                                    if markerService.targetCrossesEdge {
+                                        // Edge detected — can't place marker here
+                                        Text("Target crosses an edge.\nMove to a flat surface.")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundColor(.white.opacity(0.9))
+                                            .multilineTextAlignment(.center)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 14)
+                                                    .fill(Color.red.opacity(0.4))
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 14)
+                                                            .stroke(Color.red.opacity(0.7), lineWidth: 1.5)
+                                                    )
+                                            )
+                                    } else {
+                                        // Add marker button (only after origin has auto-scoped)
+                                        Button { createAndPersistMarker() } label: {
+                                            Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
+                                                .font(.system(size: 36))
+                                                .frame(width: 80, height: 80)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .lgCircle(tint: .white)
                                     }
-                                    .buttonStyle(.plain)
-                                    .lgCircle(tint: .white)
                                 }
                                 // Old locating badge removed — now shown as full-width badge above
                             }
