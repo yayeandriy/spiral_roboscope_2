@@ -252,4 +252,100 @@ struct LaserGuideARSessionView: View {
             }
         }
     }
+
+    // MARK: - Origin badge dynamic text
+
+    var statusTitle: String {
+        switch manualPlacementState {
+        case .inactive:
+            return originStabilityProgress > 0 ? "Locking..." : "Locating Origin"
+        case .placeFirst:
+            return "Place First Point"
+        case .placeSecond:
+            return "Place Second Point"
+        case .readyToApply:
+            return "Ready — Tap Apply"
+        }
+    }
+
+    var statusDescription: String {
+        switch manualPlacementState {
+        case .inactive:
+            return "Point camera at the area you want to map.\nThe origin will lock automatically when detected."
+        case .placeFirst:
+            return "Tap to place the first reference point."
+        case .placeSecond:
+            return "Tap to place the second reference point."
+        case .readyToApply:
+            return "Adjust points by dragging, then tap Apply."
+        }
+    }
+
+    // MARK: - Origin placement badge
+
+    @ViewBuilder
+    var originPlacementBadge: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    if manualPlacementState == .inactive, originStabilityProgress > 0 {
+                        Circle()
+                            .trim(from: 0, to: originStabilityProgress)
+                            .stroke(Color.green, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: 22, height: 22)
+                            .animation(.linear(duration: 0.1), value: originStabilityProgress)
+                    }
+                    Text(statusTitle)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(manualPlacementState == .inactive && originStabilityProgress > 0 ? .green : .white)
+                }
+
+                Text(statusDescription)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(.white.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if manualPlacementState == .inactive, !locatingDistanceText.isEmpty {
+                    Text(locatingDistanceText)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.yellow)
+                }
+
+                Text("Long press to switch to \(manualPlacementState == .inactive ? "Manual" : "Vision")")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            .padding(18)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.3), .white.opacity(0.08)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+            )
+            .onLongPressGesture(minimumDuration: 0.5) {
+                if manualPlacementState == .inactive {
+                    enterManualTwoPointsMode()
+                } else {
+                    cancelManualTwoPointsMode()
+                    enterDetectionMode()
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 50)
+        }
+        .zIndex(4)
+    }
 }
