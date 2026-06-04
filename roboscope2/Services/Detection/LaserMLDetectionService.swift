@@ -38,7 +38,8 @@ struct LaserMLOrientedQuad: Equatable {
 }
 
 struct LaserMLDetection: Identifiable, Equatable {
-    let id = UUID()
+    /// Stable identity derived from label + normalized bounding box, so SwiftUI can diff ForEach.
+    var id: String { "\(label):\(String(format: "%.3f", boundingBox.origin.x)),\(String(format: "%.3f", boundingBox.origin.y)),\(String(format: "%.3f", boundingBox.size.width)),\(String(format: "%.3f", boundingBox.size.height))" }
     /// Bounding box in normalized image coordinates (0..1), origin at top-left.
     let boundingBox: CGRect
     /// Optional rotated quad in normalized image coordinates.

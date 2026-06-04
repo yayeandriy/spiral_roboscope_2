@@ -212,7 +212,8 @@ extension SpatialMarkerService {
 
         for nodeIndex in 0..<4 {
             if let nodeEntity = anchorEntity.children.first(where: { $0.name == "node_\(nodeIndex)" }) as? ModelEntity {
-                nodeEntity.model?.mesh = .generateSphere(radius: nodeRadius)
+                let s = nodeRadius / 0.01
+                nodeEntity.scale = SIMD3<Float>(repeating: s)
                 nodeEntity.model?.materials = [UnlitMaterial(color: nodeColor)]
             }
         }
@@ -232,13 +233,13 @@ extension SpatialMarkerService {
                     edgeColor = UIColor(white: 0.6, alpha: 1.0)
                     thisEdgeRadius = edgeRadius
                 }
-                // Rebuild edge mesh with correct radius
+                // Rebuild edge mesh with correct radius — use cached unit cylinder + scale
                 let start = marker.nodes[i]
                 let end = marker.nodes[j]
                 let mid = (start + end) / 2
                 let dir = end - start
                 let len = simd_length(dir)
-                edgeEntity.model?.mesh = .generateCylinder(height: len, radius: thisEdgeRadius)
+                edgeEntity.scale = SIMD3<Float>(thisEdgeRadius / 0.0005, len, thisEdgeRadius / 0.0005)
                 edgeEntity.position = mid
                 let up = normalize(dir)
                 let yAxis = SIMD3<Float>(0, 1, 0)

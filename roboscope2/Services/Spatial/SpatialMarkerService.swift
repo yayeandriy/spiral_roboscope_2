@@ -16,6 +16,12 @@ final class SpatialMarkerService: ObservableObject {
     weak var arView: ARView?
 
     private var markersVisible: Bool = true
+
+    // MARK: - Mesh cache (avoids runtime mesh generation per marker)
+
+    private static let nodeMesh = MeshResource.generateSphere(radius: 0.01)
+    private static let edgeMesh = MeshResource.generateCylinder(height: 1.0, radius: 0.0005)
+    private static let markerMaterial = UnlitMaterial(color: .white)
     
     @Published var markers: [SpatialMarker] = []
     
@@ -80,19 +86,16 @@ final class SpatialMarkerService: ObservableObject {
         // Create anchor and geometry similar to placeMarker()
         let anchorEntity = AnchorEntity(world: .zero)
         anchorEntity.isEnabled = markersVisible
-        
-        let markerMaterial = UnlitMaterial(color: .white)
 
-        // Nodes
+        // Nodes — reuse cached sphere mesh
         for (index, position) in points.enumerated() {
-            let nodeMesh = MeshResource.generateSphere(radius: 0.01)
-            let nodeEntity = ModelEntity(mesh: nodeMesh, materials: [markerMaterial])
+            let nodeEntity = ModelEntity(mesh: Self.nodeMesh, materials: [Self.markerMaterial])
             nodeEntity.position = position
             nodeEntity.name = "node_\(index)"
             anchorEntity.addChild(nodeEntity)
         }
         
-        // Edges
+        // Edges — reuse cached cylinder mesh (height=1), scale to match distance
         let edgeIndices = [(0, 1), (1, 2), (2, 3), (3, 0)]
         for (i, j) in edgeIndices {
             let start = points[i]
@@ -100,9 +103,9 @@ final class SpatialMarkerService: ObservableObject {
             let midpoint = (start + end) / 2
             let direction = end - start
             let length = simd_length(direction)
-            let edgeMesh = MeshResource.generateCylinder(height: length, radius: 0.0005)
-            let edgeEntity = ModelEntity(mesh: edgeMesh, materials: [markerMaterial])
+            let edgeEntity = ModelEntity(mesh: Self.edgeMesh, materials: [Self.markerMaterial])
             edgeEntity.position = midpoint
+            edgeEntity.scale = SIMD3<Float>(1, length, 1)
             let up = normalize(direction)
             let defaultUp = SIMD3<Float>(0, 1, 0)
             if simd_length(cross(defaultUp, up)) > 0.001 {
@@ -439,15 +442,13 @@ extension SpatialMarkerService {
         if updateCounter % 2 == 0 {
             let edgeIndices = [(0, 1), (1, 2), (2, 3), (3, 0)]
             for (i, j) in edgeIndices {
-                guard let edgeEntity = anchorEntity.children.first(where: { $0.name == "edge_\(i)_\(j)" }) as? ModelEntity,
-                      let currentMaterial = edgeEntity.model?.materials.first else { continue }
+                guard let edgeEntity = anchorEntity.children.first(where: { $0.name == "edge_\(i)_\(j)" }) as? ModelEntity else { continue }
                 let start = newWorldPositions[i]
                 let end = newWorldPositions[j]
                 let midpoint = (start + end) / 2
                 let direction = end - start
                 let length = simd_length(direction)
-                let edgeMesh = MeshResource.generateCylinder(height: length, radius: 0.0005)
-                edgeEntity.model = ModelComponent(mesh: edgeMesh, materials: [currentMaterial])
+                edgeEntity.scale = SIMD3<Float>(1, length, 1)
                 edgeEntity.position = midpoint
                 let up = normalize(direction)
                 let defaultUp = SIMD3<Float>(0, 1, 0)
@@ -613,18 +614,16 @@ extension SpatialMarkerService {
                 nodeEntity.position = newPosition
             }
         }
-        // Rebuild all edges each update
+        // Rebuild all edges each update (reuse cached cylinder, scale to length)
         let edgeIndices = [(0, 1), (1, 2), (2, 3), (3, 0)]
         for (i, j) in edgeIndices {
-            if let edgeEntity = anchorEntity.children.first(where: { $0.name == "edge_\(i)_\(j)" }) as? ModelEntity,
-               let currentMaterial = edgeEntity.model?.materials.first {
+            if let edgeEntity = anchorEntity.children.first(where: { $0.name == "edge_\(i)_\(j)" }) as? ModelEntity {
                 let start = newNodePositions[i]
                 let end = newNodePositions[j]
                 let midpoint = (start + end) / 2
                 let direction = end - start
                 let length = simd_length(direction)
-                let edgeMesh = MeshResource.generateCylinder(height: length, radius: 0.0005)
-                edgeEntity.model = ModelComponent(mesh: edgeMesh, materials: [currentMaterial])
+                edgeEntity.scale = SIMD3<Float>(1, length, 1)
                 edgeEntity.position = midpoint
                 let up = normalize(direction)
                 let defaultUp = SIMD3<Float>(0, 1, 0)

@@ -27,6 +27,9 @@ struct LaserMLDetectionOverlay: View {
     /// auto-scope stability window is not disrupted by accumulator sliding-window jitter.
     var scopingDetections: [LaserMLDetection]? = nil
 
+    /// Throttle measurement raycasts to ~4 Hz to reduce ARKit overhead.
+    @State private var lastMeasurementTime: TimeInterval = 0
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -41,31 +44,12 @@ struct LaserMLDetectionOverlay: View {
                             path.closeSubpath()
                         }
                         .stroke(boxColor, lineWidth: 2)
-                        .overlay(alignment: .topLeading) {
-                            let labelRect = boundingRect(for: [mapped.p1, mapped.p2, mapped.p3, mapped.p4])
-                            Text("\(detection.label) \(String(format: "%.0f%%", detection.confidence * 100))")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(boxColor)
-                                .padding(4)
-                                .background(Color.black.opacity(0.6))
-                                .cornerRadius(4)
-                                .position(x: labelRect.minX + 40, y: labelRect.minY - 10)
-                        }
                     } else {
                         let rect = mappedRect(detection.boundingBox, viewSize: geometry.size)
                         Rectangle()
                             .stroke(boxColor, lineWidth: 2)
                             .frame(width: rect.width, height: rect.height)
                             .position(x: rect.midX, y: rect.midY)
-                            .overlay(alignment: .topLeading) {
-                                Text("\(detection.label) \(String(format: "%.0f%%", detection.confidence * 100))")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(boxColor)
-                                    .padding(4)
-                                    .background(Color.black.opacity(0.6))
-                                    .cornerRadius(4)
-                                    .position(x: rect.minX + 40, y: rect.minY - 10)
-                            }
                     }
                 }
             }
@@ -89,6 +73,11 @@ struct LaserMLDetectionOverlay: View {
     /// - classIndex 0 => dot
     /// - classIndex 1 => line
     private func measureDistanceBetweenDotAndLine(_ detections: [LaserMLDetection], viewSize: CGSize) {
+        // Throttle to ~4 Hz to reduce ARKit raycast overhead.
+        let now = CACurrentMediaTime()
+        guard now - lastMeasurementTime >= 0.25 else { return }
+        lastMeasurementTime = now
+
         if arView == nil {
             measureVideoMode(detections)
             return
