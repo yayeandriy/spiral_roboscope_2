@@ -61,6 +61,6 @@ Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)
 ✔ imporvement: marker placement on the edge @started(26-06-03 19:35) @done(26-06-03 22:17) @lasted(2h42m26s)
 ✔ lets indicate to user when the potential marker is crossing the object edge — so it would be clear why marker is not placed and what to do @done(26-06-03 22:17)
 ✔ fix: Vision Placement @done(26-06-03 22:17)
-☐ refactor and especially AR performance audit and imporvements
+✔ refactor and especially AR performance audit and imporvements @done(26-06-04 14:42)
 
 ✔ badge Z distnace @done(26-06-04 12:23)
