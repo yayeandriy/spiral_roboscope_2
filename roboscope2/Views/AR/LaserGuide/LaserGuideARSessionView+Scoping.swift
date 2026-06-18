@@ -276,6 +276,13 @@ extension LaserGuideARSessionView {
         let dotBadgeWorld = dotWorld + SIMD3<Float>(0, 0.15, 0)
         updateBadgeScreenPoint(world: dotBadgeWorld, setter: { refZBadgeScreenPoint = $0 })
 
+        // "TIP" badge at the Z-arrow tip of the red reference cross
+        refTipBadgeText = "TIP"
+        let tipLocal = SIMD4<Float>(0, 0.005, 0.25 + 0.04, 1) // yOffset + armLen + arrowHeight from makeReferenceCross
+        let tipWorld4 = rotMatrix * tipLocal
+        let tipWorld = SIMD3<Float>(tipWorld4.x, tipWorld4.y, tipWorld4.z) + dotWorld
+        updateBadgeScreenPoint(world: tipWorld + SIMD3<Float>(0, 0.03, 0), setter: { refTipBadgeScreenPoint = $0 })
+
         // Origin Z badge
         originZBadgeText = "Z: \(String(format: "%.2f", autoScopedDotLocalZ ?? 0))m"
         updateBadgeScreenPoint(world: O + SIMD3<Float>(0, 0.08, 0), setter: { originZBadgeScreenPoint = $0 })

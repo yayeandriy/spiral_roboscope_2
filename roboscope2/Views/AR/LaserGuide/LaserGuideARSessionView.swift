@@ -164,6 +164,8 @@ struct LaserGuideARSessionView: View {
     @State var originZBadgeScreenPoint: CGPoint? = nil
     @State var refZBadgeText: String? = nil
     @State var refZBadgeScreenPoint: CGPoint? = nil
+    @State var refTipBadgeText: String? = nil
+    @State var refTipBadgeScreenPoint: CGPoint? = nil
 
     // Reference model state
     @State var showReferenceModel = false
@@ -252,6 +254,17 @@ struct LaserGuideARSessionView: View {
             let badgeWorld = SIMD3<Float>(originWorld.x, originWorld.y + 0.08, originWorld.z)
             if let sp = projectWorldToScreen(worldPosition: badgeWorld, frame: frame, arView: arView) {
                 originZBadgeScreenPoint = sp
+            }
+        }
+
+        // Refresh TIP badge (at Z-arrow tip of red cross)
+        if refTipBadgeText != nil, let dotAnchor = debugDotAnchor {
+            let anchorMatrix = dotAnchor.transformMatrix(relativeTo: nil)
+            let tipLocal = SIMD4<Float>(0, 0.005, 0.25 + 0.04, 1)
+            let tipWorld4 = anchorMatrix * tipLocal
+            let tipWorld = SIMD3<Float>(tipWorld4.x, tipWorld4.y, tipWorld4.z)
+            if let sp = projectWorldToScreen(worldPosition: tipWorld, frame: frame, arView: arView) {
+                refTipBadgeScreenPoint = sp
             }
         }
     }

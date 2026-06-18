@@ -143,6 +143,8 @@ extension LaserGuideARSessionView {
         originZBadgeScreenPoint = nil
         refZBadgeText = nil
         refZBadgeScreenPoint = nil
+        refTipBadgeText = nil
+        refTipBadgeScreenPoint = nil
 
         Task { @MainActor in
             markerService.setMarkersVisible(false)

@@ -111,6 +111,11 @@ extension LaserGuideARSessionView {
                     refZBadgeLabel(text: zText, position: screenPt)
                         .zIndex(5)
                 }
+                // TIP badge (at Z-arrow tip of red cross)
+                if let tipText = refTipBadgeText, let screenPt = refTipBadgeScreenPoint {
+                    refZBadgeLabel(text: tipText, position: screenPt)
+                        .zIndex(5)
+                }
                 if isLoadingModel {
                     modelLoadingOverlay
                         .zIndex(3)
