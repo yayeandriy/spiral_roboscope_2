@@ -27,7 +27,7 @@ final class DetectionPipeline: ObservableObject {
 
     /// Default init: creates a fresh LaserMLDetectionService instance.
     init() {
-        self.ml = LaserMLDetectionService()
+        self.ml = LaserMLDetectionService.make()
         forwardChildChanges()
     }
 

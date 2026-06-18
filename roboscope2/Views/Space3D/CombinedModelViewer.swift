@@ -467,17 +467,17 @@ struct CombinedModelViewer: UIViewRepresentable {
         
         // Extract point clouds using settings
         await updateProgress("Extracting primary model points...", context: context)
-        let primaryPoints = ModelRegistrationService.extractPointCloud(from: primaryNode, sampleCount: AppSettings.shared.modelPointsSampleCount)
+        let primaryPoints = ModelRegistrationService.extractPointCloud(from: primaryNode, sampleCount: 5000)
         
         await updateProgress("Extracting scan points...", context: context)
-        let scanPoints = ModelRegistrationService.extractPointCloud(from: scanNode, sampleCount: AppSettings.shared.scanPointsSampleCount)
+        let scanPoints = ModelRegistrationService.extractPointCloud(from: scanNode, sampleCount: 10000)
         
         // Perform registration using settings
         if let result = await ModelRegistrationService.registerModels(
             modelPoints: primaryPoints,
             scanPoints: scanPoints,
-            maxIterations: AppSettings.shared.maxICPIterations,
-            convergenceThreshold: Float(AppSettings.shared.icpConvergenceThreshold),
+            maxIterations: 30,
+            convergenceThreshold: 0.001,
             progressHandler: { progress in
                 Task { @MainActor in
                     self.registrationProgress = progress

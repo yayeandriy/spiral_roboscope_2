@@ -91,6 +91,14 @@ struct DetectionSettingsPanel: View {
                     .toggleStyle(.switch)
                     .tint(.orange)
 
+                    Toggle(isOn: $settings.usePerFrame3DPlacement) {
+                        Text("Per-frame 3D")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                    .toggleStyle(.switch)
+                    .tint(.orange)
+
                     if let err = mlDetection.lastError, !err.isEmpty {
                         Text(err)
                             .font(.system(size: 11, weight: .semibold))

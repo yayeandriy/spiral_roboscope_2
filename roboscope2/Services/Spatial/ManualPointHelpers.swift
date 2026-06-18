@@ -162,6 +162,17 @@ enum ManualPointHelpers {
         addArm(axis: SIMD3<Float>(0, 1, 0))  // Y
         addArm(axis: SIMD3<Float>(0, 0, 1))  // Z
 
+        // Z+ arrow cone so the direction is visible even edge-on
+        let arrowHeight: Float = 0.04
+        let arrowRadius: Float = 0.012
+        let arrow = ModelEntity(
+            mesh: .generateCone(height: arrowHeight, radius: arrowRadius),
+            materials: [UnlitMaterial(color: color)]
+        )
+        arrow.position = SIMD3<Float>(0, yOffset, armLen + arrowHeight / 2)
+        arrow.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+        root.addChild(arrow)
+
         root.generateCollisionShapes(recursive: true)
         return root
     }

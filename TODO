@@ -64,3 +64,22 @@ Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)
 ✔ refactor and especially AR performance audit and imporvements @done(26-06-04 14:42)
 
 ✔ badge Z distnace @done(26-06-04 12:23)
+
+
+☐ Accumulator @started(26-06-18 19:33)
+  - Improve accumulator — use 3d points of the detections from each frame @started(26-06-18 19:33)
+☐ Direction on anchor @started(26-06-18 19:33)
+☐ Recorder
+    - lets add the Recorder mode
+    - in this mode user can record video (up to 20s)
+    - after video recorder user can upload it to the api (using the storage api — check if it aviable)    
+☐ Crop
+☐ Test setup with rotated flipper
+☐ Model dynamic
+  ☐ Custom class names
+
+  2nd way to setup anchor — yolo detection — silhouette
+- 
+      Versions
+      Marker panel
+      LRT

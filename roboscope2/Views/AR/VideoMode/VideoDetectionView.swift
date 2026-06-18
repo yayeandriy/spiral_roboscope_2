@@ -22,7 +22,7 @@ struct VideoDetectionView: View {
     @StateObject private var spaceService = SpaceService.shared
 
     // Detection pipeline (fresh per instance)
-    @StateObject private var mlDetection = LaserMLDetectionService()
+    @StateObject private var mlDetection = LaserMLDetectionService.make()
     @StateObject var pipeline: DetectionPipeline
 
     // Scope state (mirrors LaserGuideARSessionView)
@@ -35,7 +35,7 @@ struct VideoDetectionView: View {
     @State private var laserGuideFetchError: String? = nil
 
     // Display
-    @State private var viewportSize: CGSize = .zero
+    @State var viewportSize: CGSize = .zero
     @State private var showDetectionSettings = false
     @State private var isPlaying = true
     @State private var showHistoryPanel = false
@@ -53,14 +53,14 @@ struct VideoDetectionView: View {
 
     init(session: WorkSession) {
         self.session = session
-        let det = LaserMLDetectionService()
+        let det = LaserMLDetectionService.make()
         _mlDetection = StateObject(wrappedValue: det)
         _pipeline = StateObject(wrappedValue: DetectionPipeline(ml: det))
     }
 
     /// Transform from raw-buffer-normalized coords (output by the decode pipeline)
     /// to view-normalized coords, based on the video track's physical orientation.
-    private var videoImageToViewTransform: CGAffineTransform {
+    var videoImageToViewTransform: CGAffineTransform {
         switch videoService.imageOrientation {
         case .right:
             // Portrait video (landscape buffer, 90° CW display rotation).
@@ -114,7 +114,9 @@ struct VideoDetectionView: View {
                         maxDotLineYDeltaMeters: mlDetection.maxDotLineYDeltaMeters,
                         onDotLineMeasurement: { measurement in
                             latestMeasurement = measurement
-                            maybeScope(measurement)
+                            if !settings.usePerFrame3DPlacement {
+                                maybeScope(measurement)
+                            }
                         },
                         videoModeDistanceScale: settings.videoModeDistanceScale,
                         boxColor: settings.showAccumulatedOverlay ? .blue : .green
@@ -260,78 +262,7 @@ struct VideoDetectionView: View {
         .ignoresSafeArea(.all)
         .navigationBarBackButtonHidden()
         .onChange(of: mlDetection.detections) { _, newDetections in
-            // Apply "line over dot" filter before any calculations.
-            let newDetections = filterLineOverDot(newDetections)
-
-            // --- Accumulator update (always, to age out stale frames) ---
-            let maxFrames = max(1, settings.videoModeAccumulatorFrames)
-            var acc = frameAccumulator
-            acc.append(newDetections)
-            if acc.count > maxFrames { acc.removeFirst(acc.count - maxFrames) }
-            frameAccumulator = acc
-            let merged = laserDetectionMergeFrames(acc)
-            let mergedHasDot  = merged.contains { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
-            let mergedHasLine = merged.contains { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
-            if mergedHasDot && mergedHasLine {
-                emptyDetectionFrames = 0
-                accumulatedDetections = merged
-            } else {
-                emptyDetectionFrames += 1
-                if emptyDetectionFrames > 2 * maxFrames {
-                    accumulatedDetections = []
-                } else {
-                    accumulatedDetections = merged
-                }
-            }
-
-            // --- History record (only when this frame has detections) ---
-            guard !newDetections.isEmpty else { return }
-            let dotDetections  = newDetections.filter { $0.label == "dot"  || $0.classIndex == 0 }
-            let lineDetections = newDetections.filter { $0.label == "line" || $0.classIndex == 1 }
-            let bestDot  = dotDetections.max(by:  { $0.confidence < $1.confidence })
-            let bestLine = lineDetections.max(by: { $0.confidence < $1.confidence })
-            // Capture these so the closures below don't implicitly capture self.
-            let t = videoImageToViewTransform
-            let vp = viewportSize.width > 0 ? viewportSize : CGSize(width: 390, height: 844)
-            let lineToDotRatio: Float? = {
-                guard let d = bestDot, let l = bestLine else { return nil }
-                let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
-                let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
-                guard dotLong > 0 else { return nil }
-                return lineLong / dotLong
-            }()
-            let mergedDots  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }.count
-            let mergedLines = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }.count
-            let accumulatedRatio: Float? = {
-                // Use the union-merged LINE box (full accumulated extent across frames) as numerator.
-                // For the dot denominator, prefer the current frame's dot (avoids jitter inflation).
-                // Fall back to the merged dot when the current frame has none — the whole point of
-                // accumulation is to bridge frames where one class is temporarily missing.
-                let mLine = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
-                    .max(by: { $0.confidence < $1.confidence })
-                let mDot  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
-                    .max(by: { $0.confidence < $1.confidence })
-                let dot = bestDot ?? mDot
-                guard let d = dot, let l = mLine else { return nil }
-                let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
-                let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
-                guard dotLong > 0 else { return nil }
-                return lineLong / dotLong
-            }()
-            let record = DetectionFrameRecord(
-                timestamp: Date(),
-                dots: dotDetections.count,
-                lines: lineDetections.count,
-                otherCount: newDetections.filter { ($0.classIndex ?? -1) > 1 }.count,
-                distanceMeters: latestMeasurement?.distanceMeters,
-                lineToDotSizeRatio: lineToDotRatio,
-                accumulatedDots: mergedDots,
-                accumulatedLines: mergedLines,
-                accumulatorFramesUsed: acc.filter { !$0.isEmpty }.count,
-                accumulatedLineToDotRatio: accumulatedRatio
-            )
-            detectionHistory.append(record)
-            if detectionHistory.count > 50 { detectionHistory.removeFirst(detectionHistory.count - 50) }
+            processDetections(newDetections)
         }
         .onAppear {
             setupVideoMode()
@@ -345,8 +276,10 @@ struct VideoDetectionView: View {
 
     // MARK: - Setup / teardown
 
+    // MARK: - Detection helpers
+
     @MainActor
-    private func loadModelForSession() async {
+    func loadModelForSession() async {
         guard let space = spaceService.spaces.first(where: { $0.id == session.spaceId }) else {
             modelLoadError = "Space not found for this session."
             return
@@ -362,20 +295,17 @@ struct VideoDetectionView: View {
         isLoadingModel = false
     }
 
-    private func setupVideoMode() {
+    func setupVideoMode() {
         videoService.setupPlayer()
         videoService.play()
         isPlaying = true
-
         if let mlSaved = SpaceMLDetectionSettingsStore.shared.load(spaceId: session.spaceId) {
             mlDetection.confidenceThreshold = mlSaved.confidenceThreshold
             mlDetection.useROI = mlSaved.useROI
             mlDetection.roiSize = mlSaved.roiSize
             mlDetection.maxDetections = mlSaved.maxDetections
         }
-
         pipeline.start()
-
         let p = pipeline
         let orientation = videoService.imageOrientation
         videoService.startFramePump(fps: 15) { pixelBuffer in
@@ -383,24 +313,16 @@ struct VideoDetectionView: View {
         }
     }
 
-    private func teardownVideoMode() {
+    func teardownVideoMode() {
         videoService.stopFramePump()
         videoService.pause()
         pipeline.stop()
     }
 
-    // MARK: - Detection helpers (accumulator / filter)
+    // MARK: - Detection helpers (filter)
 
-    /// Removes line detections that overlap any dot detection when `lineOverDotFilter` is enabled.
-    private func filterLineOverDot(_ detections: [LaserMLDetection]) -> [LaserMLDetection] {
-        guard settings.lineOverDotFilter else { return detections }
-        let dots = detections.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
-        guard !dots.isEmpty else { return detections }
-        return detections.filter { det in
-            let isLine = det.classIndex == 1 || det.label.lowercased().contains("line")
-            guard isLine else { return true }
-            return !dots.contains { dot in det.boundingBox.intersects(dot.boundingBox) }
-        }
+    func filterLineOverDot(_ detections: [LaserMLDetection]) -> [LaserMLDetection] {
+        LaserMLDetectionService.filterLineOverDot(detections, enabled: settings.lineOverDotFilter)
     }
 
     /// Merges detections from multiple frames into a unified set.

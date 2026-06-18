@@ -16,158 +16,15 @@ import QuartzCore
 extension LaserGuideARSessionView {
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
+            sessionContent(geometry: geometry)
+        }
+    }
+
+    @ViewBuilder
+    private func sessionContent(geometry: GeometryProxy) -> some View {
+        ZStack {
                 // AR View
-                ARViewContainer(
-                    session: captureSession.session,
-                    arView: $arView
-                )
-                .onAppear {
-                    print("[LaserGuideSnap] ARViewContainer appeared, starting session")
-                    startARSession()
-
-                    // Restore ML detection tuning from last session.
-                    if let mlSaved = SpaceMLDetectionSettingsStore.shared.load(spaceId: session.spaceId) {
-                        applyMLDetectionSettings(mlSaved)
-                    }
-
-                    // Start the ML detection pipeline.
-                    pipeline.start()
-
-                    // Ensure the Space's ML model is downloaded and assign it.
-                    Task {
-                        await loadModelForSession()
-                    }
-
-                    Task {
-                        print("[LaserGuideSnap] Launching fetchLaserGuideIfNeeded task")
-                        await fetchLaserGuideIfNeeded()
-                    }
-
-                    // Place initial frame origin at AR session origin
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        placeFrameOriginGizmo(at: frameOriginTransform)
-                        // Start auto-drop with retries so it lands as soon as a plane is available
-                        startAutoDropFrameOrigin()
-                    }
-
-                    // Start tracking markers continuously via ViewModel
-                    viewModel.startTracking(getTargetRect: { getTargetRect() }, onManualSelectionUpdate: {
-                        // While holding to move a manual point, freeze selection to avoid drops
-                        if !(viewModel.isHoldingScreen && manualPlacementState != .inactive) {
-                            updateManualPointSelection()
-                        }
-                    })
-
-                    // Load persisted markers for this session
-                    Task {
-                        do {
-                            let persisted = try await markerApi.getMarkersForSession(session.id)
-                            // Transform markers from FrameOrigin coordinates to AR world coordinates
-                            let transformedMarkers = persisted.map { marker -> Marker in
-                                // Create new marker with transformed points
-                                let worldPoints = transformPointsFromFrameOrigin(marker.points)
-                                return Marker(
-                                    id: marker.id,
-                                    workSessionId: marker.workSessionId,
-                                    label: marker.label,
-                                    p1: [Double(worldPoints[0].x), Double(worldPoints[0].y), Double(worldPoints[0].z)],
-                                    p2: [Double(worldPoints[1].x), Double(worldPoints[1].y), Double(worldPoints[1].z)],
-                                    p3: [Double(worldPoints[2].x), Double(worldPoints[2].y), Double(worldPoints[2].z)],
-                                    p4: [Double(worldPoints[3].x), Double(worldPoints[3].y), Double(worldPoints[3].z)],
-                                    calibratedData: marker.calibratedData,
-                                    color: marker.color,
-                                    version: marker.version,
-                                    meta: marker.meta,
-                                    customProps: marker.customProps,
-                                    createdAt: marker.createdAt,
-                                    updatedAt: marker.updatedAt,
-                                    details: marker.details
-                                )
-                            }
-                            // Pass both world and frame-origin coordinates
-                            markerService.loadPersistedMarkers(transformedMarkers, originalFrameOriginMarkers: persisted)
-                            // Calculate details for any markers that don't have them yet
-                            for marker in transformedMarkers {
-                                if marker.details == nil {
-                                    Task {
-                                        await markerService.refreshMarkerDetails(backendId: marker.id)
-                                    }
-                                }
-                            }
-                        } catch {
-                            // Silent
-                        }
-                    }
-                }
-                .onChange(of: mlDetection.confidenceThreshold) { _, _ in
-                    saveMLDetectionSettings()
-                }
-                .onDisappear {
-                    pipeline.stop()
-                    viewModel.cancelAllTimers()
-                    autoDropTimer?.invalidate()
-                    autoDropTimer = nil
-                    autoDropAttempts = 0
-                    endManualPointMove()
-                    endARSession()
-                    cancellables.removeAll()
-                }
-                .onChange(of: arView) { newValue in
-                    markerService.arView = newValue
-                    viewModel.bindARView(newValue)
-
-                    // Keep marker visibility consistent with the current mode.
-                    Task { @MainActor in
-                        markerService.setMarkersVisible(hasAutoScoped)
-                    }
-
-                    // Hide origin + debug detections while locating.
-                    frameOriginAnchor?.isEnabled = hasAutoScoped
-                    debugDotAnchor?.isEnabled = hasAutoScoped
-                    debugLineAnchor?.isEnabled = hasAutoScoped
-
-                    // Set up frame callback for laser detection
-                    if let arView = newValue {
-                        arView.scene.subscribe(to: SceneEvents.Update.self) { _ in
-                            if let frame = arView.session.currentFrame {
-                                let interfaceOrientation = arView.window?.windowScene?.interfaceOrientation ?? .portrait
-                                // Route through the pipeline — works identically in Video Mode
-                                // (replace frame.capturedImage with a CVPixelBuffer from video).
-                                self.pipeline.processPixelBuffer(
-                                    frame.capturedImage,
-                                    orientation: Self.cgImageOrientation(for: interfaceOrientation)
-                                )
-
-                                // After auto-scope, monitor how far the user moves away from the scoped dot.
-                                self.maybeReturnToDetectionIfUserMovedAway(frame)
-
-                                // Keep Z-distance badges pinned to world positions as camera moves.
-                                if self.hasAutoScoped {
-                                    self.refreshBadgePositions()
-                                }
-
-                                // Map normalized image coordinates -> normalized view coordinates.
-                                if self.viewportSize.width > 0 && self.viewportSize.height > 0 {
-                                    self.imageToViewTransform = frame.displayTransform(for: interfaceOrientation, viewportSize: self.viewportSize)
-                                }
-
-                                // Check if target crosses an object edge (throttled ~4x/sec)
-                                if self.hasAutoScoped && self.manualPlacementState == .inactive {
-                                    let now = CACurrentMediaTime()
-                                    if now - self.lastEdgeCheckTime > 0.25 {
-                                        self.lastEdgeCheckTime = now
-                                        self.markerService.updateTargetEdgeState(targetCorners: self.getTargetRectCorners())
-                                    }
-                                }
-                            }
-                        }.store(in: &cancellables)
-                    }
-                }
-                .onAppear {
-                    // Initialize to the actual rendered size; UIScreen bounds can drift.
-                    self.viewportSize = geometry.size
-                }
+                arViewLayer(geometry: geometry)
 
                 // Invisible two-finger overlay to detect two-finger contact immediately
                 TwoFingerTouchOverlay(
@@ -225,86 +82,8 @@ extension LaserGuideARSessionView {
                 }
 
                 // Top controls — simplified
-                VStack {
-                    HStack(spacing: 12) {
-                        Spacer(minLength: 8)
-
-                        // Marker count badge (only after origin placed) — tappable for delete all
-                        if hasAutoScoped {
-                            Menu {
-                                Button(role: .destructive) {
-                                    clearAllMarkersPersisted()
-                                } label: {
-                                    Label("Delete All Markers", systemImage: "trash")
-                                }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "mappin.circle.fill")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    Text("\(markerService.markers.count)")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.white)
-                                }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(.ultraThinMaterial)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .strokeBorder(
-                                                    LinearGradient(
-                                                        colors: [.white.opacity(0.35), .white.opacity(0.1)],
-                                                        startPoint: .topLeading,
-                                                        endPoint: .bottomTrailing
-                                                    ),
-                                                    lineWidth: 1
-                                                )
-                                        )
-                                )
-                            }
-                        }
-
-                        Spacer(minLength: 8)
-
-                        if let spaceName = associatedSpaceName {
-                            Text(spaceName)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(.white)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-
-                        Spacer(minLength: 8)
-
-                        Menu {
-                            Button(role: .destructive) {
-                                dismiss()
-                            } label: {
-                                Label("Close Session", systemImage: "xmark")
-                            }
-                            Button {
-                                enterDetectionMode()
-                            } label: {
-                                Label("Restart Placing", systemImage: "arrow.counterclockwise")
-                            }
-                        } label: {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 22, weight: .semibold))
-                                .frame(width: 66, height: 66)
-                        }
-                        .menuStyle(.button)
-                        .buttonStyle(.plain)
-                        .lgCircle(tint: .white)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 56)
-                    Spacer()
-                }
-                .zIndex(5)
+                topBarControls
+                    .zIndex(5)
 
                 // Origin placement badge: long-press to toggle Vision ↔ Manual
                 if !hasAutoScoped {
@@ -370,63 +149,7 @@ extension LaserGuideARSessionView {
 
                     HStack {
                         Spacer()
-                        if manualPlacementState == .inactive {
-                            HStack(spacing: 20) {
-                                if hasAutoScoped {
-                                    if markerService.targetCrossesEdge {
-                                        // Edge detected — can't place marker here
-                                        Text("Target crosses an edge.\nMove to a flat surface.")
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundColor(.white.opacity(0.9))
-                                            .multilineTextAlignment(.center)
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 10)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 14)
-                                                    .fill(Color.red.opacity(0.4))
-                                                    .overlay(
-                                                        RoundedRectangle(cornerRadius: 14)
-                                                            .stroke(Color.red.opacity(0.7), lineWidth: 1.5)
-                                                    )
-                                            )
-                                    } else {
-                                        // Add marker button (only after origin has auto-scoped)
-                                        Button { createAndPersistMarker() } label: {
-                                            Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
-                                                .font(.system(size: 36))
-                                                .frame(width: 80, height: 80)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .lgCircle(tint: .white)
-                                    }
-                                }
-                                // Old locating badge removed — now shown as full-width badge above
-                            }
-                        } else {
-                            VStack(spacing: 10) {
-                                Button {
-                                    manualPlacementPrimaryAction()
-                                } label: {
-                                    Text(manualPlacementButtonTitle())
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .frame(minWidth: 200, minHeight: 54)
-                                }
-                                .buttonStyle(.plain)
-                                .lgCapsule(tint: .blue)
-
-                                if manualFirstPoint != nil && manualSecondPoint != nil {
-                                    Button(role: .destructive) {
-                                        clearTwoPointPlacement()
-                                    } label: {
-                                        Text("Clear")
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .frame(minWidth: 160, minHeight: 48)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .lgCapsule(tint: .red)
-                                }
-                            }
-                        }
+                        bottomControls
                         Spacer()
                     }
                     .padding(.horizontal, 16)
@@ -443,7 +166,9 @@ extension LaserGuideARSessionView {
                         maxDotLineYDeltaMeters: mlDetection.maxDotLineYDeltaMeters,
                         onDotLineMeasurement: { measurement in
                             latestLaserMeasurement = measurement
-                            maybeAutoScope(measurement)
+                            if !settings.usePerFrame3DPlacement, let measurement {
+                                placeOriginImmediately(measurement)
+                            }
                         },
                         boxColor: settings.showAccumulatedOverlay ? .blue : .green
                     )
@@ -479,7 +204,6 @@ extension LaserGuideARSessionView {
                     .zIndex(6)
                 }
             }
-        }
         .ignoresSafeArea(.all)
         .alert("Error", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
@@ -513,74 +237,7 @@ extension LaserGuideARSessionView {
         }
         .navigationBarBackButtonHidden()
         .onChange(of: mlDetection.detections) { _, rawDetections in
-            // Apply "line over dot" filter before any calculations.
-            let newDetections = filterLineOverDot(rawDetections)
-
-            // --- Accumulator update ---
-            let maxFrames = max(1, settings.videoModeAccumulatorFrames)
-            var acc = frameAccumulator
-            acc.append(newDetections)
-            if acc.count > maxFrames { acc.removeFirst(acc.count - maxFrames) }
-            frameAccumulator = acc
-            let merged = laserDetectionMergeFrames(acc)
-            // Track consecutive frames without a paired dot+line; clear stale boxes when exceeded.
-            let mergedHasDot  = merged.contains { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
-            let mergedHasLine = merged.contains { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
-            if mergedHasDot && mergedHasLine {
-                emptyDetectionFrames = 0
-                accumulatedDetections = merged
-            } else {
-                emptyDetectionFrames += 1
-                if emptyDetectionFrames > 2 * maxFrames {
-                    accumulatedDetections = []
-                } else {
-                    accumulatedDetections = merged
-                }
-            }
-
-            // --- History record (only when this frame has detections) ---
-            guard !newDetections.isEmpty else { return }
-            let dotDetections  = newDetections.filter { $0.label == "dot"  || $0.classIndex == 0 }
-            let lineDetections = newDetections.filter { $0.label == "line" || $0.classIndex == 1 }
-            let bestDot  = dotDetections.max(by: { $0.confidence < $1.confidence })
-            let bestLine = lineDetections.max(by: { $0.confidence < $1.confidence })
-            let t = imageToViewTransform
-            let vp = viewportSize.width > 0 ? viewportSize : CGSize(width: 390, height: 844)
-            let lineToDotRatio: Float? = {
-                guard let d = bestDot, let l = bestLine else { return nil }
-                let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
-                let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
-                guard dotLong > 0 else { return nil }
-                return lineLong / dotLong
-            }()
-            let mergedDots  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }.count
-            let mergedLines = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }.count
-            let accumulatedRatio: Float? = {
-                let mLine = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
-                    .max(by: { $0.confidence < $1.confidence })
-                let mDot  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
-                    .max(by: { $0.confidence < $1.confidence })
-                let dot = bestDot ?? mDot
-                guard let d = dot, let l = mLine else { return nil }
-                let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
-                let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
-                guard dotLong > 0 else { return nil }
-                return lineLong / dotLong
-            }()
-            let record = DetectionFrameRecord(
-                timestamp: Date(),
-                dots: dotDetections.count,
-                lines: lineDetections.count,
-                otherCount: newDetections.filter { ($0.classIndex ?? -1) > 1 }.count,
-                distanceMeters: latestLaserMeasurement?.distanceMeters,
-                lineToDotSizeRatio: lineToDotRatio,
-                accumulatedDots: mergedDots,
-                accumulatedLines: mergedLines,
-                accumulatorFramesUsed: acc.filter { !$0.isEmpty }.count,
-                accumulatedLineToDotRatio: accumulatedRatio
-            )
-            detectionHistory.append(record)
-            if detectionHistory.count > 50 { detectionHistory.removeFirst(detectionHistory.count - 50) }
+            processDetections(rawDetections)
         }
     }
 
@@ -588,13 +245,220 @@ extension LaserGuideARSessionView {
 
     /// Removes line detections that overlap any dot detection when `lineOverDotFilter` is enabled.
     func filterLineOverDot(_ detections: [LaserMLDetection]) -> [LaserMLDetection] {
-        guard settings.lineOverDotFilter else { return detections }
-        let dots = detections.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
-        guard !dots.isEmpty else { return detections }
-        return detections.filter { det in
-            let isLine = det.classIndex == 1 || det.label.lowercased().contains("line")
-            guard isLine else { return true }
-            return !dots.contains { dot in det.boundingBox.intersects(dot.boundingBox) }
+        LaserMLDetectionService.filterLineOverDot(detections, enabled: settings.lineOverDotFilter)
+    }
+
+    // MARK: - Bottom controls
+
+    @ViewBuilder
+    private func arViewLayer(geometry: GeometryProxy) -> some View {
+        ARViewContainer(
+            session: captureSession.session,
+            arView: $arView
+        )
+        .onAppear {
+            print("[LaserGuideSnap] ARViewContainer appeared, starting session")
+            startARSession()
+            if let mlSaved = SpaceMLDetectionSettingsStore.shared.load(spaceId: session.spaceId) {
+                applyMLDetectionSettings(mlSaved)
+            }
+            pipeline.start()
+            Task { await loadModelForSession() }
+            Task { await fetchLaserGuideIfNeeded() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                placeFrameOriginGizmo(at: frameOriginTransform)
+                startAutoDropFrameOrigin()
+            }
+            viewModel.startTracking(getTargetRect: { getTargetRect() }, onManualSelectionUpdate: {
+                if !(viewModel.isHoldingScreen && manualPlacementState != .inactive) {
+                    updateManualPointSelection()
+                }
+            })
+            Task { await loadPersistedMarkers() }
+        }
+        .onChange(of: mlDetection.confidenceThreshold) { _, _ in saveMLDetectionSettings() }
+        .onDisappear {
+            pipeline.stop()
+            viewModel.cancelAllTimers()
+            autoDropTimer?.invalidate()
+            autoDropTimer = nil
+            autoDropAttempts = 0
+            endManualPointMove()
+            endARSession()
+            cancellables.removeAll()
+        }
+        .onChange(of: arView) { newValue in
+            markerService.arView = newValue
+            viewModel.bindARView(newValue)
+            Task { @MainActor in markerService.setMarkersVisible(hasAutoScoped) }
+            frameOriginAnchor?.isEnabled = hasAutoScoped
+            debugDotAnchor?.isEnabled = hasAutoScoped
+            debugLineAnchor?.isEnabled = hasAutoScoped
+            if let arView = newValue {
+                arView.scene.subscribe(to: SceneEvents.Update.self) { _ in
+                    self.processFrameUpdate()
+                }.store(in: &cancellables)
+            }
+        }
+        .onAppear { self.viewportSize = geometry.size }
+    }
+
+    private func loadPersistedMarkers() async {
+        do {
+            let persisted = try await markerApi.getMarkersForSession(session.id)
+            let transformedMarkers = persisted.map { marker -> Marker in
+                let worldPoints = transformPointsFromFrameOrigin(marker.points)
+                return Marker(
+                    id: marker.id, workSessionId: marker.workSessionId,
+                    label: marker.label,
+                    p1: [Double(worldPoints[0].x), Double(worldPoints[0].y), Double(worldPoints[0].z)],
+                    p2: [Double(worldPoints[1].x), Double(worldPoints[1].y), Double(worldPoints[1].z)],
+                    p3: [Double(worldPoints[2].x), Double(worldPoints[2].y), Double(worldPoints[2].z)],
+                    p4: [Double(worldPoints[3].x), Double(worldPoints[3].y), Double(worldPoints[3].z)],
+                    calibratedData: marker.calibratedData, color: marker.color,
+                    version: marker.version, meta: marker.meta, customProps: marker.customProps,
+                    createdAt: marker.createdAt, updatedAt: marker.updatedAt, details: marker.details
+                )
+            }
+            markerService.loadPersistedMarkers(transformedMarkers, originalFrameOriginMarkers: persisted)
+            for marker in transformedMarkers where marker.details == nil {
+                Task { await markerService.refreshMarkerDetails(backendId: marker.id) }
+            }
+        } catch { /* silent */ }
+    }
+
+    @ViewBuilder
+    var topBarControls: some View {
+        VStack {
+            HStack(spacing: 12) {
+                Spacer(minLength: 8)
+                if hasAutoScoped { markerCountBadge }
+                Spacer(minLength: 8)
+                if let spaceName = associatedSpaceName {
+                    Text(spaceName)
+                        .font(.subheadline).fontWeight(.medium)
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
+                Menu {
+                    Button(role: .destructive) { dismiss() } label: {
+                        Label("Close Session", systemImage: "xmark")
+                    }
+                    Button { enterDetectionMode() } label: {
+                        Label("Restart Placing", systemImage: "arrow.counterclockwise")
+                    }
+                } label: {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 22, weight: .semibold)).frame(width: 66, height: 66)
+                }
+                .menuStyle(.button).buttonStyle(.plain).lgCircle(tint: .white)
+            }
+            .padding(.horizontal, 16).padding(.top, 56)
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    var markerCountBadge: some View {
+        Menu {
+            Button(role: .destructive) { clearAllMarkersPersisted() } label: {
+                Label("Delete All Markers", systemImage: "trash")
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
+                Text("\(markerService.markers.count)")
+                    .font(.system(size: 16, weight: .semibold)).foregroundColor(.white)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.35), .white.opacity(0.1)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ), lineWidth: 1
+                            )
+                    )
+            )
+        }
+    }
+
+    @ViewBuilder
+    var bottomControls: some View {
+        if manualPlacementState == .inactive {
+            HStack(spacing: 20) {
+                if hasAutoScoped {
+                    if markerService.targetCrossesEdge {
+                        edgeWarningLabel
+                    } else {
+                        markerPlaceButton
+                    }
+                }
+            }
+        } else {
+            twoPointControls
+        }
+    }
+
+    @ViewBuilder
+    var edgeWarningLabel: some View {
+        Text("Target crosses an edge.\nMove to a flat surface.")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(.white.opacity(0.9))
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.red.opacity(0.4))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.red.opacity(0.7), lineWidth: 1.5)
+                    )
+            )
+    }
+
+    @ViewBuilder
+    var markerPlaceButton: some View {
+        Button { createAndPersistMarker() } label: {
+            Image(systemName: viewModel.isTwoFingers ? "hand.tap.fill" : (viewModel.isHoldingScreen ? "hand.point.up.fill" : "plus"))
+                .font(.system(size: 36))
+                .frame(width: 80, height: 80)
+        }
+        .buttonStyle(.plain)
+        .lgCircle(tint: .white)
+    }
+
+    @ViewBuilder
+    var twoPointControls: some View {
+        VStack(spacing: 10) {
+            Button {
+                manualPlacementPrimaryAction()
+            } label: {
+                Text(manualPlacementButtonTitle())
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(minWidth: 200, minHeight: 54)
+            }
+            .buttonStyle(.plain)
+            .lgCapsule(tint: .blue)
+
+            if manualFirstPoint != nil && manualSecondPoint != nil {
+                Button(role: .destructive) {
+                    clearTwoPointPlacement()
+                } label: {
+                    Text("Clear")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(minWidth: 160, minHeight: 48)
+                }
+                .buttonStyle(.plain)
+                .lgCapsule(tint: .red)
+            }
         }
     }
 }

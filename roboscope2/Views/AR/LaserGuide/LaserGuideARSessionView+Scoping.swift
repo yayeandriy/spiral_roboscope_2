@@ -15,38 +15,23 @@ import AudioToolbox
 
 extension LaserGuideARSessionView {
 
-    func maybeAutoScope(_ measurement: LaserDotLineMeasurement?) {
+    /// Per-frame immediate origin placement — no stability delay.
+    /// Called from the accumulator when the current frame has both dot and line 3-D positions.
+    func placeOriginImmediately(_ measurement: LaserDotLineMeasurement) {
         guard !hasAutoScoped else { return }
 
-        // Reset stability when there is no measurement or the distance is out of tolerance.
-        guard let measurement,
-              let candidate = candidateSegment(for: measurement.distanceMeters),
-              candidate.delta <= laserGuideDistanceToleranceMeters else {
-            if originStabilityStartTime != 0 {
-                originStabilityStartTime = 0
-                originStabilityProgress = 0
-            }
+        guard let candidate = candidateSegment(for: measurement.distanceMeters) else {
+            logAlways("SEGMENT no match  dist=\(String(format:"%.3f",measurement.distanceMeters))m")
+            return
+        }
+
+        guard candidate.delta <= laserGuideDistanceToleranceMeters else {
+            logAlways("SEGMENT out of tolerance  dist=\(String(format:"%.3f",measurement.distanceMeters))m segment=\(candidate.key) delta=\(String(format:"%.3f",candidate.delta))m tolerance=\(String(format:"%.3f",laserGuideDistanceToleranceMeters))m")
             return
         }
 
         let now = CACurrentMediaTime()
-
-        // Start the stability clock on the first in-tolerance frame.
-        if originStabilityStartTime == 0 {
-            originStabilityStartTime = now
-            print("[LaserGuideSnap] Stability clock started, candidate delta=\(String(format: "%.3f", candidate.delta))m")
-        }
-
-        let elapsed = now - originStabilityStartTime
-        let required: TimeInterval = 1.0
-        originStabilityProgress = min(1.0, elapsed / required)
-
-        // Require 1 second of continuous stability before placing origin.
-        guard elapsed >= required else { return }
-
-        // Reset stability state before placing.
-        originStabilityStartTime = 0
-        originStabilityProgress = 0
+        print("[OriginTrace] ★ SEGMENT MATCH  dist=\(String(format:"%.3f",measurement.distanceMeters))m segment=\(candidate.key) delta=\(String(format:"%.3f",candidate.delta))m")
 
         if let snappedSegment = applyLaserGuideIfPossible(measurement) {
             autoScopedDotWorld = measurement.dotWorld
@@ -62,6 +47,7 @@ extension LaserGuideARSessionView {
             autoScopeRestartThresholdZMeters = computeAutoRestartThresholdZ(for: snappedSegment)
 
             hasAutoScoped = true
+            lockedDotWorld = nil  // release the two-phase lock
 
             // Strong haptic + sound feedback so the operator feels the snap.
             let haptic = UINotificationFeedbackGenerator()
@@ -77,6 +63,109 @@ extension LaserGuideARSessionView {
 
             pipeline.stop()
         }
+    }
+
+    // MARK: - Origin trace (throttled logging)
+
+    /// Timestamp of last origin-trace log line; used to throttle to ~1 log/s.
+    private static var lastOriginTraceLog: TimeInterval = 0
+
+    /// Log only every ~1 second to keep console readable.  Always logs on state transitions
+    /// (star-prefixed lines).
+    private func logTT(_ message: String) {
+        let now = CACurrentMediaTime()
+        if now - Self.lastOriginTraceLog >= 1.0 {
+            Self.lastOriginTraceLog = now
+            print("[OriginTrace] \(message)")
+        }
+    }
+
+    private func logAlways(_ message: String) {
+        print("[OriginTrace] ★ \(message)")
+    }
+
+    /// Performs a raycast from a 2-D detection's bounding-box center to get a 3-D world position.
+    func raycastDetection(_ detection: LaserMLDetection) -> SIMD3<Float>? {
+        raycastDetection(detection, transform: imageToViewTransform, viewportSize: viewportSize)
+    }
+
+    /// Raycast using explicit transform and viewport (for use with a specific frame's data).
+    func raycastDetection(_ detection: LaserMLDetection, transform: CGAffineTransform, viewportSize: CGSize) -> SIMD3<Float>? {
+        guard let arView else { return nil }
+        guard viewportSize.width > 0, viewportSize.height > 0 else { return nil }
+
+        let centerNormImg = CGPoint(x: detection.boundingBox.midX, y: detection.boundingBox.midY)
+        let centerNormView = centerNormImg.applying(transform)
+        let centerPx = CGPoint(
+            x: centerNormView.x * viewportSize.width,
+            y: centerNormView.y * viewportSize.height
+        )
+
+        let results = arView.raycast(from: centerPx, allowing: .existingPlaneGeometry, alignment: .any)
+        let hit = results.first ?? arView.raycast(from: centerPx, allowing: .estimatedPlane, alignment: .any).first
+        guard let world = hit?.worldTransform.columns.3 else {
+            logTT("RAYCAST MISS  class=\(detection.label) bbox=(\(String(format:"%.3f",detection.boundingBox.midX)),\(String(format:"%.3f",detection.boundingBox.midY))) conf=\(String(format:"%.2f",detection.confidence)) screenPt=(\(String(format:"%.0f",centerPx.x)),\(String(format:"%.0f",centerPx.y))) viewport=\(viewportSize)")
+            return nil
+        }
+        let pos = SIMD3<Float>(world.x, world.y, world.z)
+        logTT("raycast HIT  class=\(detection.label) screenPt=(\(String(format:"%.0f",centerPx.x)),\(String(format:"%.0f",centerPx.y))) → world=(\(String(format:"%.3f",pos.x)),\(String(format:"%.3f",pos.y)),\(String(format:"%.3f",pos.z)))")
+        return pos
+    }
+
+    /// Two-phase origin placement: phase 1 locks the dot's 3-D position; phase 2 finds the
+    /// line and immediately places the origin.  This avoids the "both in one frame" requirement
+    /// that caused raycasts to hit random geometry when only one class was visible.
+    func tryPlaceOriginFromDetections(
+        _ detections: [LaserMLDetection],
+        transform: CGAffineTransform,
+        viewportSize: CGSize
+    ) {
+        let filtered = filterLineOverDot(detections)
+        let dotCount  = filtered.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }.count
+        let lineCount = filtered.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }.count
+
+        if lockedDotWorld == nil {
+            // Phase 1 — lock the dot.
+            let dotDets = filtered.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
+            guard let bestDot = dotDets.max(by: { $0.confidence < $1.confidence }) else {
+                logTT("PHASE1 no dot  totalDet=\(filtered.count) dots=\(dotCount) lines=\(lineCount)")
+                return
+            }
+            logTT("PHASE1 trying dot  conf=\(String(format:"%.2f",bestDot.confidence)) bbox=(\(String(format:"%.3f",bestDot.boundingBox.midX)),\(String(format:"%.3f",bestDot.boundingBox.midY))) size=(\(String(format:"%.3f",bestDot.boundingBox.width)),\(String(format:"%.3f",bestDot.boundingBox.height)))")
+            guard let dotWorld = raycastDetection(bestDot, transform: transform, viewportSize: viewportSize) else { return }
+            lockedDotWorld = dotWorld
+            logAlways("DOT LOCKED  world=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z)))")
+            return
+        }
+
+        // Phase 2 — dot is locked, look for the line.
+        guard let dotWorld = lockedDotWorld else { return }
+        let lineDets = filtered.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
+        guard let bestLine = lineDets.max(by: { $0.confidence < $1.confidence }) else {
+            logTT("PHASE2 no line  dotLocked=true  dots=\(dotCount) lines=\(lineCount)")
+            return
+        }
+        logTT("PHASE2 trying line  conf=\(String(format:"%.2f",bestLine.confidence)) bbox=(\(String(format:"%.3f",bestLine.boundingBox.midX)),\(String(format:"%.3f",bestLine.boundingBox.midY)))")
+        guard let lineWorld = raycastDetection(bestLine, transform: transform, viewportSize: viewportSize) else { return }
+
+        let yDelta = abs(lineWorld.y - dotWorld.y)
+        guard yDelta <= mlDetection.maxDotLineYDeltaMeters else {
+            logAlways("PHASE2 REJECTED  yDelta=\(String(format:"%.3f",yDelta)) > tolerance=\(String(format:"%.3f",mlDetection.maxDotLineYDeltaMeters))")
+            return
+        }
+
+        let dx = dotWorld.x - lineWorld.x
+        let dy = dotWorld.y - lineWorld.y
+        let dz = dotWorld.z - lineWorld.z
+        let distance = sqrt(dx * dx + dy * dy + dz * dz)
+        let measurement = LaserDotLineMeasurement(
+            dotWorld: dotWorld,
+            lineWorld: lineWorld,
+            distanceMeters: distance
+        )
+        latestLaserMeasurement = measurement
+        logAlways("MEASURE  dot=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z))) line=(\(String(format:"%.3f",lineWorld.x)),\(String(format:"%.3f",lineWorld.y)),\(String(format:"%.3f",lineWorld.z))) dist=\(String(format:"%.3f",distance))m")
+        placeOriginImmediately(measurement)
     }
 
     func maybeReturnToDetectionIfUserMovedAway(_ frame: ARFrame) {

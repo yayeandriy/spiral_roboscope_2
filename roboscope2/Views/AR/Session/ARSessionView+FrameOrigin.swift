@@ -209,27 +209,30 @@ extension LaserGuideARSessionView {
         )
         yAxis.position = SIMD3<Float>(0, axisLength/2, 0)
 
-        // Z-axis
-        let zAxis = ModelEntity(
-            mesh: .generateCylinder(height: axisLength, radius: axisRadius),
-            materials: [axisMaterial]
-        )
-        zAxis.position = SIMD3<Float>(0, 0, axisLength/2)
-        zAxis.orientation = simd_quatf(angle: .pi/2, axis: SIMD3<Float>(1, 0, 0))
+        // Z-axis — dashed line segments with arrow at tip
+        let zSegments: Int = 5
+        let zGapRatio: Float = 0.4      // 40% gap between segments
+        let zSegmentLength = axisLength / Float(zSegments)
+        let zDashLength = zSegmentLength * (1 - zGapRatio)
+        let zMaterial = UnlitMaterial(color: UIColor(red: 0.6, green: 0.8, blue: 1.0, alpha: 1.0)) // light blue tint
 
-        // Dots at X and Y tips; Z gets an arrow
-        let xTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
-        xTip.position = SIMD3<Float>(axisLength, 0, 0)
+        for i in 0..<zSegments {
+            let zDash = ModelEntity(
+                mesh: .generateCylinder(height: zDashLength, radius: axisRadius * 1.3),
+                materials: [zMaterial]
+            )
+            let dashCenter = zSegmentLength * Float(i) + zDashLength / 2
+            zDash.position = SIMD3<Float>(0, 0, dashCenter)
+            zDash.orientation = simd_quatf(angle: .pi/2, axis: SIMD3<Float>(1, 0, 0))
+            anchor.addChild(zDash)
+        }
 
-        let yTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
-        yTip.position = SIMD3<Float>(0, axisLength, 0)
-
-        // Z-axis arrow only (no dot)
-        let arrowHeight: Float = 0.05
-        let arrowRadius: Float = 0.018
+        // Z-axis arrow (cone) — more prominent
+        let arrowHeight: Float = 0.08
+        let arrowRadius: Float = 0.025
         let zArrow = ModelEntity(
             mesh: .generateCone(height: arrowHeight, radius: arrowRadius),
-            materials: [axisMaterial]
+            materials: [zMaterial]
         )
         zArrow.position = SIMD3<Float>(0, 0, axisLength + arrowHeight / 2)
         zArrow.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
@@ -237,10 +240,17 @@ extension LaserGuideARSessionView {
         // Center dot (slightly larger)
         let centerDot = ModelEntity(mesh: .generateSphere(radius: dotRadius * 1.4), materials: [axisMaterial])
 
+        // X and Y tip dots
+        let xTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
+        xTip.position = SIMD3<Float>(axisLength, 0, 0)
+
+        let yTip = ModelEntity(mesh: .generateSphere(radius: dotRadius), materials: [axisMaterial])
+        yTip.position = SIMD3<Float>(0, axisLength, 0)
+
         // Add all components to anchor
         anchor.addChild(xAxis)
         anchor.addChild(yAxis)
-        anchor.addChild(zAxis)
+        // Z dashes already added in the loop above
         anchor.addChild(xTip)
         anchor.addChild(yTip)
         anchor.addChild(zArrow)

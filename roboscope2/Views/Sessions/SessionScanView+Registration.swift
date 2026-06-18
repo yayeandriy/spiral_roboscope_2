@@ -15,12 +15,12 @@ extension SessionScanView {
     // MARK: - Registration
 
     func performSpaceRegistration() async {
-        if settings.pauseARDuringRegistration {
+        if true {
             await MainActor.run { captureSession.session.pause() }
         }
 
         defer {
-            if settings.pauseARDuringRegistration {
+            if true {
                 Task { @MainActor in
                     captureSession.session.run(captureSession.session.configuration!)
                 }
@@ -64,15 +64,15 @@ extension SessionScanView {
             let loadOptions: [SCNSceneSource.LoadingOption: Any] = [
                 .convertUnitsToMeters: true,
                 .flattenScene: true,
-                .checkConsistency: !settings.skipModelConsistencyChecks
+                .checkConsistency: false
             ]
             let scanLoadOptions: [SCNSceneSource.LoadingOption: Any] = [
                 .flattenScene: true,
-                .checkConsistency: !settings.skipModelConsistencyChecks
+                .checkConsistency: false
             ]
 
             let (modelScene, scanScene): (SCNScene, SCNScene)
-            if settings.useBackgroundLoading {
+            if true {
                 (modelScene, scanScene) = await Task.detached(priority: .userInitiated) {
                     let m = try SCNScene(url: modelPath, options: loadOptions)
                     let s = try SCNScene(url: scanPath, options: scanLoadOptions)
@@ -92,11 +92,11 @@ extension SessionScanView {
             await MainActor.run { registrationProgress = "Extracting point clouds..." }
             let modelPoints = ModelRegistrationService.extractPointCloud(
                 from: flattenedModelNode,
-                sampleCount: settings.modelPointsSampleCount
+                sampleCount: 5000
             )
             let scanPoints = ModelRegistrationService.extractPointCloud(
                 from: flattenedScanNode,
-                sampleCount: settings.scanPointsSampleCount
+                sampleCount: 10000
             )
 
             guard !modelPoints.isEmpty else {
@@ -120,8 +120,8 @@ extension SessionScanView {
             guard let result = await ModelRegistrationService.registerModels(
                 modelPoints: modelPoints,
                 scanPoints: scanPoints,
-                maxIterations: settings.maxICPIterations,
-                convergenceThreshold: Float(settings.icpConvergenceThreshold),
+                maxIterations: 30,
+                convergenceThreshold: Float(0.001),
                 progressHandler: { progress in
                     Task { @MainActor in registrationProgress = progress }
                 }

@@ -53,6 +53,9 @@ struct LaserGuideARSessionView: View {
     @State var accumulatedDetections: [LaserMLDetection] = []
     /// Consecutive frames (post-filter) that lacked both a dot AND a line.
     @State var emptyDetectionFrames: Int = 0
+    /// Two-phase lock: once a dot is raycast to 3-D, its world position is frozen here.
+    /// Subsequent frames only look for the line; when found, measurement + origin placement fires.
+    @State var lockedDotWorld: SIMD3<Float>? = nil
     // Origin placement stability delay (Normal Mode).
     /// `CACurrentMediaTime()` timestamp of when the current in-tolerance stable match began; 0 = not tracking.
     @State var originStabilityStartTime: TimeInterval = 0
@@ -106,7 +109,7 @@ struct LaserGuideARSessionView: View {
         _viewModel = StateObject(wrappedValue: ARSessionViewModel(sessionId: session.id, markerService: markerService, markerApi: markerApi))
         // Create mlDetection service and share with DetectionPipeline so $-bindings
         // in the settings panel and the pipeline's routing both use the same instance.
-        let mlDet = LaserMLDetectionService()
+        let mlDet = LaserMLDetectionService.make()
         _mlDetection = StateObject(wrappedValue: mlDet)
         _pipeline = StateObject(wrappedValue: DetectionPipeline(ml: mlDet))
     }
@@ -258,7 +261,7 @@ struct LaserGuideARSessionView: View {
     var statusTitle: String {
         switch manualPlacementState {
         case .inactive:
-            return originStabilityProgress > 0 ? "Locking..." : "Locating Origin"
+            return "Locating Origin"
         case .placeFirst:
             return "Place First Point"
         case .placeSecond:
@@ -271,7 +274,7 @@ struct LaserGuideARSessionView: View {
     var statusDescription: String {
         switch manualPlacementState {
         case .inactive:
-            return "Point camera at the area you want to map.\nThe origin will lock automatically when detected."
+            return "Point camera at the area you want to map."
         case .placeFirst:
             return "Tap to place the first reference point."
         case .placeSecond:
@@ -289,17 +292,9 @@ struct LaserGuideARSessionView: View {
             Spacer()
             VStack(spacing: 10) {
                 HStack(spacing: 10) {
-                    if manualPlacementState == .inactive, originStabilityProgress > 0 {
-                        Circle()
-                            .trim(from: 0, to: originStabilityProgress)
-                            .stroke(Color.green, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                            .frame(width: 22, height: 22)
-                            .animation(.linear(duration: 0.1), value: originStabilityProgress)
-                    }
                     Text(statusTitle)
                         .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(manualPlacementState == .inactive && originStabilityProgress > 0 ? .green : .white)
+                        .foregroundColor(.white)
                 }
 
                 Text(statusDescription)

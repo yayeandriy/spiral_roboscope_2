@@ -18,7 +18,7 @@ extension ARSessionView {
     //
         
         // Optionally pause AR session during registration
-        if settings.pauseARDuringRegistration {
+        if true {
             await MainActor.run {
                 captureSession.session.pause()
             }
@@ -26,7 +26,7 @@ extension ARSessionView {
         
         defer {
             // Resume AR session if it was paused
-            if settings.pauseARDuringRegistration {
+            if true {
                 Task { @MainActor in
                     captureSession.session.run(captureSession.session.configuration!)
                     isRegistering = false
@@ -101,16 +101,16 @@ extension ARSessionView {
             let loadOptions: [SCNSceneSource.LoadingOption: Any] = [
                 SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
                 SCNSceneSource.LoadingOption.flattenScene: true,
-                SCNSceneSource.LoadingOption.checkConsistency: !settings.skipModelConsistencyChecks
+                SCNSceneSource.LoadingOption.checkConsistency: false
             ]
             
             let scanLoadOptions: [SCNSceneSource.LoadingOption: Any] = [
                 SCNSceneSource.LoadingOption.flattenScene: true,
-                SCNSceneSource.LoadingOption.checkConsistency: !settings.skipModelConsistencyChecks
+                SCNSceneSource.LoadingOption.checkConsistency: false
             ]
             
             let (modelScene, scanScene): (SCNScene, SCNScene)
-            if settings.useBackgroundLoading {
+            if true {
                 (modelScene, scanScene) = await Task.detached(priority: .userInitiated) {
                     let modelScene = try SCNScene(url: modelPath, options: loadOptions)
                     let scanScene = try SCNScene(url: scanPath, options: scanLoadOptions)
@@ -137,11 +137,11 @@ extension ARSessionView {
             
             let modelPoints = ModelRegistrationService.extractPointCloud(
                 from: flattenedModelNode,
-                sampleCount: settings.modelPointsSampleCount
+                sampleCount: 5000
             )
             let scanPoints = ModelRegistrationService.extractPointCloud(
                 from: flattenedScanNode,
-                sampleCount: settings.scanPointsSampleCount
+                sampleCount: 10000
             )
             
             
@@ -171,8 +171,8 @@ extension ARSessionView {
             guard let result = await ModelRegistrationService.registerModels(
                 modelPoints: modelPoints,
                 scanPoints: scanPoints,
-                maxIterations: settings.maxICPIterations,
-                convergenceThreshold: Float(settings.icpConvergenceThreshold),
+                maxIterations: 30,
+                convergenceThreshold: Float(0.001),
                 progressHandler: { progress in
                     Task { @MainActor in
                         registrationProgress = progress
@@ -238,7 +238,7 @@ extension LaserGuideARSessionView {
         isRegistering = true
 
         // Optionally pause AR session during registration
-        if settings.pauseARDuringRegistration {
+        if true {
             await MainActor.run {
                 captureSession.session.pause()
             }
@@ -246,7 +246,7 @@ extension LaserGuideARSessionView {
 
         defer {
             // Resume AR session if it was paused
-            if settings.pauseARDuringRegistration {
+            if true {
                 Task { @MainActor in
                     captureSession.session.run(captureSession.session.configuration!)
                     isRegistering = false
@@ -315,16 +315,16 @@ extension LaserGuideARSessionView {
             let loadOptions: [SCNSceneSource.LoadingOption: Any] = [
                 SCNSceneSource.LoadingOption.convertUnitsToMeters: true,
                 SCNSceneSource.LoadingOption.flattenScene: true,
-                SCNSceneSource.LoadingOption.checkConsistency: !settings.skipModelConsistencyChecks
+                SCNSceneSource.LoadingOption.checkConsistency: false
             ]
 
             let scanLoadOptions: [SCNSceneSource.LoadingOption: Any] = [
                 SCNSceneSource.LoadingOption.flattenScene: true,
-                SCNSceneSource.LoadingOption.checkConsistency: !settings.skipModelConsistencyChecks
+                SCNSceneSource.LoadingOption.checkConsistency: false
             ]
 
             let (modelScene, scanScene): (SCNScene, SCNScene)
-            if settings.useBackgroundLoading {
+            if true {
                 (modelScene, scanScene) = await Task.detached(priority: .userInitiated) {
                     let modelScene = try SCNScene(url: modelPath, options: loadOptions)
                     let scanScene = try SCNScene(url: scanPath, options: scanLoadOptions)
@@ -349,11 +349,11 @@ extension LaserGuideARSessionView {
 
             let modelPoints = ModelRegistrationService.extractPointCloud(
                 from: flattenedModelNode,
-                sampleCount: settings.modelPointsSampleCount
+                sampleCount: 5000
             )
             let scanPoints = ModelRegistrationService.extractPointCloud(
                 from: flattenedScanNode,
-                sampleCount: settings.scanPointsSampleCount
+                sampleCount: 10000
             )
 
             guard !modelPoints.isEmpty && !scanPoints.isEmpty else {
@@ -381,8 +381,8 @@ extension LaserGuideARSessionView {
             guard let result = await ModelRegistrationService.registerModels(
                 modelPoints: modelPoints,
                 scanPoints: scanPoints,
-                maxIterations: settings.maxICPIterations,
-                convergenceThreshold: Float(settings.icpConvergenceThreshold),
+                maxIterations: 30,
+                convergenceThreshold: Float(0.001),
                 progressHandler: { progress in
                     Task { @MainActor in
                         registrationProgress = progress

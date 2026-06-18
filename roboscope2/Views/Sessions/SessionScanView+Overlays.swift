@@ -113,46 +113,6 @@ extension SessionScanView {
                 .font(.subheadline)
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
-
-            Divider()
-                .background(Color.white.opacity(0.3))
-                .padding(.horizontal, 8)
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Preset:")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
-                    Spacer()
-                    Text(settings.currentPreset.rawValue)
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                }
-
-                HStack {
-                    Text("Model/Scan Points:")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
-                    Spacer()
-                    Text("\(settings.modelPointsSampleCount) / \(settings.scanPointsSampleCount)")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                }
-
-                HStack {
-                    Text("Max Iterations:")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
-                    Spacer()
-                    Text("\(settings.maxICPIterations)")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                }
-            }
-            .padding(.horizontal, 4)
         }
         .padding(24)
         .background(.ultraThinMaterial)

@@ -134,6 +134,7 @@ extension LaserGuideARSessionView {
         frameAccumulator = []
         accumulatedDetections = []
         emptyDetectionFrames = 0
+        lockedDotWorld = nil
         originStabilityStartTime = 0
         originStabilityProgress = 0
 
@@ -177,5 +178,120 @@ extension LaserGuideARSessionView {
         let delta = abs(Float(best.segmentLength) - distanceMeters)
         let key = "x=\(best.x),z=\(best.z),len=\(best.segmentLength)"
         return (key: key, segment: best, delta: delta)
+    }
+
+    /// Processes raw ML detections: applies filters, updates 2-D accumulator for overlay,
+    /// performs per-frame 3-D raycast + immediate origin placement (when enabled), and
+    /// appends a history record.
+    func processDetections(_ rawDetections: [LaserMLDetection]) {
+        let newDetections = filterLineOverDot(rawDetections)
+
+        // --- 2-D accumulator update (for overlay visualization only) ---
+        let maxFrames = max(1, settings.videoModeAccumulatorFrames)
+        var acc = frameAccumulator
+        acc.append(newDetections)
+        if acc.count > maxFrames { acc.removeFirst(acc.count - maxFrames) }
+        frameAccumulator = acc
+        let merged = laserDetectionMergeFrames(acc)
+        let mergedHasDot  = merged.contains { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
+        let mergedHasLine = merged.contains { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
+        if mergedHasDot && mergedHasLine {
+            emptyDetectionFrames = 0
+            accumulatedDetections = merged
+        } else {
+            emptyDetectionFrames += 1
+            if emptyDetectionFrames > 2 * maxFrames {
+                accumulatedDetections = []
+            } else {
+                accumulatedDetections = merged
+            }
+        }
+
+        // --- History record ---
+        guard !newDetections.isEmpty else { return }
+        let dotDets  = newDetections.filter { $0.label == "dot"  || $0.classIndex == 0 }
+        let lineDets = newDetections.filter { $0.label == "line" || $0.classIndex == 1 }
+        let bestDot  = dotDets.max(by: { $0.confidence < $1.confidence })
+        let bestLine = lineDets.max(by: { $0.confidence < $1.confidence })
+        let t = imageToViewTransform
+        let vp = viewportSize.width > 0 ? viewportSize : CGSize(width: 390, height: 844)
+        let lineToDotRatio: Float? = {
+            guard let d = bestDot, let l = bestLine else { return nil }
+            let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
+            let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
+            guard dotLong > 0 else { return nil }
+            return lineLong / dotLong
+        }()
+        let mergedDots  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }.count
+        let mergedLines = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }.count
+        let accumulatedRatio: Float? = {
+            let mLine = merged.filter { $0.classIndex == 1 || $0.label.lowercased().contains("line") }
+                .max(by: { $0.confidence < $1.confidence })
+            let mDot  = merged.filter { $0.classIndex == 0 || $0.label.lowercased().contains("dot") }
+                .max(by: { $0.confidence < $1.confidence })
+            let dot = bestDot ?? mDot
+            guard let d = dot, let l = mLine else { return nil }
+            let dotLong  = laserDetectionLongestSidePixels(d.boundingBox, transform: t, viewport: vp)
+            let lineLong = laserDetectionLongestSidePixels(l.boundingBox, transform: t, viewport: vp)
+            guard dotLong > 0 else { return nil }
+            return lineLong / dotLong
+        }()
+        let record = DetectionFrameRecord(
+            timestamp: Date(),
+            dots: dotDets.count,
+            lines: lineDets.count,
+            otherCount: newDetections.filter { ($0.classIndex ?? -1) > 1 }.count,
+            distanceMeters: latestLaserMeasurement?.distanceMeters,
+            lineToDotSizeRatio: lineToDotRatio,
+            accumulatedDots: mergedDots,
+            accumulatedLines: mergedLines,
+            accumulatorFramesUsed: acc.filter { !$0.isEmpty }.count,
+            accumulatedLineToDotRatio: accumulatedRatio
+        )
+        detectionHistory.append(record)
+        if detectionHistory.count > 50 { detectionHistory.removeFirst(detectionHistory.count - 50) }
+    }
+
+    /// Processes an AR frame update — routes pixels through the ML pipeline, handles
+    /// auto-return-to-detection, badge positioning, transform updates, and edge checks.
+    func processFrameUpdate() {
+        guard let arView, let frame = arView.session.currentFrame else { return }
+
+        let interfaceOrientation = arView.window?.windowScene?.interfaceOrientation ?? .portrait
+        pipeline.processPixelBuffer(
+            frame.capturedImage,
+            orientation: Self.cgImageOrientation(for: interfaceOrientation)
+        )
+
+        // After auto-scope, monitor how far the user moves away from the scoped dot.
+        maybeReturnToDetectionIfUserMovedAway(frame)
+
+        // Keep Z-distance badges pinned to world positions as camera moves.
+        if hasAutoScoped {
+            refreshBadgePositions()
+        }
+
+        // Map normalized image coordinates -> normalized view coordinates.
+        if viewportSize.width > 0 && viewportSize.height > 0 {
+            imageToViewTransform = frame.displayTransform(for: interfaceOrientation, viewportSize: viewportSize)
+        }
+
+        // --- 3-D per-frame raycast using the CURRENT frame's transform ---
+        if settings.usePerFrame3DPlacement, !hasAutoScoped {
+            tryPlaceOriginFromDetections(
+                mlDetection.detections,
+                transform: imageToViewTransform,
+                viewportSize: viewportSize
+            )
+        }
+
+        // Check if target crosses an object edge (throttled ~4x/sec)
+        if hasAutoScoped && manualPlacementState == .inactive {
+            let now = CACurrentMediaTime()
+            if now - lastEdgeCheckTime > 0.25 {
+                lastEdgeCheckTime = now
+                markerService.updateTargetEdgeState(targetCorners: getTargetRectCorners())
+            }
+        }
     }
 }
