@@ -94,21 +94,37 @@ extension LaserGuideARSessionView {
         guard let arView else { return nil }
         guard viewportSize.width > 0, viewportSize.height > 0 else { return nil }
 
-        let centerNormImg = CGPoint(x: detection.boundingBox.midX, y: detection.boundingBox.midY)
+        let bbox = detection.boundingBox
+        let centerNormImg = CGPoint(x: bbox.midX, y: bbox.midY)
         let centerNormView = centerNormImg.applying(transform)
         let centerPx = CGPoint(
             x: centerNormView.x * viewportSize.width,
             y: centerNormView.y * viewportSize.height
         )
 
-        let results = arView.raycast(from: centerPx, allowing: .existingPlaneGeometry, alignment: .any)
-        let hit = results.first ?? arView.raycast(from: centerPx, allowing: .estimatedPlane, alignment: .any).first
-        guard let world = hit?.worldTransform.columns.3 else {
-            logTT("RAYCAST MISS  class=\(detection.label) bbox=(\(String(format:"%.3f",detection.boundingBox.midX)),\(String(format:"%.3f",detection.boundingBox.midY))) conf=\(String(format:"%.2f",detection.confidence)) screenPt=(\(String(format:"%.0f",centerPx.x)),\(String(format:"%.0f",centerPx.y))) viewport=\(viewportSize)")
+        // Camera position for distance reference
+        let camPos: SIMD3<Float>? = {
+            guard let frame = arView.session.currentFrame else { return nil }
+            let c = frame.camera.transform.columns.3
+            return SIMD3<Float>(c.x, c.y, c.z)
+        }()
+
+        var hitKind = "none"
+        var hit: ARRaycastResult?
+        let existingHits = arView.raycast(from: centerPx, allowing: .existingPlaneGeometry, alignment: .any)
+        if let h = existingHits.first { hit = h; hitKind = "existingPlane" }
+        else if let h = arView.raycast(from: centerPx, allowing: .estimatedPlane, alignment: .any).first { hit = h; hitKind = "estimatedPlane" }
+
+        guard let hit else {
+            logTT("RAYCAST MISS  class=\(detection.label) conf=\(String(format:"%.2f",detection.confidence)) normImg=(\(String(format:"%.3f",bbox.midX)),\(String(format:"%.3f",bbox.midY))) normView=(\(String(format:"%.3f",centerNormView.x)),\(String(format:"%.3f",centerNormView.y))) screenPt=(\(String(format:"%.0f",centerPx.x)),\(String(format:"%.0f",centerPx.y)))")
             return nil
         }
+        let world = hit.worldTransform.columns.3
         let pos = SIMD3<Float>(world.x, world.y, world.z)
-        logTT("raycast HIT  class=\(detection.label) screenPt=(\(String(format:"%.0f",centerPx.x)),\(String(format:"%.0f",centerPx.y))) → world=(\(String(format:"%.3f",pos.x)),\(String(format:"%.3f",pos.y)),\(String(format:"%.3f",pos.z)))")
+        let dist = camPos.map { simd_distance(pos, $0) }
+        let distStr = dist.map { String(format:"%.3f", $0) } ?? "?"
+        let arBounds = arView.bounds.size
+        logAlways("RAYCAST HIT \(hitKind) class=\(detection.label) cam=(\(camPos.map{"\(String(format:"%.3f",$0.x)),\(String(format:"%.3f",$0.y)),\(String(format:"%.3f",$0.z))"} ?? "?")) hit=(\(String(format:"%.3f",pos.x)),\(String(format:"%.3f",pos.y)),\(String(format:"%.3f",pos.z))) distFromCam=\(distStr)m bbox=\(String(format:"%.3f",bbox.midX)),\(String(format:"%.3f",bbox.midY)) screenPt=(\(String(format:"%.0f",centerPx.x)),\(String(format:"%.0f",centerPx.y))) viewport=\(viewportSize) arViewBounds=\(arBounds)")
         return pos
     }
 
@@ -132,6 +148,21 @@ extension LaserGuideARSessionView {
                 return
             }
             logTT("PHASE1 trying dot  conf=\(String(format:"%.2f",bestDot.confidence)) bbox=(\(String(format:"%.3f",bestDot.boundingBox.midX)),\(String(format:"%.3f",bestDot.boundingBox.midY))) size=(\(String(format:"%.3f",bestDot.boundingBox.width)),\(String(format:"%.3f",bestDot.boundingBox.height)))")
+
+            // Screen-center proximity gate: reject dots whose bbox center is far from
+            // the reticle center.  The user naturally aims the reticle at the dot, so a
+            // large offset indicates a false positive on a different surface.
+            let bboxNormCenter = CGPoint(x: bestDot.boundingBox.midX, y: bestDot.boundingBox.midY)
+            let bboxViewCenter = bboxNormCenter.applying(transform)
+            let bboxPx = CGPoint(x: bboxViewCenter.x * viewportSize.width, y: bboxViewCenter.y * viewportSize.height)
+            let screenCenter = CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
+            let pxDelta = hypot(bboxPx.x - screenCenter.x, bboxPx.y - screenCenter.y)
+            let maxPxDelta: CGFloat = 150
+            guard pxDelta <= maxPxDelta else {
+                logAlways("PHASE1 REJECTED (off-center)  bboxPx=(\(String(format:"%.0f",bboxPx.x)),\(String(format:"%.0f",bboxPx.y))) screenCenter=(\(String(format:"%.0f",screenCenter.x)),\(String(format:"%.0f",screenCenter.y))) Δ=\(String(format:"%.0f",pxDelta))px > \(String(format:"%.0f",maxPxDelta))px")
+                return
+            }
+
             guard let dotWorld = raycastDetection(bestDot, transform: transform, viewportSize: viewportSize) else { return }
             lockedDotWorld = dotWorld
             logAlways("DOT LOCKED  world=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z)))")
@@ -202,20 +233,18 @@ extension LaserGuideARSessionView {
     }
 
     func snapFrameOriginToAlignDot(dotWorld: SIMD3<Float>, lineWorld: SIMD3<Float>, segment: LaserGuideGridSegment) {
-        print("[LaserGuideSnap] snapFrameOriginToAlignDot called")
-        print("[LaserGuideSnap]   dotWorld: \(dotWorld)")
-        print("[LaserGuideSnap]   lineWorld: \(lineWorld)")
-        print("[LaserGuideSnap]   segment: x=\(segment.x), z=\(segment.z)")
-
-        // Compute direction first so we can orient the crosses
+        // Compute direction from dot → line
         let R = lineWorld - dotWorld
         let R_xz = SIMD2<Float>(R.x, R.z)
-        var r = normalize(R_xz)
+        let rawLen = simd_length(R)
+        let r = normalize(R_xz)
+        print("[OriginTrace] ★ DIRECTION  dot→line=(\(String(format:"%.3f",R.x)),\(String(format:"%.3f",R.z))) rawLen=\(String(format:"%.3f",rawLen))m  dir=(\(String(format:"%.3f",r.x)),\(String(format:"%.3f",r.y)))")
 
-        if let cameraTransform = arView?.session.currentFrame?.camera.transform {
-            let camForward = SIMD2<Float>(-cameraTransform.columns.2.x, -cameraTransform.columns.2.z)
-            if dot(r, camForward) < 0 { r = -r }
-        }
+        let S = SIMD2<Float>(Float(segment.x), Float(segment.z))
+        let segLen = simd_length(S)
+        let offset_xz = r * segLen
+        let O = SIMD3<Float>(dotWorld.x - offset_xz.x, dotWorld.y, dotWorld.z - offset_xz.y)
+        print("[OriginTrace] ★ ORIGIN  dotWorld=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z)))  dir=(\(String(format:"%.3f",r.x)),\(String(format:"%.3f",r.y)))  segXZ=(\(segment.x),\(segment.z)) len=\(String(format:"%.3f",segLen))  offset=(\(String(format:"%.3f",offset_xz.x)),\(String(format:"%.3f",offset_xz.y)))  origin=(\(String(format:"%.3f",O.x)),\(String(format:"%.3f",O.y)),\(String(format:"%.3f",O.z)))")
 
         let newZ = SIMD3<Float>(r.x, 0, r.y)
         let newX = SIMD3<Float>(r.y, 0, -r.x)
@@ -232,11 +261,10 @@ extension LaserGuideARSessionView {
                             color: UIColor(red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0),
                             orientation: rotMatrix, anchorState: $debugDotAnchor)
 
-        // Compute origin position
-        let S = SIMD2<Float>(Float(segment.x), Float(segment.z))
-        let d = length(S)
-        let offset_xz = r * d
-        let O = SIMD3<Float>(dotWorld.x - offset_xz.x, dotWorld.y, dotWorld.z - offset_xz.y)
+        // Debug: bright yellow sphere at dotWorld (no rotation) so we can see the
+        // exact raycast hit point independent of the cross orientation.
+        placeDebugDot(at: dotWorld, name: "debug_dot_sphere",
+                       color: UIColor.yellow, anchorState: $debugLineAnchor)
 
         // Z distance badge at red cross (dot→origin)
         let zDist = simd_distance(dotWorld, O)
@@ -299,6 +327,23 @@ extension LaserGuideARSessionView {
         arView.scene.addAnchor(anchor)
         anchorState.wrappedValue = anchor
         print("[RefCross] placed \(name) at \(position) aligned to origin Z")
+    }
+
+    /// Places a simple sphere at a world position — no rotation, just a bright dot.
+    private func placeDebugDot(at position: SIMD3<Float>, name: String, color: UIColor, anchorState: Binding<AnchorEntity?>) {
+        guard let arView = arView else { return }
+        if let existing = anchorState.wrappedValue {
+            arView.scene.removeAnchor(existing)
+        }
+        let anchor = AnchorEntity(world: position)
+        let sphere = ModelEntity(
+            mesh: .generateSphere(radius: 0.02),
+            materials: [UnlitMaterial(color: color)]
+        )
+        anchor.addChild(sphere)
+        arView.scene.addAnchor(anchor)
+        anchorState.wrappedValue = anchor
+        print("[DebugDot] placed \(name) at \(position)")
     }
 
     func endARSession() {

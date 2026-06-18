@@ -272,8 +272,12 @@ extension LaserGuideARSessionView {
         }
 
         // Map normalized image coordinates -> normalized view coordinates.
-        if viewportSize.width > 0 && viewportSize.height > 0 {
-            imageToViewTransform = frame.displayTransform(for: interfaceOrientation, viewportSize: viewportSize)
+        // Use arView.bounds, NOT viewportSize, because the ARView fills the entire
+        // screen (including behind safe areas), while GeometryReader's size excludes
+        // safe-area insets.  A mismatch here causes raycast screen points to be offset.
+        let arSize = arView.bounds.size
+        if arSize.width > 0 && arSize.height > 0 {
+            imageToViewTransform = frame.displayTransform(for: interfaceOrientation, viewportSize: arSize)
         }
 
         // --- 3-D per-frame raycast using the CURRENT frame's transform ---
@@ -281,7 +285,7 @@ extension LaserGuideARSessionView {
             tryPlaceOriginFromDetections(
                 mlDetection.detections,
                 transform: imageToViewTransform,
-                viewportSize: viewportSize
+                viewportSize: arSize
             )
         }
 
