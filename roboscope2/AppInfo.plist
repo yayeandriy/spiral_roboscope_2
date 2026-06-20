@@ -29,6 +29,7 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>This app requires camera access for AR features and spatial scanning.</string>
+
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>This app needs to access your local network to communicate with the alignment server for 3D model positioning.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

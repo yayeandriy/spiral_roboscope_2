@@ -70,18 +70,29 @@ class SpiralStorageService {
     /// - Parameters:
     ///   - fileURL: Local file URL to upload
     ///   - destinationPath: Destination path in R2 storage (e.g., "models/session-123/scan.usdc")
+    ///   - contentType: MIME type of the file (default: "application/octet-stream")
     ///   - progress: Optional progress callback (0.0 to 1.0)
     /// - Returns: Public URL of the uploaded file
     func uploadFile(
         fileURL: URL,
         destinationPath: String,
+        contentType: String = "application/octet-stream",
         progress: ProgressHandler? = nil
     ) async throws -> String {
         
         // Read file data
         let fileData = try Data(contentsOf: fileURL)
         let totalSize = fileData.count
-        
+
+        // For small files, use direct upload (simpler, faster)
+        if totalSize <= chunkSize {
+            return try await directUpload(
+                fileData: fileData,
+                key: destinationPath,
+                contentType: contentType
+            )
+        }
+
         // Calculate number of parts needed
         let numberOfParts = Int(ceil(Double(totalSize) / Double(chunkSize)))
         
@@ -89,6 +100,7 @@ class SpiralStorageService {
         // Step 1: Create multipart upload
         let createResponse = try await createMultipartUpload(
             key: destinationPath,
+            contentType: contentType,
             numberOfParts: numberOfParts
         )
         
@@ -124,12 +136,14 @@ class SpiralStorageService {
     /// - Parameters:
     ///   - fileURL: Local file URL to upload
     ///   - destinationPath: Destination path in R2 storage
+    ///   - contentType: MIME type of the file
     ///   - maxRetries: Maximum number of retry attempts (default: 3)
     ///   - progress: Optional progress callback
     /// - Returns: Public URL of the uploaded file
     func uploadFileWithRetry(
         fileURL: URL,
         destinationPath: String,
+        contentType: String = "application/octet-stream",
         maxRetries: Int = 3,
         progress: ProgressHandler? = nil
     ) async throws -> String {
@@ -141,6 +155,7 @@ class SpiralStorageService {
                 return try await uploadFile(
                     fileURL: fileURL,
                     destinationPath: destinationPath,
+                    contentType: contentType,
                     progress: progress
                 )
             } catch {
@@ -158,9 +173,55 @@ class SpiralStorageService {
     }
     
     // MARK: - Private Methods
-    
+
+    /// Direct upload for small files (≤ chunkSize). Uses POST /v1/upload.
+    private func directUpload(
+        fileData: Data,
+        key: String,
+        contentType: String
+    ) async throws -> String {
+        let url = URL(string: "\(baseURL)/v1/upload")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        request.timeoutInterval = 60
+
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(contentType)\r\n\r\n".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\r\n--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"key\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(key)\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw StorageError.serverError(
+                (response as? HTTPURLResponse)?.statusCode ?? 0,
+                errorMsg
+            )
+        }
+
+        let result = try JSONDecoder().decode(DirectUploadResponse.self, from: data)
+        return result.url
+    }
+
+    private struct DirectUploadResponse: Codable {
+        let url: String
+    }
+
     private func createMultipartUpload(
         key: String,
+        contentType: String,
         numberOfParts: Int
     ) async throws -> CreateUploadResponse {
         
@@ -173,7 +234,7 @@ class SpiralStorageService {
         
         let body: [String: Any] = [
             "key": key,
-            "content_type": "model/vnd.usd+zip",
+            "content_type": contentType,
             "parts": numberOfParts
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)

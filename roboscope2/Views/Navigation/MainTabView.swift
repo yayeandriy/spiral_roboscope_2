@@ -13,19 +13,29 @@ struct MainTabView: View {
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            // Sessions Tab (first)
+            // Sessions Tab
             SessionsView()
                 .tabItem {
                     Label("Sessions", systemImage: "list.clipboard")
                 }
                 .tag(0)
 
+            // Record Tab
+            NavigationView {
+                RecordView()
+            }
+            .navigationViewStyle(.stack)
+                .tabItem {
+                    Label("Record", systemImage: "video.fill")
+                }
+                .tag(1)
+
             // Settings Tab
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
-                .tag(1)
+                .tag(2)
         }
     }
 }
