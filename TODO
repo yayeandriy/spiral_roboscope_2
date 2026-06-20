@@ -69,8 +69,14 @@ Snap cooldown: laserGuideSnapCooldownSeconds (currently 0.6)
 ✔ Accumulator @started(26-06-18 19:33) @done(26-06-20 13:27) @lasted(1d17h54m38s)
   ✔ Improve accumulator — use 3d points of the detections from each frame @started(26-06-18 19:33) @done(26-06-20 13:27) @lasted(1d17h54m33s)
 ✔ Direction on anchor @started(26-06-18 19:33) @done(26-06-20 13:27) @lasted(1d17h54m41s)
-☐ Tabs
-☐ Test repositioning
+✔ Tabs @started(26-06-20 14:06) @done(26-06-20 14:12) @lasted(6m)
+☐ Test: 
+  ☐ reset anchor
+  ☐ detection
+☐ Reference markers
+    ☐ API
+    ☐ Portal table
+    ☐ App view
 ☐ Recorder
     - lets add the Recorder mode
     - in this mode user can record video (up to 20s)

@@ -22,6 +22,15 @@ struct SessionsView: View {
     @State private var isLaunchingAR: Bool = false
     @State private var refreshTrigger: Bool = false  // Force row refresh
     @State private var isQuickCreating: Bool = false
+    /// Persisted space tab selection. Empty string = no previous selection.
+    @AppStorage("selectedSpaceTabId") private var persistedSpaceId: String = ""
+    /// Resolved tab. nil = no tab selected yet (show space picker).
+    @State private var selectedTabSpaceId: UUID? = nil
+    @State private var isDeletingEmpty = false
+    @State private var isSelectionMode = false
+    @State private var selectedForDeletion: Set<UUID> = []
+    @State private var showingDeleteAllAlert = false
+    @State private var showingDeleteSelectedAlert = false
 
     @ViewBuilder
     private func laserGuideDestination(for session: WorkSession) -> some View {
@@ -34,43 +43,39 @@ struct SessionsView: View {
 
     var body: some View {
         NavigationView {
-            VStack { sessionsList }
-            .navigationTitle("Work Sessions")
-            .navigationBarTitleDisplayMode(.inline)
+            VStack(spacing: 0) {
+                if selectedTabSpaceId == nil {
+                    SpacesListView(
+                        spaces: availableSpaces,
+                        sessionCounts: spaceSessionCounts,
+                        isLoading: spaceService.isLoading && spaceService.spaces.isEmpty,
+                        onSelect: { selectSpaceTab($0.id) }
+                    )
+                    .padding(.top, 16)
+                } else {
+                    sessionHeader
+                    sessionsList
+                }
+            }
+            .navigationTitle(selectedTabSpaceId == nil ? "Spaces" : "")
+            .navigationBarTitleDisplayMode(selectedTabSpaceId == nil ? .large : .inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Text("\(allSessions.count)")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.primary.opacity(0.12))
-                            )
-                            .foregroundColor(.primary)
-                        Text("Work Sessions")
-                            .font(.headline)
-                        if settings.videoModeEnabled {
-                            Image(systemName: "video.fill")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if selectedTabSpaceId != nil {
+                        Button(action: { goBackToSpaces() }) {
+                            Image(systemName: "chevron.left")
                         }
                     }
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { handleCreateTapped() }) {
-                        Image(systemName: "plus")
+                    if selectedTabSpaceId != nil && !isSelectionMode {
+                        Button(action: { handleCreateTapped() }) {
+                            Image(systemName: "plus")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                        }
                     }
-                }
-                
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: { Task { await refreshData() } }) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .disabled(workSessionService.isLoading)
                 }
             }
             // Search removed
@@ -131,8 +136,42 @@ struct SessionsView: View {
             } message: { session in
                 Text("Are you sure you want to delete this session? This action cannot be undone.")
             }
+            .alert("Delete All Sessions?", isPresented: $showingDeleteAllAlert) {
+                Button("Delete All", role: .destructive) {
+                    Task { await deleteAllSessions() }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will permanently delete ALL \(allSessions.count) sessions in this space. This action cannot be undone.")
+            }
+            .alert("Delete Selected?", isPresented: $showingDeleteSelectedAlert) {
+                Button("Delete \(selectedForDeletion.count)", role: .destructive) {
+                    Task { await deleteSelectedSessions() }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will permanently delete the \(selectedForDeletion.count) selected sessions. This action cannot be undone.")
+            }
+            .overlay {
+                if isDeletingEmpty {
+                    ZStack {
+                        Color.black.opacity(0.12).ignoresSafeArea()
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Deleting empty sessions…")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
+                        .padding(14)
+                        .background(.ultraThinMaterial, in: Capsule())
+                    }
+                }
+            }
             .task {
                 await loadInitialData()
+            }
+            .onChange(of: spaceService.spaces) { _, _ in
+                resolvePersistedTab()
             }
             .refreshable {
                 await refreshData()
@@ -141,7 +180,74 @@ struct SessionsView: View {
     }
     
     // Filters removed
-    
+
+    // MARK: - Session Header
+
+    private var sessionHeader: some View {
+        VStack(spacing: 0) {
+            if isSelectionMode {
+                HStack {
+                    Text("\(selectedForDeletion.count) selected")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    Spacer()
+                    Button("Cancel") { exitSelectionMode() }
+                    Button(role: .destructive) {
+                        showingDeleteSelectedAlert = true
+                    } label: {
+                        Text("Delete")
+                    }
+                    .disabled(selectedForDeletion.isEmpty)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Sessions")
+                        .font(.title)
+                        .fontWeight(.bold)
+                    Spacer()
+                    if !allSessions.isEmpty {
+                        Menu {
+                            Button(role: .destructive) {
+                                Task { await deleteAllEmptySessions() }
+                            } label: {
+                                Label("Delete All Empty Sessions", systemImage: "trash.slash")
+                            }
+
+                            Button {
+                                enterSelectionMode()
+                            } label: {
+                                Label("Select to Delete…", systemImage: "checklist")
+                            }
+
+                            Divider()
+
+                            Button(role: .destructive) {
+                                showingDeleteAllAlert = true
+                            } label: {
+                                Label("Delete All", systemImage: "trash")
+                            }
+                        } label: {
+                            Text("\(allSessions.count)")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        Text("\(allSessions.count)")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
     // MARK: - Sessions List
     
     private var sessionsList: some View {
@@ -154,28 +260,38 @@ struct SessionsView: View {
             } else {
                 List {
                     ForEach(allSessions) { session in
-                        SessionRowView(session: session, refreshTrigger: refreshTrigger) {
-                            // Start AR Session
-                            startARSession(session)
+                        SessionRowView(
+                            session: session,
+                            refreshTrigger: refreshTrigger,
+                            isSelectionMode: isSelectionMode,
+                            isSelected: selectedForDeletion.contains(session.id)
+                        ) {
+                            if isSelectionMode {
+                                toggleSelection(session.id)
+                            } else {
+                                startARSession(session)
+                            }
                         } onEdit: { }
                           onDelete: { }
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                sessionToDelete = session
-                                showingDeleteAlert = true
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                            if !isSelectionMode {
+                                Button(role: .destructive) {
+                                    sessionToDelete = session
+                                    showingDeleteAlert = true
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+
+                                Button {
+                                    selectedSession = session
+                                    showingEditSheet = true
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                .tint(.blue)
                             }
-                            
-                            Button {
-                                selectedSession = session
-                                showingEditSheet = true
-                            } label: {
-                                Label("Edit", systemImage: "pencil")
-                            }
-                            .tint(.blue)
                         }
                         .listRowBackground(Color.clear)
                     }
@@ -246,21 +362,100 @@ struct SessionsView: View {
     }
     
     // MARK: - Computed Properties
-    
-    private var allSessions: [WorkSession] {
-        // Sort by creation date (newest first)
-        return workSessionService.workSessions.sorted {
-            guard let date0 = $0.createdAt, let date1 = $1.createdAt else {
-                return $0.createdAt != nil
+
+    /// All spaces sorted by name.
+    private var availableSpaces: [Space] {
+        spaceService.spaces.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Sessions for the currently selected space tab.
+    private var filteredSessions: [WorkSession] {
+        guard let spaceId = selectedTabSpaceId else { return [] }
+        return workSessionService.workSessions
+            .filter { $0.spaceId == spaceId }
+            .sorted {
+                guard let d0 = $0.createdAt, let d1 = $1.createdAt else { return $0.createdAt != nil }
+                return d0 > d1
             }
-            return date0 > date1
+    }
+
+    /// Pre-computed session counts per space, so the list doesn't re-filter on every row.
+    private var spaceSessionCounts: [UUID: Int] {
+        var counts: [UUID: Int] = [:]
+        for session in workSessionService.workSessions {
+            counts[session.spaceId, default: 0] += 1
         }
+        return counts
+    }
+
+    private var allSessions: [WorkSession] {
+        filteredSessions
+    }
+
+    private var selectedSpaceName: String {
+        guard let spaceId = selectedTabSpaceId,
+              let space = availableSpaces.first(where: { $0.id == spaceId }) else {
+            return "Work Sessions"
+        }
+        return space.name
+    }
+
+    private var titleText: String {
+        selectedSpaceName
     }
     
     // MARK: - Actions
+
+    private func selectSpaceTab(_ spaceId: UUID) {
+        selectedTabSpaceId = spaceId
+        persistedSpaceId = spaceId.uuidString
+    }
+
+    private func goBackToSpaces() {
+        selectedTabSpaceId = nil
+        persistedSpaceId = ""
+    }
+
+    // MARK: - Selection Mode
+
+    private func enterSelectionMode() {
+        isSelectionMode = true
+        selectedForDeletion = []
+    }
+
+    private func exitSelectionMode() {
+        isSelectionMode = false
+        selectedForDeletion = []
+    }
+
+    private func toggleSelection(_ id: UUID) {
+        if selectedForDeletion.contains(id) {
+            selectedForDeletion.remove(id)
+        } else {
+            selectedForDeletion.insert(id)
+        }
+    }
+
+    /// Resolve the persisted tab ID against available spaces. If valid, select it.
+    /// If no persisted tab but only one space exists, auto-select it.
+    private func resolvePersistedTab() {
+        guard !persistedSpaceId.isEmpty,
+              let uuid = UUID(uuidString: persistedSpaceId),
+              availableSpaces.contains(where: { $0.id == uuid }) else {
+            // No valid persisted tab. If only one space, auto-select it.
+            if availableSpaces.count == 1, let only = availableSpaces.first {
+                selectSpaceTab(only.id)
+            }
+            return
+        }
+        if selectedTabSpaceId != uuid {
+            selectedTabSpaceId = uuid
+        }
+    }
     
     private func loadInitialData() async {
         await refreshData()
+        resolvePersistedTab()
     }
     
     private func refreshData() async {
@@ -272,6 +467,8 @@ struct SessionsView: View {
         } catch {
             // TODO: handle error UI if needed
         }
+        // Resolve persisted tab after data loads (spaces may have just arrived)
+        resolvePersistedTab()
     }
     
     private func startARSession(_ session: WorkSession) {
@@ -286,6 +483,30 @@ struct SessionsView: View {
             // Trigger navigation
             arSession = session
         }
+    }
+
+    // MARK: - Delete All Empty
+
+    private func deleteAllEmptySessions() async {
+        isDeletingEmpty = true
+        defer { isDeletingEmpty = false }
+
+        let markerService = MarkerService.shared
+        var emptyIds: [UUID] = []
+
+        for session in filteredSessions {
+            let count = await markerService.getMarkerCountForSession(session.id)
+            if count == 0 {
+                emptyIds.append(session.id)
+            }
+        }
+
+        guard !emptyIds.isEmpty else { return }
+
+        for id in emptyIds {
+            try? await workSessionService.deleteWorkSession(id: id)
+        }
+        await refreshData()
     }
     
     // MARK: - Create helpers
@@ -329,6 +550,25 @@ struct SessionsView: View {
         } catch {
             // TODO: Show error alert
         }
+    }
+
+    private func deleteAllSessions() async {
+        isDeletingEmpty = true
+        defer { isDeletingEmpty = false }
+        for session in allSessions {
+            try? await workSessionService.deleteWorkSession(id: session.id)
+        }
+        await refreshData()
+    }
+
+    private func deleteSelectedSessions() async {
+        isDeletingEmpty = true
+        defer { isDeletingEmpty = false }
+        for id in selectedForDeletion {
+            try? await workSessionService.deleteWorkSession(id: id)
+        }
+        await refreshData()
+        exitSelectionMode()
     }
 }
 

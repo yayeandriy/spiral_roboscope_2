@@ -10,6 +10,8 @@ import SwiftUI
 struct SessionRowView: View {
     let session: WorkSession
     let refreshTrigger: Bool  // Force re-fetch marker count
+    let isSelectionMode: Bool
+    let isSelected: Bool
     let onStartAR: () -> Void
     // These are kept for compatibility but handled via swipe actions in the list
     // rather than inline buttons in the row. They are optional and unused here.
@@ -23,44 +25,42 @@ struct SessionRowView: View {
     
     var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-            // Top row: status (left) + updated date (right)
-            HStack(alignment: .firstTextBaseline) {
-                Text(session.status.displayName)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(statusColor)
-                Spacer()
-                if let updatedTime = updatedRelativeString {
-                Text(updatedTime)
-                    .font(.caption)
-                    .foregroundColor(.secondary) // Lighter color for updated date
-            } else {
-                // Debug: show why updated date is not available
-                Text("No updated date")
-                    .font(.caption2)
-                    .foregroundColor(.gray)
-                    .opacity(0.3)
-            }
-            }
-
-            // Title: Space name (or fallback)
-            Text(spaceName)
-                .font(.headline)
-                .fontWeight(.semibold)
-                .foregroundColor(.primary)
-
-            // Bottom row: session type + markers badge
-            HStack(spacing: 8) {
-                Text(session.sessionType.displayName.capitalized)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                if session.isLaserGuide {
-                    laserGuideBadge
+            // Title + optional selection checkbox
+            HStack(alignment: .top, spacing: 0) {
+                if isSelectionMode {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundColor(isSelected ? .blue : .secondary.opacity(0.5))
+                        .padding(.trailing, 12)
                 }
 
-                Spacer()
-                markersBadge
+                VStack(alignment: .leading, spacing: 4) {
+                    if let updatedTime = updatedRelativeString {
+                        Text(updatedTime)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                    } else {
+                        Text(session.id.uuidString.prefix(8).description)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                    }
+
+                    // Bottom row: session type + laser guide badge + markers / empty
+                    HStack(spacing: 8) {
+                        Text(session.sessionType.displayName.capitalized)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        if session.isLaserGuide {
+                            laserGuideBadge
+                        }
+
+                        Spacer()
+                        markersIndicator
+                    }
+                }
             }
 
             // ML model row (only for LaserGuide sessions whose space has a model URL)
@@ -142,28 +142,6 @@ struct SessionRowView: View {
         colorScheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.08)
     }
     
-    private var statusColor: Color {
-        switch session.status {
-        case .draft: return .gray
-        case .active: return .green
-        case .done: return .blue
-        case .archived: return .purple
-        }
-    }
-    
-    private var spaceName: String {
-        if let space = associatedSpace { return space.name }
-        return "Space: \(session.spaceId.uuidString.prefix(8))..."
-    }
-    
-    private var updatedDateString: String? {
-        guard let updatedAt = session.updatedAt else { return nil }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: updatedAt)
-    }
-    
     private var updatedRelativeString: String? {
         guard let updatedAt = session.updatedAt else { 
             return nil 
@@ -175,21 +153,23 @@ struct SessionRowView: View {
     }
     
     private var markersCount: Int {
-        let count = sessionMarkersCount ?? markerService.markers.filter { $0.workSessionId == session.id }.count
-        return count
+        sessionMarkersCount ?? markerService.markers.filter { $0.workSessionId == session.id }.count
     }
     
-    private var markersBadge: some View {
-        Text("\(markersCount) markers")
-            .font(.caption)
-            .foregroundColor(.primary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule()
-                    .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
-                    .background(Capsule().fill(Color(.systemBackground)))
-            )
+    @ViewBuilder
+    private var markersIndicator: some View {
+        if markersCount == 0 {
+            Text("Empty")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        } else {
+            Text("\(markersCount) marker\(markersCount == 1 ? "" : "s")")
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.blue)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+        }
     }
 
     private var laserGuideBadge: some View {
@@ -281,6 +261,8 @@ struct StatusBadge: View {
                 updatedAt: Date()
             ),
             refreshTrigger: false,
+            isSelectionMode: false,
+            isSelected: false,
             onStartAR: { },
             onEdit: { },
             onDelete: { }
@@ -300,6 +282,8 @@ struct StatusBadge: View {
                 updatedAt: Date()
             ),
             refreshTrigger: false,
+            isSelectionMode: false,
+            isSelected: false,
             onStartAR: { },
             onEdit: { },
             onDelete: { }
