@@ -19,7 +19,8 @@ struct RecordView: View {
     @State private var copiedVideoID: UUID?
 
     private let storageService = SpiralStorageService.shared
-    private let videoBasePath = "class-balance/roboscope/video"
+    @AppStorage("selectedSpaceTabId") private var selectedSpaceId: String = ""
+    private let videoBasePath = "class-balance/roboscope"
 
     var body: some View {
         ZStack {
@@ -266,8 +267,9 @@ struct RecordView: View {
         uploadProgress = 0
         uploadError = nil
 
-        let videoID = UUID().uuidString
-        let destinationPath = "\(videoBasePath)/\(videoID).mp4"
+        let videoID = UUID().uuidString.lowercased()
+        let spacePath = selectedSpaceId.isEmpty ? "unknown" : selectedSpaceId.lowercased()
+        let destinationPath = "\(videoBasePath)/\(spacePath)/\(videoID).mp4"
 
         Task {
             do {

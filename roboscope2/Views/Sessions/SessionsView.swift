@@ -57,7 +57,7 @@ struct SessionsView: View {
                     sessionsList
                 }
             }
-            .navigationTitle(selectedTabSpaceId == nil ? "Spaces" : "")
+            .navigationTitle(selectedTabSpaceId == nil ? "Spaces" : selectedSpaceName)
             .navigationBarTitleDisplayMode(selectedTabSpaceId == nil ? .large : .inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -203,9 +203,9 @@ struct SessionsView: View {
                 .padding(.vertical, 12)
             } else {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("Sessions")
-                        .font(.title)
-                        .fontWeight(.bold)
+                    Text("\(allSessions.count) sessions")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
                     Spacer()
                     if !allSessions.isEmpty {
                         Menu {
@@ -229,16 +229,10 @@ struct SessionsView: View {
                                 Label("Delete All", systemImage: "trash")
                             }
                         } label: {
-                            Text("\(allSessions.count)")
+                            Image(systemName: "ellipsis.circle")
                                 .font(.title3)
-                                .fontWeight(.semibold)
                                 .foregroundColor(.secondary)
                         }
-                    } else {
-                        Text("\(allSessions.count)")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
                     }
                 }
                 .padding(.horizontal, 16)

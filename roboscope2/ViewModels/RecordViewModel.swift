@@ -192,15 +192,74 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
                 print("[RecordVM] Recording failed: \(error.localizedDescription)")
                 noFramesWarning = true
                 state = .preview(url: outputFileURL)
-            } else if let attrs = try? FileManager.default.attributesOfItem(atPath: outputFileURL.path),
-                      let size = attrs[.size] as? Int64 {
+                return
+            }
+
+            // Post-process: crop to square if needed
+            let finalURL: URL
+            if settings.proportion.isSquare {
+                finalURL = await cropToSquare(sourceURL: outputFileURL)
+            } else {
+                finalURL = outputFileURL
+            }
+
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: finalURL.path),
+               let size = attrs[.size] as? Int64 {
                 print("[RecordVM] Recording complete — \(size) bytes")
                 noFramesWarning = size < 1000
-                state = .preview(url: outputFileURL)
-            } else {
-                state = .preview(url: outputFileURL)
             }
+            state = .preview(url: finalURL)
         }
+    }
+
+    private func cropToSquare(sourceURL: URL) async -> URL {
+        let asset = AVAsset(url: sourceURL)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
+            return sourceURL
+        }
+
+        let naturalSize: CGSize
+        let preferredTransform: CGAffineTransform
+        do {
+            naturalSize = try await track.load(.naturalSize)
+            preferredTransform = try await track.load(.preferredTransform)
+        } catch {
+            return sourceURL
+        }
+
+        let squareSize = min(naturalSize.width, naturalSize.height)
+        let xOffset = (naturalSize.width - squareSize) / 2
+        let yOffset = (naturalSize.height - squareSize) / 2
+
+        let composition = AVMutableVideoComposition()
+        composition.renderSize = CGSize(width: squareSize, height: squareSize)
+        composition.frameDuration = (try? await track.load(.minFrameDuration)) ?? CMTime(value: 1, timescale: 30)
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        let duration = (try? await asset.load(.duration)) ?? CMTime(value: 1, timescale: 30)
+        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
+
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        // Combine the track's rotation with our crop translation
+        let transform = preferredTransform.translatedBy(x: -xOffset, y: -yOffset)
+        layerInstruction.setTransform(transform, at: .zero)
+        instruction.layerInstructions = [layerInstruction]
+        composition.instructions = [instruction]
+
+        let outputURL = tempVideoURL()
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            return sourceURL
+        }
+        exporter.videoComposition = composition
+        exporter.outputURL = outputURL
+        exporter.outputFileType = .mp4
+
+        await exporter.export()
+
+        // Clean up original uncropped temp file
+        try? FileManager.default.removeItem(at: sourceURL)
+
+        return outputURL
     }
 
     nonisolated func fileOutput(_ output: AVCaptureFileOutput,

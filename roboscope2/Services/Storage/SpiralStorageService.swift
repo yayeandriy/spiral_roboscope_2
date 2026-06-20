@@ -174,49 +174,56 @@ class SpiralStorageService {
     
     // MARK: - Private Methods
 
-    /// Direct upload for small files (≤ chunkSize). Uses POST /v1/upload.
+    /// Direct upload for small files (≤ chunkSize). Uses presigned PUT — no multipart.
     private func directUpload(
         fileData: Data,
         key: String,
         contentType: String
     ) async throws -> String {
-        let url = URL(string: "\(baseURL)/v1/upload")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
-        request.timeoutInterval = 60
+        // Step 1: Get presigned upload URL
+        let presignURL = URL(string: "\(baseURL)/v1/presign/upload")!
+        var presignRequest = URLRequest(url: presignURL)
+        presignRequest.httpMethod = "POST"
+        presignRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        presignRequest.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        presignRequest.timeoutInterval = 30
 
-        let boundary = UUID().uuidString
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let presignBody: [String: Any] = [
+            "key": key,
+            "content_type": contentType,
+        ]
+        presignRequest.httpBody = try JSONSerialization.data(withJSONObject: presignBody)
 
-        var body = Data()
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: \(contentType)\r\n\r\n".data(using: .utf8)!)
-        body.append(fileData)
-        body.append("\r\n--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"key\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(key)\r\n".data(using: .utf8)!)
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
-        request.httpBody = body
+        let (presignData, presignResponse) = try await URLSession.shared.data(for: presignRequest)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw StorageError.serverError(
-                (response as? HTTPURLResponse)?.statusCode ?? 0,
-                errorMsg
-            )
+        guard let httpResp = presignResponse as? HTTPURLResponse,
+              (200...299).contains(httpResp.statusCode) else {
+            let err = String(data: presignData, encoding: .utf8) ?? "Unknown"
+            throw StorageError.serverError((presignResponse as? HTTPURLResponse)?.statusCode ?? 0, err)
         }
 
-        let result = try JSONDecoder().decode(DirectUploadResponse.self, from: data)
-        return result.url
+        let presignResult = try JSONDecoder().decode(PresignUploadResponse.self, from: presignData)
+
+        // Step 2: PUT raw file data to the presigned URL
+        var putRequest = URLRequest(url: URL(string: presignResult.url)!)
+        putRequest.httpMethod = "PUT"
+        putRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        putRequest.httpBody = fileData
+        putRequest.timeoutInterval = 60
+
+        let (_, putResponse) = try await URLSession.shared.data(for: putRequest)
+
+        guard let putHttp = putResponse as? HTTPURLResponse,
+              (200...299).contains(putHttp.statusCode) else {
+            throw StorageError.serverError((putResponse as? HTTPURLResponse)?.statusCode ?? 0, "PUT failed")
+        }
+
+        return baseURL + "/" + key
     }
 
-    private struct DirectUploadResponse: Codable {
+    private struct PresignUploadResponse: Codable {
         let url: String
+        let key: String
     }
 
     private func createMultipartUpload(
