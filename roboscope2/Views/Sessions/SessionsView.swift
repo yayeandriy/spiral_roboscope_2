@@ -19,6 +19,7 @@ struct SessionsView: View {
     // Search and filters removed for a simpler UI
     @State private var arSession: WorkSession?
     @State private var dashboardSession: WorkSession?
+    @State private var minimapSession: WorkSession?
     @State private var isLaunchingAR: Bool = false
     @State private var refreshTrigger: Bool = false  // Force row refresh
     @State private var isQuickCreating: Bool = false
@@ -125,6 +126,9 @@ struct SessionsView: View {
                         await refreshData()
                     }
                 }
+            }
+            .fullScreenCover(item: $minimapSession) { session in
+                MinimapView(spaceId: session.spaceId.uuidString, sessionId: session.id)
             }
             .alert("Delete Session", isPresented: $showingDeleteAlert, presenting: sessionToDelete) { session in
                 Button("Delete", role: .destructive) {
@@ -267,6 +271,8 @@ struct SessionsView: View {
                             } else {
                                 startARSession(session)
                             }
+                        } onMinimap: {
+                            minimapSession = session
                         } onEdit: { }
                           onDelete: { }
                         .listRowSeparator(.hidden)

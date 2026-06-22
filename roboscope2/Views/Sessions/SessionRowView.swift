@@ -13,6 +13,7 @@ struct SessionRowView: View {
     let isSelectionMode: Bool
     let isSelected: Bool
     let onStartAR: () -> Void
+    let onMinimap: (() -> Void)?
     // These are kept for compatibility but handled via swipe actions in the list
     // rather than inline buttons in the row. They are optional and unused here.
     let onEdit: (() -> Void)?
@@ -59,6 +60,19 @@ struct SessionRowView: View {
 
                         Spacer()
                         markersIndicator
+
+                        if let onMinimap {
+                            Button {
+                                onMinimap()
+                            } label: {
+                                Image(systemName: "map")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .frame(width: 36, height: 36)
+                                    .foregroundColor(.blue)
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(RoundedRectangle(cornerRadius: 8))
+                        }
                     }
                 }
             }
@@ -264,6 +278,7 @@ struct StatusBadge: View {
             isSelectionMode: false,
             isSelected: false,
             onStartAR: { },
+            onMinimap: nil,
             onEdit: { },
             onDelete: { }
         )
@@ -285,6 +300,7 @@ struct StatusBadge: View {
             isSelectionMode: false,
             isSelected: false,
             onStartAR: { },
+            onMinimap: nil,
             onEdit: { },
             onDelete: { }
         )

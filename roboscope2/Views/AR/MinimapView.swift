@@ -10,6 +10,12 @@ import SceneKit
 
 // MARK: - Minimap View
 
+enum MinimapCameraView: String, CaseIterable {
+    case top = "Top"
+    case front = "Front"
+    case side = "Side"
+}
+
 struct MinimapView: View {
     let spaceId: String
     let sessionId: UUID
@@ -20,103 +26,122 @@ struct MinimapView: View {
     @State private var selectedRefSetId: String? = nil
     @State private var showRefMarkers = true
     @State private var showGrid = true
+    @State private var is3D = false
+    @State private var cameraView: MinimapCameraView = .top
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.white.ignoresSafeArea()
 
             MinimapSceneView(
                 sessionMarkers: markerService.markers,
                 referenceMarkers: filteredRefMarkers,
                 showRefMarkers: showRefMarkers,
-                showGrid: showGrid
+                showGrid: showGrid,
+                is3D: is3D,
+                cameraView: cameraView
             )
 
             // Top bar
             VStack {
-                HStack {
-                    Button {
+                HStack(spacing: 8) {
+                    IconButton(systemName: "xmark", size: 44, tint: .black, useGlass: false) {
                         dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Circle().fill(.ultraThinMaterial))
                     }
 
                     Spacer()
 
+                    // 2D/3D toggle
+                    HStack(spacing: 2) {
+                        Button { is3D = false } label: {
+                            Text("2D")
+                                .font(.caption).fontWeight(.medium)
+                                .frame(width: 40, height: 32)
+                                .foregroundColor(!is3D ? .white : .black.opacity(0.5))
+                                .background(!is3D ? Color.blue : Color.gray.opacity(0.15))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        Button { is3D = true } label: {
+                            Text("3D")
+                                .font(.caption).fontWeight(.medium)
+                                .frame(width: 40, height: 32)
+                                .foregroundColor(is3D ? .white : .black.opacity(0.5))
+                                .background(is3D ? Color.blue : Color.gray.opacity(0.15))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+
+                    // View selector (2D only)
+                    if !is3D {
+                        Picker("View", selection: $cameraView) {
+                            ForEach(MinimapCameraView.allCases, id: \.self) { v in
+                                Text(v.rawValue).tag(v)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 170)
+                    }
+
                     // Ref set picker
                     if !refSetService.referenceSets.isEmpty {
                         Menu {
-                            Button("All Sets") {
-                                selectedRefSetId = nil
-                            }
+                            Button("All Sets") { selectedRefSetId = nil }
                             Divider()
                             ForEach(refSetService.referenceSets) { set in
-                                Button(set.name) {
-                                    selectedRefSetId = set.id.uuidString
-                                }
+                                Button(set.name) { selectedRefSetId = set.id.uuidString }
                             }
                         } label: {
                             HStack(spacing: 4) {
-                                Text(selectedRefSetName)
-                                    .font(.system(size: 12, weight: .medium))
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 8, weight: .bold))
+                                Text(selectedRefSetName).font(.caption).fontWeight(.medium)
+                                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                             }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Capsule().fill(.ultraThinMaterial))
+                            .foregroundColor(.black)
+                            .frame(height: 32)
+                            .padding(.horizontal, 10)
+                            .background(Capsule().stroke(Color.gray.opacity(0.3)))
                         }
 
-                        // Toggle ref markers
                         Button {
                             showRefMarkers.toggle()
                         } label: {
                             Text("Ref")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(showRefMarkers ? .white : .gray)
+                                .font(.caption).fontWeight(.medium)
+                                .frame(height: 32)
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(
-                                    Capsule()
-                                        .fill(showRefMarkers ? AnyShapeStyle(Color.green.opacity(0.6)) : AnyShapeStyle(.ultraThinMaterial))
-                                )
+                                .foregroundColor(showRefMarkers ? .white : .black.opacity(0.5))
+                                .background(Capsule().fill(showRefMarkers ? Color.green : Color.gray.opacity(0.15)))
                         }
                     }
 
-                    // Grid toggle
                     Button {
                         showGrid.toggle()
                     } label: {
                         Text("Grid")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(showGrid ? .white : .gray)
+                            .font(.caption).fontWeight(.medium)
+                            .frame(height: 32)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Capsule().fill(.ultraThinMaterial))
+                            .foregroundColor(showGrid ? .white : .black.opacity(0.5))
+                            .background(Capsule().fill(showGrid ? Color.blue : Color.gray.opacity(0.15)))
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
+                .padding(.horizontal, 12)
+                .padding(.top, 56)
 
                 Spacer()
 
                 // Legend
-                HStack(spacing: 16) {
+                HStack(spacing: 20) {
                     legendDot(color: .orange, label: "Session (\(markerService.markers.count))")
                     if showRefMarkers && !filteredRefMarkers.isEmpty {
                         legendDot(color: .green, label: "Ref (\(filteredRefMarkers.count))")
                     }
                 }
-                .font(.system(size: 10))
-                .foregroundColor(.white.opacity(0.7))
-                .padding(.bottom, 16)
+                .font(.caption)
+                .foregroundColor(.black.opacity(0.6))
+                .padding(.bottom, 12)
             }
         }
+        .preferredColorScheme(.light)
         .task {
             try? await refSetService.listReferenceSets(spaceId: spaceId)
             try? await markerService.listMarkers(workSessionId: sessionId)
@@ -142,8 +167,8 @@ struct MinimapView: View {
     }
 
     private func legendDot(color: Color, label: String) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 6, height: 6)
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 10, height: 10)
             Text(label)
         }
     }
@@ -156,65 +181,64 @@ private struct MinimapSceneView: UIViewRepresentable {
     let referenceMarkers: [ReferenceMarker]
     let showRefMarkers: Bool
     let showGrid: Bool
+    let is3D: Bool
+    let cameraView: MinimapCameraView
 
     func makeUIView(context: Context) -> SCNView {
         let sceneView = SCNView()
-        sceneView.backgroundColor = .black
-        sceneView.allowsCameraControl = true
+        sceneView.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1)
+        sceneView.allowsCameraControl = is3D
         sceneView.autoenablesDefaultLighting = false
         sceneView.antialiasingMode = .multisampling4X
 
         let scene = SCNScene()
         sceneView.scene = scene
 
-        // Camera — top-down orthographic
+        // Camera
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
-        cameraNode.camera?.usesOrthographicProjection = true
+        cameraNode.camera?.usesOrthographicProjection = !is3D
         cameraNode.camera?.orthographicScale = 10
         cameraNode.camera?.zFar = 1000
-        cameraNode.position = SCNVector3(0, 15, 0)
-        cameraNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
+        cameraNode.name = "minimapCamera"
         scene.rootNode.addChildNode(cameraNode)
         sceneView.pointOfView = cameraNode
+        applyCameraView(cameraNode)
+
+        // Store camera node
+        context.coordinator.cameraNode = cameraNode
 
         // Lighting
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.intensity = 300
+        ambient.light?.intensity = 500
         ambient.light?.color = UIColor.white
         scene.rootNode.addChildNode(ambient)
 
-        let directional = SCNNode()
-        directional.light = SCNLight()
-        directional.light?.type = .directional
-        directional.light?.intensity = 500
-        directional.position = SCNVector3(0, 10, 0)
-        scene.rootNode.addChildNode(directional)
-
         // Grid
         addGrid(to: scene)
-        scene.rootNode.childNode(withName: "grid", recursively: false)?.isHidden = !showGrid
 
-        // Session markers
+        // Markers
         addSessionMarkers(to: scene)
-
-        // Reference markers
         addRefMarkers(to: scene)
-        scene.rootNode.childNode(withName: "refMarkers", recursively: false)?.isHidden = !showRefMarkers
 
         context.coordinator.scene = scene
         return sceneView
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
-        guard let scene = context.coordinator.scene else { return }
+        guard let scene = context.coordinator.scene,
+              let cameraNode = context.coordinator.cameraNode else { return }
 
-        // Toggle grid
+        // Camera mode
+        uiView.allowsCameraControl = is3D
+        cameraNode.camera?.usesOrthographicProjection = !is3D
+        applyCameraView(cameraNode)
+
+        // Grid
         scene.rootNode.childNode(withName: "grid", recursively: false)?.isHidden = !showGrid
-
-        // Toggle ref markers
+        // Ref markers
         scene.rootNode.childNode(withName: "refMarkers", recursively: false)?.isHidden = !showRefMarkers
 
         // Rebuild markers if count changed
@@ -222,12 +246,25 @@ private struct MinimapSceneView: UIViewRepresentable {
            context.coordinator.lastRefCount != referenceMarkers.count {
             context.coordinator.lastSessionCount = sessionMarkers.count
             context.coordinator.lastRefCount = referenceMarkers.count
-
             scene.rootNode.childNode(withName: "sessionMarkers", recursively: false)?.removeFromParentNode()
             scene.rootNode.childNode(withName: "refMarkers", recursively: false)?.removeFromParentNode()
             addSessionMarkers(to: scene)
             addRefMarkers(to: scene)
-            scene.rootNode.childNode(withName: "refMarkers", recursively: false)?.isHidden = !showRefMarkers
+        }
+    }
+
+    private func applyCameraView(_ camera: SCNNode) {
+        let dist: Float = 15
+        switch cameraView {
+        case .top:
+            camera.position = SCNVector3(0, dist, 0)
+            camera.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
+        case .front:
+            camera.position = SCNVector3(0, 0, dist)
+            camera.eulerAngles = SCNVector3(0, 0, 0)
+        case .side:
+            camera.position = SCNVector3(dist, 0, 0)
+            camera.eulerAngles = SCNVector3(0, Float.pi / 2, 0)
         }
     }
 
@@ -237,6 +274,7 @@ private struct MinimapSceneView: UIViewRepresentable {
 
     class Coordinator {
         var scene: SCNScene?
+        var cameraNode: SCNNode?
         var lastSessionCount = 0
         var lastRefCount = 0
     }
