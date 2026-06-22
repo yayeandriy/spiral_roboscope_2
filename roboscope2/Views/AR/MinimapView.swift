@@ -67,6 +67,7 @@ struct MinimapView: View {
     @State private var selectedRefSetId: String? = nil
     @State private var showRefMarkers = true
     @State private var cameraView: MinimapCameraView = .top
+    @AppStorage("minimap.selectedRefSetId") private var persistedRefSetId: String = ""
 
     var is3D: Bool { cameraView == .threeD }
 
@@ -87,6 +88,16 @@ struct MinimapView: View {
         .task {
             try? await refSetService.listReferenceSets(spaceId: spaceId)
             try? await markerService.listMarkers(workSessionId: sessionId)
+            // Auto-select persisted set or first one
+            if selectedRefSetId == nil, let first = refSetService.referenceSets.first {
+                if !persistedRefSetId.isEmpty,
+                   refSetService.referenceSets.contains(where: { $0.id.uuidString == persistedRefSetId }) {
+                    selectedRefSetId = persistedRefSetId
+                } else {
+                    selectedRefSetId = first.id.uuidString
+                    persistedRefSetId = first.id.uuidString
+                }
+            }
         }
     }
 
@@ -108,13 +119,23 @@ struct MinimapView: View {
 
                 Spacer()
 
-                Picker("View", selection: $cameraView) {
-                    ForEach(MinimapCameraView.allCases, id: \.self) { v in
-                        Text(v.rawValue).tag(v)
+                // Custom view selector (same style as old 2D/3D toggle)
+                HStack(spacing: 0) {
+                    ForEach(MinimapCameraView.allCases, id: \.self) { mode in
+                        Button {
+                            cameraView = mode
+                        } label: {
+                            Text(mode.rawValue)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .frame(width: mode == .threeD ? 44 : 48, height: 36)
+                                .foregroundStyle(cameraView == mode ? .white : .secondary)
+                                .background(cameraView == mode ? Color.blue : Color(.systemGray5))
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 250)
+                .clipShape(.rect(cornerRadius: 10))
             }
             .padding(.horizontal, 16)
             .padding(.top, 56)
@@ -149,10 +170,11 @@ struct MinimapView: View {
 
     private var refSetMenu: some View {
         Menu {
-            Button("All Sets") { selectedRefSetId = nil }
-            Divider()
             ForEach(refSetService.referenceSets) { set in
-                Button(set.name) { selectedRefSetId = set.id.uuidString }
+                Button(set.name) {
+                    selectedRefSetId = set.id.uuidString
+                    persistedRefSetId = set.id.uuidString
+                }
             }
         } label: {
             HStack(spacing: 6) {
@@ -178,17 +200,14 @@ struct MinimapView: View {
            let set = refSetService.referenceSets.first(where: { $0.id.uuidString == id }) {
             return set.name
         }
-        return "All Sets"
+        return "Select Set"
     }
 
     private var filteredRefMarkers: [ReferenceMarker] {
-        let sets: [ReferenceSet]
-        if let id = selectedRefSetId {
-            sets = refSetService.referenceSets.filter { $0.id.uuidString == id }
-        } else {
-            sets = refSetService.referenceSets
-        }
-        return sets.flatMap { $0.markers }
+        guard let id = selectedRefSetId else { return [] }
+        return refSetService.referenceSets
+            .filter { $0.id.uuidString == id }
+            .flatMap { $0.markers }
     }
 }
 
