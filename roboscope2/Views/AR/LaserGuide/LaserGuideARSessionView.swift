@@ -118,6 +118,7 @@ struct LaserGuideARSessionView: View {
     @State var isSessionActive = false
     @State var errorMessage: String?
     @State var showScanView = false
+    @State var showMinimap = false
     @State var isRegistering = false
     @State var registrationProgress: String = ""
     @State var showActionsDialog: Bool = false

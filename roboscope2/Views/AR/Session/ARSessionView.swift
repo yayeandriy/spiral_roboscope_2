@@ -45,6 +45,7 @@ struct ARSessionView: View {
     @State var isSessionActive = false
     @State var errorMessage: String?
     @State var showScanView = false
+    @State var showMinimap = false
     @State var isRegistering = false
     @State var registrationProgress: String = ""
     @State var showActionsDialog: Bool = false
@@ -271,7 +272,7 @@ struct ARSessionView: View {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(.white)
-                            .frame(width: 44, height: 36)
+                            .frame(width: 44, height: 44)
                             .background(
                                 RoundedRectangle(cornerRadius: 12)
                                     .fill(.ultraThinMaterial)
@@ -452,6 +453,10 @@ struct ARSessionView: View {
             if let errorMessage = errorMessage { Text(errorMessage) }
         }
         .confirmationDialog("Actions", isPresented: $showActionsDialog, titleVisibility: .visible) {
+            Button("Minimap") {
+                showMinimap = true
+            }
+
             if !isLaserGuideSession {
                 // Show/Hide Reference Model
                 Button(showReferenceModel ? "Hide Reference Model" : "Show Reference Model") {
@@ -502,6 +507,12 @@ struct ARSessionView: View {
                     // NOTE: Reference model and scan model positions are automatically
                     // updated via frameOriginTransform didSet observer
                 }
+            )
+        }
+        .sheet(isPresented: $showMinimap) {
+            MinimapView(
+                spaceId: session.spaceId.uuidString,
+                sessionId: session.id
             )
         }
         .navigationBarBackButtonHidden()

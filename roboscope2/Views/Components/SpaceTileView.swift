@@ -55,6 +55,7 @@ struct SpaceTileView: View {
             }
             .padding(16)
         }
+        .contentShape(RoundedRectangle(cornerRadius: 20))
         .aspectRatio(1, contentMode: .fit)
         .contextMenu {
             if has3DModels, let onView3D {

@@ -93,9 +93,10 @@ struct SessionScanView: View {
                         Image(systemName: "ellipsis.circle.fill")
                             .font(.title2)
                             .foregroundColor(.white)
-                            .padding(8)
+                            .frame(width: 44, height: 44)
                             .background(.ultraThinMaterial)
                             .clipShape(Circle())
+                            .contentShape(Circle())
                     }
                     .padding(.trailing, 8)
                     

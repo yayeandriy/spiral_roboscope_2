@@ -232,6 +232,8 @@ struct SessionsView: View {
                             Image(systemName: "ellipsis.circle")
                                 .font(.title3)
                                 .foregroundColor(.secondary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Circle())
                         }
                     }
                 }

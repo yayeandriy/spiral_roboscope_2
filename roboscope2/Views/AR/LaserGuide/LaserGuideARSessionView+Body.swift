@@ -240,6 +240,12 @@ extension LaserGuideARSessionView {
                 }
             )
         }
+        .sheet(isPresented: $showMinimap) {
+            MinimapView(
+                spaceId: session.spaceId.uuidString,
+                sessionId: session.id
+            )
+        }
         .navigationBarBackButtonHidden()
         .onChange(of: mlDetection.detections) { _, rawDetections in
             processDetections(rawDetections)
@@ -347,6 +353,10 @@ extension LaserGuideARSessionView {
                 }
                 Spacer(minLength: 8)
                 Menu {
+                    Button { showMinimap = true } label: {
+                        Label("Minimap", systemImage: "map")
+                    }
+                    Divider()
                     Button(role: .destructive) { dismiss() } label: {
                         Label("Close Session", systemImage: "xmark")
                     }
@@ -378,6 +388,7 @@ extension LaserGuideARSessionView {
                     .font(.system(size: 16, weight: .semibold)).foregroundColor(.white)
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
+            .contentShape(RoundedRectangle(cornerRadius: 12))
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(.ultraThinMaterial)

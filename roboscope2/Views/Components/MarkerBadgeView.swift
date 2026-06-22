@@ -42,6 +42,8 @@ struct MarkerBadgeView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .frame(minHeight: 44)
 
                     if showNodes {
                         VStack(alignment: .leading, spacing: 8) {
