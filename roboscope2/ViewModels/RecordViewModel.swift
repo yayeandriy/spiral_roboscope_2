@@ -40,7 +40,22 @@ final class RecordViewModel: NSObject, ObservableObject {
     // MARK: - Public API
 
     func startRecording() {
-        guard state == .ready, movieOutput.connection(with: .video) != nil else { return }
+        guard state == .ready,
+              let connection = movieOutput.connection(with: .video) else { return }
+
+        // Match video orientation to device so preview and recording align
+        let orientation = UIDevice.current.orientation
+        if let videoOrientation = AVCaptureVideoOrientation(deviceOrientation: orientation) {
+            connection.videoOrientation = videoOrientation
+        }
+
+        // Re-read format at record time — the session may have changed it
+        if let device = videoDeviceInput?.device {
+            let fd = device.activeFormat.formatDescription
+            let d = CMVideoFormatDescriptionGetDimensions(fd)
+            captureFormatDimensions = CGSize(width: CGFloat(d.width), height: CGFloat(d.height))
+        }
+
         let url = tempVideoURL()
         elapsedSeconds = 0
         frameCount = 0
