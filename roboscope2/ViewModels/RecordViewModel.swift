@@ -34,6 +34,8 @@ final class RecordViewModel: NSObject, ObservableObject {
     private let movieOutput = AVCaptureMovieFileOutput()
     private var recordingTimer: Timer?
     private let maxDuration: Double = 20.0
+    /// Capture device format dimensions (width × height in pixels) — used to match the preview crop.
+    private var captureFormatDimensions: CGSize = .zero
 
     // MARK: - Public API
 
@@ -96,6 +98,9 @@ final class RecordViewModel: NSObject, ObservableObject {
             captureSession.sessionPreset = .high
 
             if let device = Self.preferredCamera(cameraSetting) {
+                let fd = device.activeFormat.formatDescription
+                let d = CMVideoFormatDescriptionGetDimensions(fd)
+                self.captureFormatDimensions = CGSize(width: CGFloat(d.width), height: CGFloat(d.height))
                 do {
                     let input = try AVCaptureDeviceInput(device: device)
                     if captureSession.canAddInput(input) {
@@ -135,6 +140,9 @@ final class RecordViewModel: NSObject, ObservableObject {
                 videoDeviceInput = nil
             }
             if let device = Self.preferredCamera(cameraSetting) {
+                let fd = device.activeFormat.formatDescription
+                let d = CMVideoFormatDescriptionGetDimensions(fd)
+                self.captureFormatDimensions = CGSize(width: CGFloat(d.width), height: CGFloat(d.height))
                 do {
                     let input = try AVCaptureDeviceInput(device: device)
                     if captureSession.canAddInput(input) {
@@ -228,12 +236,40 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
             return sourceURL
         }
 
-        let squareSize = min(naturalSize.width, naturalSize.height)
-        let xOffset = (naturalSize.width - squareSize) / 2
-        let yOffset = (naturalSize.height - squareSize) / 2
+        // Use the same dimensions as the capture device format so the crop
+        // matches what AVCaptureVideoPreviewLayer.resizeAspectFill shows.
+        let sourceW: CGFloat
+        let sourceH: CGFloat
+        if captureFormatDimensions.width > 0 {
+            if abs(preferredTransform.b) > 0.01 || abs(preferredTransform.c) > 0.01 {
+                sourceW = captureFormatDimensions.height
+                sourceH = captureFormatDimensions.width
+            } else {
+                sourceW = captureFormatDimensions.width
+                sourceH = captureFormatDimensions.height
+            }
+        } else {
+            sourceW = naturalSize.width
+            sourceH = naturalSize.height
+        }
+
+        // .resizeAspectFill on a square: scale so smaller dim fills, center-crop the overflow
+        let square = min(sourceW, sourceH)
+        let scale = square / min(sourceW, sourceH)
+        let scaledW = sourceW * scale
+        let scaledH = sourceH * scale
+        let cropX = (scaledW - square) / 2
+        let cropY = (scaledH - square) / 2
+
+        // Build transform: rotate, scale to fill, translate to crop origin
+        let fillScale = CGAffineTransform(scaleX: scale, y: scale)
+        let cropTranslate = CGAffineTransform(translationX: -cropX, y: -cropY)
+        let transform = preferredTransform
+            .concatenating(fillScale)
+            .concatenating(cropTranslate)
 
         let composition = AVMutableVideoComposition()
-        composition.renderSize = CGSize(width: squareSize, height: squareSize)
+        composition.renderSize = CGSize(width: square, height: square)
         composition.frameDuration = (try? await track.load(.minFrameDuration)) ?? CMTime(value: 1, timescale: 30)
 
         let instruction = AVMutableVideoCompositionInstruction()
@@ -241,8 +277,6 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
         instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
 
         let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
-        // Apply rotation first, then translate to crop center
-        let transform = preferredTransform.translatedBy(x: -xOffset, y: -yOffset)
         layerInstruction.setTransform(transform, at: .zero)
         instruction.layerInstructions = [layerInstruction]
         composition.instructions = [instruction]
@@ -260,6 +294,7 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
         try? FileManager.default.removeItem(at: sourceURL)
         return outputURL
     }
+
     nonisolated func fileOutput(_ output: AVCaptureFileOutput,
                     didStartRecordingTo fileURL: URL,
                     from connections: [AVCaptureConnection]) {
