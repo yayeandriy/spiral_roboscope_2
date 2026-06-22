@@ -83,7 +83,7 @@ struct MinimapView: View {
                                 .padding(.vertical, 8)
                                 .background(
                                     Capsule()
-                                        .fill(showRefMarkers ? Color.green.opacity(0.6) : .ultraThinMaterial)
+                                        .fill(showRefMarkers ? AnyShapeStyle(Color.green.opacity(0.6)) : AnyShapeStyle(.ultraThinMaterial))
                                 )
                         }
                     }
