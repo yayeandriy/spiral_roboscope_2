@@ -44,9 +44,12 @@ final class RecordViewModel: NSObject, ObservableObject {
               let connection = movieOutput.connection(with: .video) else { return }
 
         // Match video orientation to device so preview and recording align
-        let orientation = UIDevice.current.orientation
-        if let videoOrientation = AVCaptureVideoOrientation(deviceOrientation: orientation) {
-            connection.videoOrientation = videoOrientation
+        switch UIDevice.current.orientation {
+        case .portrait:           connection.videoOrientation = .portrait
+        case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
+        case .landscapeLeft:      connection.videoOrientation = .landscapeRight
+        case .landscapeRight:     connection.videoOrientation = .landscapeLeft
+        default: break
         }
 
         // Re-read format at record time — the session may have changed it
