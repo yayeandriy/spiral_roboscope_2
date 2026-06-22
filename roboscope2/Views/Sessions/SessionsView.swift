@@ -60,7 +60,7 @@ struct SessionsView: View {
             }
             .navigationTitle(selectedTabSpaceId == nil ? "Spaces" : selectedSpaceName)
             .navigationBarTitleDisplayMode(selectedTabSpaceId == nil ? .large : .inline)
-            .toolbar(selectedTabSpaceId != nil ? .hidden : .visible, for: .tabBar)
+            .toolbar(selectedTabSpaceId == nil ? .hidden : .visible, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     if selectedTabSpaceId != nil {
