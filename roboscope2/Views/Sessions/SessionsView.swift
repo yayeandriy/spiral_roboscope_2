@@ -43,8 +43,9 @@ struct SessionsView: View {
     }
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
+        ZStack {
+            NavigationView {
+                VStack(spacing: 0) {
                 if selectedTabSpaceId == nil {
                     SpacesListView(
                         spaces: availableSpaces,
@@ -58,7 +59,7 @@ struct SessionsView: View {
                     sessionsList
                 }
             }
-            .navigationTitle(selectedTabSpaceId == nil ? "Spaces" : selectedSpaceName)
+            .navigationTitle((selectedTabSpaceId == nil && !availableSpaces.isEmpty) ? "Spaces" : (selectedTabSpaceId == nil ? "" : selectedSpaceName))
             .navigationBarTitleDisplayMode(selectedTabSpaceId == nil ? .large : .inline)
             .toolbar(selectedTabSpaceId == nil ? .hidden : .visible, for: .tabBar)
             .toolbar {
@@ -175,7 +176,7 @@ struct SessionsView: View {
             .overlay {
                 if selectedTabSpaceId == nil && spaceService.spaces.isEmpty {
                     ZStack {
-                        Color(.systemBackground).ignoresSafeArea()
+                        Color(.systemBackground).ignoresSafeArea().ignoresSafeArea()
                         VStack(spacing: 24) {
                             Image("AppIcon")
                                 .resizable()
@@ -203,6 +204,26 @@ struct SessionsView: View {
                 await refreshData()
             }
         }
+        if selectedTabSpaceId == nil && spaceService.isLoading && spaceService.spaces.isEmpty {
+            ZStack {
+                Color(.systemBackground).ignoresSafeArea()
+                VStack(spacing: 24) {
+                    Image("AppIcon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 100, height: 100)
+                        .cornerRadius(24)
+                        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+                    Text("Roboscope")
+                        .font(.title)
+                        .fontWeight(.bold)
+                    ProgressView()
+                        .padding(.top, 4)
+                }
+            }
+            .transition(.opacity)
+        }
+    }
     }
     
     // Filters removed
