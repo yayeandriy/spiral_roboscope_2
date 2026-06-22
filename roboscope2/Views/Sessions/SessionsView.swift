@@ -60,6 +60,7 @@ struct SessionsView: View {
             }
             .navigationTitle(selectedTabSpaceId == nil ? "Spaces" : selectedSpaceName)
             .navigationBarTitleDisplayMode(selectedTabSpaceId == nil ? .large : .inline)
+            .toolbar(selectedTabSpaceId != nil ? .hidden : .visible, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     if selectedTabSpaceId != nil {
@@ -439,15 +440,10 @@ struct SessionsView: View {
     }
 
     /// Resolve the persisted tab ID against available spaces. If valid, select it.
-    /// If no persisted tab but only one space exists, auto-select it.
     private func resolvePersistedTab() {
         guard !persistedSpaceId.isEmpty,
               let uuid = UUID(uuidString: persistedSpaceId),
               availableSpaces.contains(where: { $0.id == uuid }) else {
-            // No valid persisted tab. If only one space, auto-select it.
-            if availableSpaces.count == 1, let only = availableSpaces.first {
-                selectSpaceTab(only.id)
-            }
             return
         }
         if selectedTabSpaceId != uuid {
