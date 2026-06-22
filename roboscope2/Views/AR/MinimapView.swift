@@ -25,7 +25,6 @@ struct MinimapView: View {
     @StateObject private var markerService = MarkerService.shared
     @State private var selectedRefSetId: String? = nil
     @State private var showRefMarkers = true
-    @State private var showGrid = true
     @State private var is3D = false
     @State private var cameraView: MinimapCameraView = .top
 
@@ -35,41 +34,45 @@ struct MinimapView: View {
 
             MinimapSceneView(
                 sessionMarkers: markerService.markers,
-                referenceMarkers: filteredRefMarkers,
-                showRefMarkers: showRefMarkers,
-                showGrid: showGrid,
+                referenceMarkers: showRefMarkers ? filteredRefMarkers : [],
                 is3D: is3D,
                 cameraView: cameraView
             )
 
-            // Top bar
+            // Top bar — minimal: close + 2D/3D + view selector + ref set picker
             VStack {
                 HStack(spacing: 8) {
-                    IconButton(systemName: "xmark", size: 44, tint: .black, useGlass: false) {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(width: 48, height: 48)
+                            .background(Circle().fill(Color.gray.opacity(0.12)))
                     }
+                    .contentShape(Circle())
 
                     Spacer()
 
                     // 2D/3D toggle
-                    HStack(spacing: 2) {
+                    HStack(spacing: 0) {
                         Button { is3D = false } label: {
                             Text("2D")
-                                .font(.caption).fontWeight(.medium)
-                                .frame(width: 40, height: 32)
+                                .font(.footnote).fontWeight(.semibold)
+                                .frame(width: 44, height: 36)
                                 .foregroundColor(!is3D ? .white : .black.opacity(0.5))
-                                .background(!is3D ? Color.blue : Color.gray.opacity(0.15))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .background(!is3D ? Color.blue : Color.gray.opacity(0.12))
                         }
                         Button { is3D = true } label: {
                             Text("3D")
-                                .font(.caption).fontWeight(.medium)
-                                .frame(width: 40, height: 32)
+                                .font(.footnote).fontWeight(.semibold)
+                                .frame(width: 44, height: 36)
                                 .foregroundColor(is3D ? .white : .black.opacity(0.5))
-                                .background(is3D ? Color.blue : Color.gray.opacity(0.15))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .background(is3D ? Color.blue : Color.gray.opacity(0.12))
                         }
                     }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
 
                     // View selector (2D only)
                     if !is3D {
@@ -92,36 +95,16 @@ struct MinimapView: View {
                             }
                         } label: {
                             HStack(spacing: 4) {
-                                Text(selectedRefSetName).font(.caption).fontWeight(.medium)
-                                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+                                Text(selectedRefSetName)
+                                    .font(.footnote).fontWeight(.medium)
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 10, weight: .bold))
                             }
                             .foregroundColor(.black)
-                            .frame(height: 32)
-                            .padding(.horizontal, 10)
-                            .background(Capsule().stroke(Color.gray.opacity(0.3)))
-                        }
-
-                        Button {
-                            showRefMarkers.toggle()
-                        } label: {
-                            Text("Ref")
-                                .font(.caption).fontWeight(.medium)
-                                .frame(height: 32)
-                                .padding(.horizontal, 12)
-                                .foregroundColor(showRefMarkers ? .white : .black.opacity(0.5))
-                                .background(Capsule().fill(showRefMarkers ? Color.green : Color.gray.opacity(0.15)))
-                        }
-                    }
-
-                    Button {
-                        showGrid.toggle()
-                    } label: {
-                        Text("Grid")
-                            .font(.caption).fontWeight(.medium)
-                            .frame(height: 32)
+                            .frame(height: 36)
                             .padding(.horizontal, 12)
-                            .foregroundColor(showGrid ? .white : .black.opacity(0.5))
-                            .background(Capsule().fill(showGrid ? Color.blue : Color.gray.opacity(0.15)))
+                            .background(Capsule().stroke(Color.gray.opacity(0.25)))
+                        }
                     }
                 }
                 .padding(.horizontal, 12)
@@ -129,19 +112,42 @@ struct MinimapView: View {
 
                 Spacer()
 
-                // Legend
-                HStack(spacing: 20) {
-                    legendDot(color: .orange, label: "Session (\(markerService.markers.count))")
-                    if showRefMarkers && !filteredRefMarkers.isEmpty {
-                        legendDot(color: .green, label: "Ref (\(filteredRefMarkers.count))")
+                // Bottom bar — legend + Ref toggle
+                HStack(spacing: 16) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.orange).frame(width: 12, height: 12)
+                        Text("Session (\(markerService.markers.count))")
+                            .font(.footnote)
+                    }
+
+                    if !filteredRefMarkers.isEmpty {
+                        HStack(spacing: 6) {
+                            Circle().fill(Color.green).frame(width: 12, height: 12)
+                            Text("Ref (\(filteredRefMarkers.count))")
+                                .font(.footnote)
+                        }
+                    }
+
+                    Spacer()
+
+                    if !refSetService.referenceSets.isEmpty {
+                        Button {
+                            showRefMarkers.toggle()
+                        } label: {
+                            Text(showRefMarkers ? "Hide Ref" : "Show Ref")
+                                .font(.footnote).fontWeight(.medium)
+                                .frame(height: 36)
+                                .padding(.horizontal, 14)
+                                .foregroundColor(showRefMarkers ? .white : .black.opacity(0.5))
+                                .background(Capsule().fill(showRefMarkers ? Color.green : Color.gray.opacity(0.15)))
+                        }
                     }
                 }
-                .font(.caption)
-                .foregroundColor(.black.opacity(0.6))
+                .foregroundColor(.black.opacity(0.7))
+                .padding(.horizontal, 16)
                 .padding(.bottom, 12)
             }
         }
-        .preferredColorScheme(.light)
         .task {
             try? await refSetService.listReferenceSets(spaceId: spaceId)
             try? await markerService.listMarkers(workSessionId: sessionId)
@@ -165,13 +171,6 @@ struct MinimapView: View {
         }
         return sets.flatMap { $0.markers }
     }
-
-    private func legendDot(color: Color, label: String) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 10, height: 10)
-            Text(label)
-        }
-    }
 }
 
 // MARK: - SceneKit Minimap
@@ -179,15 +178,13 @@ struct MinimapView: View {
 private struct MinimapSceneView: UIViewRepresentable {
     let sessionMarkers: [Marker]
     let referenceMarkers: [ReferenceMarker]
-    let showRefMarkers: Bool
-    let showGrid: Bool
     let is3D: Bool
     let cameraView: MinimapCameraView
 
     func makeUIView(context: Context) -> SCNView {
         let sceneView = SCNView()
         sceneView.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1)
-        sceneView.allowsCameraControl = is3D
+        sceneView.allowsCameraControl = true
         sceneView.autoenablesDefaultLighting = false
         sceneView.antialiasingMode = .multisampling4X
 
@@ -197,7 +194,6 @@ private struct MinimapSceneView: UIViewRepresentable {
         // Camera
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
-        cameraNode.camera?.usesOrthographicProjection = !is3D
         cameraNode.camera?.orthographicScale = 10
         cameraNode.camera?.zFar = 1000
         cameraNode.name = "minimapCamera"
@@ -205,8 +201,8 @@ private struct MinimapSceneView: UIViewRepresentable {
         sceneView.pointOfView = cameraNode
         applyCameraView(cameraNode)
 
-        // Store camera node
         context.coordinator.cameraNode = cameraNode
+        context.coordinator.sceneView = sceneView
 
         // Lighting
         let ambient = SCNNode()
@@ -231,15 +227,10 @@ private struct MinimapSceneView: UIViewRepresentable {
         guard let scene = context.coordinator.scene,
               let cameraNode = context.coordinator.cameraNode else { return }
 
-        // Camera mode
-        uiView.allowsCameraControl = is3D
+        // Always allow pan/drag
         cameraNode.camera?.usesOrthographicProjection = !is3D
         applyCameraView(cameraNode)
-
-        // Grid
-        scene.rootNode.childNode(withName: "grid", recursively: false)?.isHidden = !showGrid
-        // Ref markers
-        scene.rootNode.childNode(withName: "refMarkers", recursively: false)?.isHidden = !showRefMarkers
+        uiView.allowsCameraControl = true
 
         // Rebuild markers if count changed
         if context.coordinator.lastSessionCount != sessionMarkers.count ||
@@ -251,6 +242,9 @@ private struct MinimapSceneView: UIViewRepresentable {
             addSessionMarkers(to: scene)
             addRefMarkers(to: scene)
         }
+
+        // Update ref markers visibility
+        scene.rootNode.childNode(withName: "refMarkers", recursively: false)?.isHidden = referenceMarkers.isEmpty
     }
 
     private func applyCameraView(_ camera: SCNNode) {
@@ -274,6 +268,7 @@ private struct MinimapSceneView: UIViewRepresentable {
 
     class Coordinator {
         var scene: SCNScene?
+        var sceneView: SCNView?
         var cameraNode: SCNNode?
         var lastSessionCount = 0
         var lastRefCount = 0
@@ -284,22 +279,45 @@ private struct MinimapSceneView: UIViewRepresentable {
     private func addGrid(to scene: SCNScene) {
         let gridNode = SCNNode()
         gridNode.name = "grid"
-        let size: Float = 20
-        let divisions = 20
-        let step = size / Float(divisions)
+        let size: Float = 30
+        let step: Float = 1.0
 
-        for i in 0...divisions {
-            let offset = -size / 2 + Float(i) * step
-            // X lines
-            let lineX = line(from: SCNVector3(-size / 2, 0, offset), to: SCNVector3(size / 2, 0, offset))
-            lineX.firstMaterial?.diffuse.contents = UIColor.white.withAlphaComponent(i == divisions / 2 ? 0.3 : 0.1)
+        for i in stride(from: -size, through: size, by: step) {
+            // X-parallel lines (varying Z)
+            let lineX = line(from: SCNVector3(-size, 0, i), to: SCNVector3(size, 0, i))
+            let isMajor = Int(i) % 5 == 0
+            lineX.firstMaterial?.diffuse.contents = UIColor.darkGray.withAlphaComponent(isMajor ? 0.35 : 0.15)
             gridNode.addChildNode(SCNNode(geometry: lineX))
-            // Z lines
-            let lineZ = line(from: SCNVector3(offset, 0, -size / 2), to: SCNVector3(offset, 0, size / 2))
-            lineZ.firstMaterial?.diffuse.contents = UIColor.white.withAlphaComponent(i == divisions / 2 ? 0.3 : 0.1)
+
+            // Z-parallel lines (varying X)
+            let lineZ = line(from: SCNVector3(i, 0, -size), to: SCNVector3(i, 0, size))
+            let isMajorZ = Int(i) % 5 == 0
+            lineZ.firstMaterial?.diffuse.contents = UIColor.darkGray.withAlphaComponent(isMajorZ ? 0.35 : 0.15)
             gridNode.addChildNode(SCNNode(geometry: lineZ))
+
+            // Distance labels on major grid lines
+            if isMajor && i != 0 {
+                let label = textNode("\(Int(abs(i)))m", at: SCNVector3(0, 0.05, i))
+                gridNode.addChildNode(label)
+            }
+            if isMajorZ && i != 0 {
+                let label = textNode("\(Int(abs(i)))m", at: SCNVector3(i, 0.05, 0))
+                gridNode.addChildNode(label)
+            }
         }
         scene.rootNode.addChildNode(gridNode)
+    }
+
+    private func textNode(_ text: String, at position: SCNVector3) -> SCNNode {
+        let textGeo = SCNText(string: text, extrusionDepth: 0)
+        textGeo.font = UIFont.systemFont(ofSize: 0.4, weight: .light)
+        textGeo.firstMaterial?.diffuse.contents = UIColor.darkGray.withAlphaComponent(0.5)
+        textGeo.firstMaterial?.isDoubleSided = true
+        textGeo.flatness = 0.1
+        let node = SCNNode(geometry: textGeo)
+        node.position = position
+        node.scale = SCNVector3(0.02, 0.02, 0.02)
+        return node
     }
 
     // MARK: - Session Markers
@@ -314,8 +332,7 @@ private struct MinimapSceneView: UIViewRepresentable {
                 SCNVector3(marker.point3.x, marker.point3.y, marker.point3.z),
                 SCNVector3(marker.point4.x, marker.point4.y, marker.point4.z),
             ]
-            let color = UIColor.orange.withAlphaComponent(0.7)
-            parent.addChildNode(markerNode(corners: corners, color: color, dotRadius: 0.08))
+            parent.addChildNode(markerNode(corners: corners, color: UIColor.orange.withAlphaComponent(0.7), dotRadius: 0.08))
         }
         scene.rootNode.addChildNode(parent)
     }
@@ -327,8 +344,7 @@ private struct MinimapSceneView: UIViewRepresentable {
         parent.name = "refMarkers"
         for ref in referenceMarkers {
             let corners = ref.corners.map { SCNVector3($0.x, $0.y, $0.z) }
-            let color = UIColor.green.withAlphaComponent(0.5)
-            parent.addChildNode(markerNode(corners: corners, color: color, dotRadius: 0.05))
+            parent.addChildNode(markerNode(corners: corners, color: UIColor.systemGreen.withAlphaComponent(0.5), dotRadius: 0.05))
         }
         scene.rootNode.addChildNode(parent)
     }
@@ -338,7 +354,6 @@ private struct MinimapSceneView: UIViewRepresentable {
     private func markerNode(corners: [SCNVector3], color: UIColor, dotRadius: Float) -> SCNNode {
         let node = SCNNode()
 
-        // Filled quad
         if corners.count == 4 {
             let positions: [SCNVector3] = [corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]]
             let source = SCNGeometrySource(vertices: positions)
@@ -350,7 +365,6 @@ private struct MinimapSceneView: UIViewRepresentable {
             node.addChildNode(SCNNode(geometry: geo))
         }
 
-        // Outline
         for i in 0..<corners.count {
             let next = (i + 1) % corners.count
             let geo = line(from: corners[i], to: corners[next])
@@ -358,7 +372,6 @@ private struct MinimapSceneView: UIViewRepresentable {
             node.addChildNode(SCNNode(geometry: geo))
         }
 
-        // Corner dots
         for corner in corners {
             let sphere = SCNSphere(radius: CGFloat(dotRadius))
             sphere.firstMaterial?.diffuse.contents = color
