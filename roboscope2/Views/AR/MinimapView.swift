@@ -54,6 +54,7 @@ enum MinimapCameraView: String, CaseIterable {
     case top = "Top"
     case front = "Front"
     case side = "Side"
+    case threeD = "3D"
 }
 
 struct MinimapView: View {
@@ -65,8 +66,9 @@ struct MinimapView: View {
     @StateObject private var markerService = MarkerService.shared
     @State private var selectedRefSetId: String? = nil
     @State private var showRefMarkers = true
-    @State private var is3D = false
     @State private var cameraView: MinimapCameraView = .top
+
+    var is3D: Bool { cameraView == .threeD }
 
     var body: some View {
         ZStack {
@@ -79,10 +81,7 @@ struct MinimapView: View {
                 cameraView: cameraView
             )
 
-            // Top bar
             topBar
-
-            // Bottom bar
             bottomBar
         }
         .task {
@@ -109,11 +108,13 @@ struct MinimapView: View {
 
                 Spacer()
 
-                modeToggle
-
-                if !is3D {
-                    viewPicker
+                Picker("View", selection: $cameraView) {
+                    ForEach(MinimapCameraView.allCases, id: \.self) { v in
+                        Text(v.rawValue).tag(v)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .frame(width: 250)
             }
             .padding(.horizontal, 16)
             .padding(.top, 56)
@@ -144,45 +145,6 @@ struct MinimapView: View {
         }
     }
 
-    // MARK: - Mode Toggle
-
-    private var modeToggle: some View {
-        HStack(spacing: 0) {
-            Button { is3D = false } label: {
-                Text("2D")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .frame(width: 48, height: 36)
-                    .foregroundStyle(!is3D ? .white : .secondary)
-                    .background(!is3D ? Color.blue : Color(.systemGray5))
-            }
-            .buttonStyle(.plain)
-
-            Button { is3D = true } label: {
-                Text("3D")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .frame(width: 48, height: 36)
-                    .foregroundStyle(is3D ? .white : .secondary)
-                    .background(is3D ? Color.blue : Color(.systemGray5))
-            }
-            .buttonStyle(.plain)
-        }
-        .clipShape(.rect(cornerRadius: 10))
-    }
-
-    // MARK: - View Picker
-
-    private var viewPicker: some View {
-        Picker("View", selection: $cameraView) {
-            ForEach(MinimapCameraView.allCases, id: \.self) { v in
-                Text(v.rawValue).tag(v)
-            }
-        }
-        .pickerStyle(.segmented)
-        .frame(width: 170)
-    }
-
     // MARK: - Ref Set Menu
 
     private var refSetMenu: some View {
@@ -197,10 +159,11 @@ struct MinimapView: View {
                 Text(selectedRefSetName)
                     .font(.subheadline)
                     .fontWeight(.medium)
+                    .foregroundStyle(.black)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.black)
             }
-            .foregroundStyle(.primary)
             .frame(height: 40)
             .padding(.horizontal, 16)
             .background(Capsule().stroke(Color(.systemGray4), lineWidth: 1))
@@ -240,7 +203,7 @@ private struct MinimapSceneView: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let sceneView = SCNView()
         sceneView.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1)
-        sceneView.allowsCameraControl = true
+        sceneView.allowsCameraControl = is3D
         sceneView.autoenablesDefaultLighting = false
         sceneView.antialiasingMode = .multisampling4X
 
@@ -258,6 +221,13 @@ private struct MinimapSceneView: UIViewRepresentable {
 
         context.coordinator.cameraNode = cameraNode
         context.coordinator.sceneView = sceneView
+
+        // 2D pan gesture
+        if !is3D {
+            let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+            sceneView.addGestureRecognizer(pan)
+            context.coordinator.panGesture = pan
+        }
 
         let ambient = SCNNode()
         ambient.light = SCNLight()
@@ -278,9 +248,20 @@ private struct MinimapSceneView: UIViewRepresentable {
         guard let scene = context.coordinator.scene,
               let cameraNode = context.coordinator.cameraNode else { return }
 
+        // Camera mode
+        uiView.allowsCameraControl = is3D
         cameraNode.camera?.usesOrthographicProjection = !is3D
         applyCameraView(cameraNode)
-        uiView.allowsCameraControl = true
+
+        // Add/remove pan gesture
+        if !is3D && context.coordinator.panGesture == nil {
+            let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+            uiView.addGestureRecognizer(pan)
+            context.coordinator.panGesture = pan
+        } else if is3D, let pan = context.coordinator.panGesture {
+            uiView.removeGestureRecognizer(pan)
+            context.coordinator.panGesture = nil
+        }
 
         if context.coordinator.lastSessionCount != sessionMarkers.count ||
            context.coordinator.lastRefCount != referenceMarkers.count {
@@ -307,6 +288,9 @@ private struct MinimapSceneView: UIViewRepresentable {
         case .side:
             camera.position = SCNVector3(dist, 0, 0)
             camera.eulerAngles = SCNVector3(0, Float.pi / 2, 0)
+        case .threeD:
+            camera.position = SCNVector3(dist * 0.6, dist * 0.6, dist * 0.6)
+            camera.eulerAngles = SCNVector3(-Float.pi / 4, Float.pi / 4, 0)
         }
     }
 
@@ -314,12 +298,32 @@ private struct MinimapSceneView: UIViewRepresentable {
         Coordinator()
     }
 
-    class Coordinator {
+    class Coordinator: NSObject {
         var scene: SCNScene?
         var sceneView: SCNView?
         var cameraNode: SCNNode?
+        var panGesture: UIPanGestureRecognizer?
         var lastSessionCount = 0
         var lastRefCount = 0
+
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard let cameraNode = cameraNode,
+                  let sceneView = sceneView else { return }
+
+            let translation = gesture.translation(in: sceneView)
+            let scale = cameraNode.camera?.orthographicScale ?? 10
+            let factor = Float(scale / 200.0)
+
+            // Pan: move camera in XY plane (relative to camera orientation)
+            let dx = Float(-translation.x) * factor
+            let dy = Float(translation.y) * factor
+
+            // For top-down: dx=x axis, dy=z axis
+            cameraNode.position.x += dx
+            cameraNode.position.z += dy
+
+            gesture.setTranslation(.zero, in: sceneView)
+        }
     }
 
     // MARK: - Grid
