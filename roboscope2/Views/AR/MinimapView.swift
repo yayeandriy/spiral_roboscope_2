@@ -128,7 +128,8 @@ struct MinimapView: View {
                             Text(mode.rawValue)
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
-                                .frame(width: mode == .threeD ? 44 : 48, height: 36)
+                                .frame(height: 36)
+                                .padding(.horizontal, 14)
                                 .foregroundStyle(cameraView == mode ? .white : .secondary)
                                 .background(cameraView == mode ? Color.blue : Color(.systemGray5))
                         }
@@ -241,11 +242,15 @@ private struct MinimapSceneView: UIViewRepresentable {
         context.coordinator.cameraNode = cameraNode
         context.coordinator.sceneView = sceneView
 
-        // 2D pan gesture
+        // 2D pan + pinch gestures
         if !is3D {
             let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
             sceneView.addGestureRecognizer(pan)
             context.coordinator.panGesture = pan
+
+            let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+            sceneView.addGestureRecognizer(pinch)
+            context.coordinator.pinchGesture = pinch
         }
 
         let ambient = SCNNode()
@@ -272,14 +277,22 @@ private struct MinimapSceneView: UIViewRepresentable {
         cameraNode.camera?.usesOrthographicProjection = !is3D
         applyCameraView(cameraNode)
 
-        // Add/remove pan gesture
+        // Add/remove pan+pinch gestures
         if !is3D && context.coordinator.panGesture == nil {
             let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
             uiView.addGestureRecognizer(pan)
             context.coordinator.panGesture = pan
+
+            let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+            uiView.addGestureRecognizer(pinch)
+            context.coordinator.pinchGesture = pinch
         } else if is3D, let pan = context.coordinator.panGesture {
             uiView.removeGestureRecognizer(pan)
             context.coordinator.panGesture = nil
+            if let pinch = context.coordinator.pinchGesture {
+                uiView.removeGestureRecognizer(pinch)
+                context.coordinator.pinchGesture = nil
+            }
         }
 
         if context.coordinator.lastSessionCount != sessionMarkers.count ||
@@ -322,6 +335,8 @@ private struct MinimapSceneView: UIViewRepresentable {
         var sceneView: SCNView?
         var cameraNode: SCNNode?
         var panGesture: UIPanGestureRecognizer?
+        var pinchGesture: UIPinchGestureRecognizer?
+        var pinchStartScale: Float = 10
         var lastSessionCount = 0
         var lastRefCount = 0
 
@@ -342,6 +357,20 @@ private struct MinimapSceneView: UIViewRepresentable {
             cameraNode.position.z += dy
 
             gesture.setTranslation(.zero, in: sceneView)
+        }
+
+        @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            guard let cameraNode = cameraNode else { return }
+
+            switch gesture.state {
+            case .began:
+                pinchStartScale = Float(cameraNode.camera?.orthographicScale ?? 10)
+            case .changed:
+                let newScale = max(1, min(50, pinchStartScale / Float(gesture.scale)))
+                cameraNode.camera?.orthographicScale = Double(newScale)
+            default:
+                break
+            }
         }
     }
 
