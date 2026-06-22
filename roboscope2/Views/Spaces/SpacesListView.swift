@@ -28,13 +28,8 @@ struct SpacesListView: View {
                         Text("Roboscope")
                             .font(.title)
                             .fontWeight(.bold)
-                        Text("Loading your spaces…")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
                     }
                     ProgressView()
-                        .scaleEffect(0.8)
-                        .padding(.top, 4)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
