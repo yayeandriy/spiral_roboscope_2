@@ -212,7 +212,7 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
         }
     }
 
-    /// Letterbox the video into a square — matches the `.resizeAspect` preview.
+    /// Center-crop to square — matches `.resizeAspectFill` preview.
     private func cropToSquare(sourceURL: URL) async -> URL {
         let asset = AVAsset(url: sourceURL)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
@@ -228,18 +228,9 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
             return sourceURL
         }
 
-        // Rendered frame size after rotation
-        let renderedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
-        let renderedW = abs(renderedRect.width)
-        let renderedH = abs(renderedRect.height)
-
-        // Square that fits the entire rendered frame (letterboxed)
-        let squareSize = max(renderedW, renderedH)
-        let xOffset = (squareSize - renderedW) / 2 - renderedRect.origin.x
-        let yOffset = (squareSize - renderedH) / 2 - renderedRect.origin.y
-
-        let translate = CGAffineTransform(translationX: xOffset, y: yOffset)
-        let transform = preferredTransform.concatenating(translate)
+        let squareSize = min(naturalSize.width, naturalSize.height)
+        let xOffset = (naturalSize.width - squareSize) / 2
+        let yOffset = (naturalSize.height - squareSize) / 2
 
         let composition = AVMutableVideoComposition()
         composition.renderSize = CGSize(width: squareSize, height: squareSize)
@@ -250,6 +241,8 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
         instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
 
         let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        // Apply rotation first, then translate to crop center
+        let transform = preferredTransform.translatedBy(x: -xOffset, y: -yOffset)
         layerInstruction.setTransform(transform, at: .zero)
         instruction.layerInstructions = [layerInstruction]
         composition.instructions = [instruction]
@@ -267,7 +260,6 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
         try? FileManager.default.removeItem(at: sourceURL)
         return outputURL
     }
-
     nonisolated func fileOutput(_ output: AVCaptureFileOutput,
                     didStartRecordingTo fileURL: URL,
                     from connections: [AVCaptureConnection]) {
