@@ -49,7 +49,7 @@ struct SessionsView: View {
                     SpacesListView(
                         spaces: availableSpaces,
                         sessionCounts: spaceSessionCounts,
-                        isLoading: spaceService.isLoading && spaceService.spaces.isEmpty,
+                        isLoading: false, // full-screen splash handled above
                         onSelect: { selectSpaceTab($0.id) }
                     )
                     .padding(.top, 16)
@@ -170,6 +170,27 @@ struct SessionsView: View {
                         .padding(14)
                         .background(.ultraThinMaterial, in: Capsule())
                     }
+                }
+            }
+            .overlay {
+                if selectedTabSpaceId == nil && spaceService.spaces.isEmpty {
+                    ZStack {
+                        Color(.systemBackground).ignoresSafeArea()
+                        VStack(spacing: 24) {
+                            Image("AppIcon")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 100, height: 100)
+                                .cornerRadius(24)
+                                .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+                            Text("Roboscope")
+                                .font(.title)
+                                .fontWeight(.bold)
+                            ProgressView()
+                                .padding(.top, 4)
+                        }
+                    }
+                    .transition(.opacity)
                 }
             }
             .task {
