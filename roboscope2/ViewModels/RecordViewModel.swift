@@ -43,6 +43,9 @@ final class RecordViewModel: NSObject, ObservableObject {
         guard state == .ready,
               let connection = movieOutput.connection(with: .video) else { return }
 
+        // Disable stabilization — it crops the video and causes preview mismatch
+        connection.preferredVideoStabilizationMode = .off
+
         // Match video orientation to device so preview and recording align
         switch UIDevice.current.orientation {
         case .portrait:           connection.videoOrientation = .portrait
@@ -238,7 +241,9 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
         }
     }
 
-    /// Center-crop to square — matches `.resizeAspectFill` preview.
+    /// Center-crop to square with NO scaling — 1:1 pixel mapping from source.
+    /// Because the preview layer (.resizeAspectFill) and this crop both
+    /// take the center square of the source frame, they match by definition.
     private func cropToSquare(sourceURL: URL) async -> URL {
         let asset = AVAsset(url: sourceURL)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
@@ -254,40 +259,16 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
             return sourceURL
         }
 
-        // Use the same dimensions as the capture device format so the crop
-        // matches what AVCaptureVideoPreviewLayer.resizeAspectFill shows.
-        let sourceW: CGFloat
-        let sourceH: CGFloat
-        if captureFormatDimensions.width > 0 {
-            if abs(preferredTransform.b) > 0.01 || abs(preferredTransform.c) > 0.01 {
-                sourceW = captureFormatDimensions.height
-                sourceH = captureFormatDimensions.width
-            } else {
-                sourceW = captureFormatDimensions.width
-                sourceH = captureFormatDimensions.height
-            }
-        } else {
-            sourceW = naturalSize.width
-            sourceH = naturalSize.height
-        }
+        // Center crop: take the smaller dimension as the square side
+        let squareSize = min(naturalSize.width, naturalSize.height)
+        let xOffset = (naturalSize.width - squareSize) / 2
+        let yOffset = (naturalSize.height - squareSize) / 2
 
-        // .resizeAspectFill on a square: scale so smaller dim fills, center-crop the overflow
-        let square = min(sourceW, sourceH)
-        let scale = square / min(sourceW, sourceH)
-        let scaledW = sourceW * scale
-        let scaledH = sourceH * scale
-        let cropX = (scaledW - square) / 2
-        let cropY = (scaledH - square) / 2
-
-        // Build transform: rotate, scale to fill, translate to crop origin
-        let fillScale = CGAffineTransform(scaleX: scale, y: scale)
-        let cropTranslate = CGAffineTransform(translationX: -cropX, y: -cropY)
-        let transform = preferredTransform
-            .concatenating(fillScale)
-            .concatenating(cropTranslate)
+        // Rotate first, then translate to crop origin
+        let transform = preferredTransform.translatedBy(x: -xOffset, y: -yOffset)
 
         let composition = AVMutableVideoComposition()
-        composition.renderSize = CGSize(width: square, height: square)
+        composition.renderSize = CGSize(width: squareSize, height: squareSize)
         composition.frameDuration = (try? await track.load(.minFrameDuration)) ?? CMTime(value: 1, timescale: 30)
 
         let instruction = AVMutableVideoCompositionInstruction()
