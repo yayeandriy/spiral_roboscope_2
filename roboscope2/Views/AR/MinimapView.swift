@@ -335,7 +335,7 @@ private struct MinimapSceneView: UIViewRepresentable {
 
             // Pan: move camera in XY plane (relative to camera orientation)
             let dx = Float(-translation.x) * factor
-            let dy = Float(translation.y) * factor
+            let dy = Float(-translation.y) * factor
 
             // For top-down: dx=x axis, dy=z axis
             cameraNode.position.x += dx
