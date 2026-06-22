@@ -126,11 +126,7 @@ class AppSettings: ObservableObject {
            let env = APIEnvironmentSetting(rawValue: raw) {
             self.apiEnvironment = env
         } else {
-            #if DEBUG
-            self.apiEnvironment = .dev
-            #else
             self.apiEnvironment = .prod
-            #endif
         }
     }
 }

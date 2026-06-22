@@ -375,7 +375,7 @@ private struct CameraPreview: UIViewControllerRepresentable {
         let vc = UIViewController()
         vc.view.backgroundColor = .black
         let layer = AVCaptureVideoPreviewLayer(session: session)
-        layer.videoGravity = .resizeAspectFill
+        layer.videoGravity = .resizeAspect
         vc.view.layer.addSublayer(layer)
         return vc
     }
