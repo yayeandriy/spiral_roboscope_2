@@ -142,6 +142,10 @@ struct SpacesView: View {
     
     private func loadInitialData() async {
         await refreshSpaces()
+        // Auto-navigate if there's exactly one space
+        if spaceService.spaces.count == 1 {
+            handleSpaceTap(spaceService.spaces[0])
+        }
     }
     
     private func refreshSpaces() async {

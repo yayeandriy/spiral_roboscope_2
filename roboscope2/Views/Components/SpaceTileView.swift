@@ -63,11 +63,6 @@ struct SpaceTileView: View {
                     Label("View 3D Models", systemImage: "cube")
                 }
             }
-            if let onScan {
-                Button { onScan() } label: {
-                    Label("Scan Space", systemImage: "camera.metering.center.weighted")
-                }
-            }
             if let onDelete {
                 Button(role: .destructive) { onDelete() } label: {
                     Label("Delete", systemImage: "trash")

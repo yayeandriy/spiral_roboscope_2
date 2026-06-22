@@ -344,7 +344,7 @@ extension LaserGuideARSessionView {
         }
         let anchor = AnchorEntity(world: position)
         let sphere = ModelEntity(
-            mesh: .generateSphere(radius: 0.02),
+            mesh: .generateSphere(radius: 0.04),
             materials: [UnlitMaterial(color: color)]
         )
         anchor.addChild(sphere)
