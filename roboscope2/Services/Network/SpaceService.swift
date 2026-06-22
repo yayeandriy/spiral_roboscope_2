@@ -33,6 +33,9 @@ final class SpaceService: ObservableObject {
         
         do {
             var queryItems: [URLQueryItem] = []
+            if AppSettings.shared.testMode {
+                queryItems.append(URLQueryItem(name: "include_inactive", value: "true"))
+            }
             if let key = key {
                 queryItems.append(URLQueryItem(name: "key", value: key))
             }

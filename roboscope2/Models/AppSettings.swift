@@ -26,6 +26,7 @@ class AppSettings: ObservableObject {
         static let showAccumulatedOverlay = "showAccumulatedOverlay"
         static let lineOverDotFilter = "lineOverDotFilter"
         static let usePerFrame3DPlacement = "usePerFrame3DPlacement"
+        static let testMode = "testMode"
     }
     
     // MARK: - Laser Guide
@@ -102,6 +103,11 @@ class AppSettings: ObservableObject {
         didSet { defaults.set(apiEnvironment.rawValue, forKey: Keys.apiEnvironment) }
     }
 
+    /// Show ALL spaces including inactive ones (for testing).
+    @Published var testMode: Bool {
+        didSet { defaults.set(testMode, forKey: Keys.testMode) }
+    }
+
     // MARK: - Initialization
     
     private init() {
@@ -120,6 +126,7 @@ class AppSettings: ObservableObject {
         self.showAccumulatedOverlay = defaults.object(forKey: Keys.showAccumulatedOverlay) as? Bool ?? true
         self.lineOverDotFilter = defaults.object(forKey: Keys.lineOverDotFilter) as? Bool ?? false
         self.usePerFrame3DPlacement = defaults.object(forKey: Keys.usePerFrame3DPlacement) as? Bool ?? true
+        self.testMode = defaults.object(forKey: Keys.testMode) as? Bool ?? false
 
         // API environment: default to dev in DEBUG, prod otherwise (first launch only).
         if let raw = defaults.string(forKey: Keys.apiEnvironment),

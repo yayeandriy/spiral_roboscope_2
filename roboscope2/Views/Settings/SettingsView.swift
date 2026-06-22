@@ -45,6 +45,9 @@ struct SettingsView: View {
                     Text("Switch between development and production API servers. Changes take effect immediately.")
                 }
 
+                Toggle("Test Mode", isOn: $settings.testMode)
+                    .tint(.orange)
+
                 // Video Mode Section
                 Section {
                     Toggle("Video Mode", isOn: $settings.videoModeEnabled)
