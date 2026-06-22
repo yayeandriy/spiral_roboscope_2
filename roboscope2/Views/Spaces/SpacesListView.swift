@@ -16,8 +16,28 @@ struct SpacesListView: View {
     var body: some View {
         Group {
             if isLoading && spaces.isEmpty {
-                ProgressView("Loading spaces…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 24) {
+                    Spacer()
+                    Image("AppIcon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 100, height: 100)
+                        .cornerRadius(24)
+                        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+                    VStack(spacing: 8) {
+                        Text("Roboscope")
+                            .font(.title)
+                            .fontWeight(.bold)
+                        Text("Loading your spaces…")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .padding(.top, 4)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if spaces.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "square.split.2x2")

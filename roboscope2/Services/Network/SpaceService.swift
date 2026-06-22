@@ -17,7 +17,7 @@ final class SpaceService: ObservableObject {
     // MARK: - Published Properties
     
     @Published var spaces: [Space] = []
-    @Published var isLoading: Bool = false
+    @Published var isLoading: Bool = true
     @Published var error: String? = nil
     
     private init() {}
