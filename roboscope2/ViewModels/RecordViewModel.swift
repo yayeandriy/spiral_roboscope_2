@@ -227,18 +227,9 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
             return sourceURL
         }
 
-        // Compute the rendered (post-transform) size to find the correct crop
-        let renderedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
-        let renderedSize = CGSize(width: abs(renderedRect.width), height: abs(renderedRect.height))
-
-        let squareSize = min(renderedSize.width, renderedSize.height)
-        let xOffset = (renderedSize.width - squareSize) / 2
-        let yOffset = (renderedSize.height - squareSize) / 2
-
-        // Translate to crop center, then apply track's rotation
-        let translate = CGAffineTransform(translationX: -(renderedRect.origin.x + xOffset),
-                                           y: -(renderedRect.origin.y + yOffset))
-        let transform = translate.concatenating(preferredTransform)
+        let squareSize = min(naturalSize.width, naturalSize.height)
+        let xOffset = (naturalSize.width - squareSize) / 2
+        let yOffset = (naturalSize.height - squareSize) / 2
 
         let composition = AVMutableVideoComposition()
         composition.renderSize = CGSize(width: squareSize, height: squareSize)
@@ -249,6 +240,8 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
         instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
 
         let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        // Apply rotation first, then translate to crop
+        let transform = preferredTransform.translatedBy(x: -xOffset, y: -yOffset)
         layerInstruction.setTransform(transform, at: .zero)
         instruction.layerInstructions = [layerInstruction]
         composition.instructions = [instruction]
