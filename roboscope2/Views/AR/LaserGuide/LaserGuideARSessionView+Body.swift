@@ -190,6 +190,10 @@ extension LaserGuideARSessionView {
                                 placeOriginImmediately(measurement)
                             }
                         },
+                        onDotWorldDetected: { dotWorld in
+                            // Cone placed immediately when the dot is raycasted, before line is found.
+                            placeDotCone(at: dotWorld)
+                        },
                         boxColor: settings.showAccumulatedOverlay ? .blue : .green
                     )
                     .onAppear { viewportSize = geometry.size }
