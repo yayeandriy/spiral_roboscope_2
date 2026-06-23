@@ -1,8 +1,9 @@
 # What's New
 
-## Version 2.2.4
+## Version 2.2.5
 
-### Placement Gate Fix
+### ML Model Download Fix
 
-- Origin placement now strictly requires holding the Placement button — detection no longer auto-starts on session open
-- `placeOriginImmediately` gated by `isPlacementButtonHeld` to prevent accidental placement
+- Fixed 403 error when downloading ML models from S3 storage
+- Model downloads now route through SpiralStorage presigned URL API for authenticated access
+- Added `resolveDownloadURL` to SpiralStorageService for transparent S3 key-to-presigned-URL resolution

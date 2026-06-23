@@ -114,7 +114,7 @@ final class MLModelDownloadService: ObservableObject {
 
     private func performDownload(space: Space, urlString: String) async throws -> URL {
         let spaceIdStr = space.id.uuidString
-        guard let url = URL(string: urlString) else {
+        guard URL(string: urlString) != nil else {
             let msg = "Invalid model URL: \(urlString)"
             downloadStates[spaceIdStr] = .error(msg)
             throw URLError(.badURL, userInfo: [NSLocalizedDescriptionKey: msg])
@@ -122,8 +122,19 @@ final class MLModelDownloadService: ObservableObject {
 
         downloadStates[spaceIdStr] = .downloading(progress: -1)
 
+        // ── 0. Resolve presigned download URL via SpiralStorage ─────────
+        let resolvedURL: URL
+        do {
+            resolvedURL = try await SpiralStorageService.shared.resolveDownloadURL(urlOrKey: urlString)
+        } catch {
+            let msg = "Failed to resolve download URL: \(error.localizedDescription)"
+            downloadStates[spaceIdStr] = .error(msg)
+            throw NSError(domain: "MLModelDownloadService", code: 9,
+                          userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+
         // ── 1. Download ZIP ─────────────────────────────────────────────────
-        let (tempFileURL, _) = try await URLSession.shared.download(from: url)
+        let (tempFileURL, _) = try await URLSession.shared.download(from: resolvedURL)
 
         guard !Task.isCancelled else { throw CancellationError() }
 

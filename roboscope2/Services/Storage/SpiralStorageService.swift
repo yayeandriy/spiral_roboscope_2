@@ -130,6 +130,59 @@ class SpiralStorageService {
         }
     }
     
+    // MARK: - Presigned Download URL
+
+    /// Resolves an S3 object key or full S3 URL into a presigned download URL.
+    /// - If `urlOrKey` starts with `http`, the key is extracted from the path after the bucket.
+    /// - Otherwise it's treated as an object key directly.
+    /// - Returns: A presigned URL valid for the configured expiry duration.
+    func resolveDownloadURL(urlOrKey: String) async throws -> URL {
+        let key: String
+        if urlOrKey.hasPrefix("http") {
+            // Extract key from S3 URL: https://<bucket>.s3.../<key>
+            guard let url = URL(string: urlOrKey),
+                  let keyFromPath = extractKeyFromS3URL(url) else {
+                throw StorageError.invalidURL
+            }
+            key = keyFromPath
+        } else {
+            key = urlOrKey
+        }
+
+        let requestURL = URL(string: "\(baseURL)/v1/objects/url/\(key)")!
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = "GET"
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        request.timeoutInterval = 30
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw StorageError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, body)
+        }
+
+        let result = try JSONDecoder().decode(PresignedDownloadResponse.self, from: data)
+        guard let presignedURL = URL(string: result.url) else {
+            throw StorageError.invalidURL
+        }
+        return presignedURL
+    }
+
+    /// Extracts the object key from an S3 URL like:
+    /// `https://<bucket>.s3.<region>.<host>/<key>`
+    private func extractKeyFromS3URL(_ url: URL) -> String? {
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !path.isEmpty else { return nil }
+        return path
+    }
+
+    private struct PresignedDownloadResponse: Codable {
+        let url: String
+        let key: String
+    }
+
     // MARK: - Upload with Retry Logic
     
     /// Upload a file with automatic retry on failure
