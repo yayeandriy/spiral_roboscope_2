@@ -178,7 +178,7 @@ struct SessionsView: View {
                     ZStack {
                         Color(.systemBackground).ignoresSafeArea().ignoresSafeArea()
                         VStack(spacing: 24) {
-                            Image("AppIcon")
+                            Image("SplashLogo")
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                                 .frame(width: 100, height: 100)
@@ -208,14 +208,12 @@ struct SessionsView: View {
             ZStack {
                 Color(.systemBackground).ignoresSafeArea()
                 VStack(spacing: 24) {
-                    if let icon = UIImage(named: "AppIcon") {
-                        Image(uiImage: icon)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 100, height: 100)
-                            .cornerRadius(24)
-                            .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
-                    }
+                    Image("SplashLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 100, height: 100)
+                        .cornerRadius(24)
+                        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
                     Text("Roboscope")
                         .font(.title)
                         .fontWeight(.bold)
