@@ -18,6 +18,7 @@ extension LaserGuideARSessionView {
     /// Per-frame immediate origin placement — no stability delay.
     /// Called from the accumulator when the current frame has both dot and line 3-D positions.
     func placeOriginImmediately(_ measurement: LaserDotLineMeasurement) {
+        guard isPlacementButtonHeld else { return }
         guard !hasAutoScoped else { return }
 
         guard let candidate = candidateSegment(for: measurement.distanceMeters) else {

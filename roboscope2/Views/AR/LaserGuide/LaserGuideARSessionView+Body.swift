@@ -298,7 +298,6 @@ extension LaserGuideARSessionView {
             if let mlSaved = SpaceMLDetectionSettingsStore.shared.load(spaceId: session.spaceId) {
                 applyMLDetectionSettings(mlSaved)
             }
-            pipeline.start()
             Task { await loadModelForSession() }
             Task { await fetchLaserGuideIfNeeded() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
