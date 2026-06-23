@@ -145,6 +145,7 @@ extension LaserGuideARSessionView {
         refZBadgeScreenPoint = nil
         refTipBadgeText = nil
         refTipBadgeScreenPoint = nil
+        removeDotCone()
 
         Task { @MainActor in
             markerService.setMarkersVisible(false)

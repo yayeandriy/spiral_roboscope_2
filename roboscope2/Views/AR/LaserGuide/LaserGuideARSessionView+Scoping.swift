@@ -60,6 +60,7 @@ extension LaserGuideARSessionView {
                 frameOriginAnchor?.isEnabled = true
                 debugDotAnchor?.isEnabled = true
                 debugLineAnchor?.isEnabled = true
+                removeDotCone()
                 Task { @MainActor in
                     markerService.setMarkersVisible(true)
                 }
@@ -169,6 +170,8 @@ extension LaserGuideARSessionView {
 
             guard let dotWorld = raycastDetection(bestDot, transform: transform, viewportSize: viewportSize) else { return }
             lockedDotWorld = dotWorld
+            // Immediately place a small red cone at the detected dot's 3-D world position.
+            placeDotCone(at: dotWorld)
             logAlways("DOT LOCKED  world=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z)))")
             return
         }
@@ -182,6 +185,9 @@ extension LaserGuideARSessionView {
         }
         logTT("PHASE2 trying line  conf=\(String(format:"%.2f",bestLine.confidence)) bbox=(\(String(format:"%.3f",bestLine.boundingBox.midX)),\(String(format:"%.3f",bestLine.boundingBox.midY)))")
         guard let lineWorld = raycastDetection(bestLine, transform: transform, viewportSize: viewportSize) else { return }
+
+        // Keep the cone updated while waiting for origin placement (dot position is stable).
+        placeDotCone(at: dotWorld)
 
         let yDelta = abs(lineWorld.y - dotWorld.y)
         guard yDelta <= mlDetection.maxDotLineYDeltaMeters else {
@@ -355,6 +361,47 @@ extension LaserGuideARSessionView {
         arView.scene.addAnchor(anchor)
         anchorState.wrappedValue = anchor
         print("[DebugDot] placed \(name) at \(position)")
+    }
+
+    /// Places or moves a small red cone at `position` to mark the detected laser dot's 3-D location.
+    /// The cone is created on first call and then repositioned on every subsequent call.
+    func placeDotCone(at position: SIMD3<Float>) {
+        guard let arView else { return }
+
+        if let existing = dotConeAnchor {
+            // Reuse the existing anchor — just move it.
+            existing.transform.translation = position
+        } else {
+            // First call: create cone + anchor and add to scene.
+            let coneHeight: Float = 0.025   // 2.5 cm tall
+            let coneRadius: Float = 0.010   // 1.0 cm base radius
+            let material = UnlitMaterial(color: UIColor(red: 1.0, green: 0.08, blue: 0.08, alpha: 1.0))
+            let cone = ModelEntity(
+                mesh: .generateCone(height: coneHeight, radius: coneRadius),
+                materials: [material]
+            )
+            // Tip points up by default; rotate 180° so tip points down toward the surface.
+            cone.orientation = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
+            // Offset so the tip sits exactly at the raycasted surface position.
+            cone.position = SIMD3<Float>(0, coneHeight / 2, 0)
+
+            let anchor = AnchorEntity(world: position)
+            anchor.addChild(cone)
+            arView.scene.addAnchor(anchor)
+            dotConeAnchor = anchor
+            print("[DotCone] placed at \(position)")
+        }
+    }
+
+    /// Removes the dot-indicator cone from the scene.
+    func removeDotCone() {
+        guard let arView, let anchor = dotConeAnchor else {
+            dotConeAnchor = nil
+            return
+        }
+        arView.scene.removeAnchor(anchor)
+        dotConeAnchor = nil
+        print("[DotCone] removed")
     }
 
     func endARSession() {

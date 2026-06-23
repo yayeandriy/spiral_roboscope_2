@@ -45,6 +45,9 @@ struct LaserGuideARSessionView: View {
     @State var autoScopeRestartThresholdZMeters: Float? = nil
     @State var autoScopedSegment: LaserGuideGridSegment? = nil
     @State var debugDotAnchor: AnchorEntity? = nil
+    /// Live red cone placed at the detected dot's 3-D raycast position.
+    /// Updated every frame a dot is detected; removed when placement ends.
+    @State var dotConeAnchor: AnchorEntity? = nil
     @State var debugLineAnchor: AnchorEntity? = nil
     @State var showDetectionSettings = false
     @State var detectionHistory: [DetectionFrameRecord] = []
@@ -517,6 +520,7 @@ struct LaserGuideARSessionView: View {
         frameOriginAnchor?.isEnabled = false
         debugDotAnchor?.isEnabled = false
         debugLineAnchor?.isEnabled = false
+        removeDotCone()
         markerService.setMarkersVisible(false)
 
         // Enter detection mode (without restarting AR tracking)
@@ -541,6 +545,7 @@ struct LaserGuideARSessionView: View {
 
     func stopPlacement() {
         pipeline.stop()
+        removeDotCone()
 
         if hasAutoScoped {
             // Placement succeeded during hold — keep the new origin, show everything
