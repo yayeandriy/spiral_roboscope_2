@@ -17,6 +17,9 @@ struct LaserMLDetectionOverlay: View {
     let arView: ARView?
     let maxDotLineYDeltaMeters: Float
     let onDotLineMeasurement: ((LaserDotLineMeasurement?) -> Void)?
+    /// Called whenever a dot is successfully raycasted to a 3-D world position,
+    /// even if no line is visible yet. Used to place the live indicator cone.
+    var onDotWorldDetected: ((SIMD3<Float>) -> Void)? = nil
     /// Scale factor applied to normalised image-space distance to produce fake "world" metres
     /// in Video Mode (when arView is nil). Default 5.0 — adjust in Settings to match your guide.
     var videoModeDistanceScale: Float = 5.0
@@ -96,6 +99,9 @@ struct LaserMLDetectionOverlay: View {
             onDotLineMeasurement?(nil)
             return
         }
+
+        // Fire the dot-only callback immediately — line doesn't need to be visible yet.
+        onDotWorldDetected?(SIMD3<Float>(dotWorld.x, dotWorld.y, dotWorld.z))
 
         // Consider line candidates, but only accept those within Y tolerance.
         let tolerance = maxDotLineYDeltaMeters
