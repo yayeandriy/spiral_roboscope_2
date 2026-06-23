@@ -186,8 +186,6 @@ extension LaserGuideARSessionView {
         logTT("PHASE2 trying line  conf=\(String(format:"%.2f",bestLine.confidence)) bbox=(\(String(format:"%.3f",bestLine.boundingBox.midX)),\(String(format:"%.3f",bestLine.boundingBox.midY)))")
         guard let lineWorld = raycastDetection(bestLine, transform: transform, viewportSize: viewportSize) else { return }
 
-        // Keep the cone updated while waiting for origin placement (dot position is stable).
-        placeDotCone(at: dotWorld)
 
         let yDelta = abs(lineWorld.y - dotWorld.y)
         guard yDelta <= mlDetection.maxDotLineYDeltaMeters else {
