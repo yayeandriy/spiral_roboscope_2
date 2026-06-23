@@ -1,28 +1,24 @@
 # What's New
 
-## Version [Current Version]
+## Version 2.2.3
 
-### Enhanced Marker Display & Accuracy
+### Hold-to-Place Origin in LaserGuide AR
 
-**Improved Marker Badge**
-- Added collapsible nodes section showing precise p1-p4 coordinates with color-coded x, y, z values
-- Marker ID now displayed at the bottom for easy reference
-- Calibrated center only shown when it differs from raw measurements, reducing visual clutter
+**New Placement Button**
+- Replaced the origin placement badge with a large hold-to-place button at the bottom-right corner
+- Button styled like the record button with two states: idle (green-ringed circle with scale.3d icon) and held (filled green square)
+- Placement starts only while the button is held; releasing stops detection immediately
 
-**Fixed Coordinate System**
-- Corrected marker coordinate calculations to use Frame Origin reference system
-- Raw center and node coordinates now accurately reflect stored server values
-- Fixed width/length calculations to properly align with X and Z axes
+**Smarter Origin Lifecycle**
+- If a previous origin was placed, it's preserved until a new one is successfully set
+- During placement, previous origin and anchor are hidden; restored if placement fails
+- Markers and plus button are hidden during active placement for a cleaner view
 
-**Real-Time Calibration Updates**
-- Calibrated data automatically refreshes when markers are moved or resized
-- Improved synchronization between local display and server-calculated metrics
-- Faster updates with optimized single-network-call approach
+**Onboarding & Info**
+- Instruction block at bottom-left guides first-time users: "Hold the button to start origin placement"
+- Space Info overlay (checkmark menu) shows: Space name, ML model filename, input size, classes, update dates, and collapsible Laser Grid table
+- Laser Grid table lists all segments with X, Z, and length values
 
-**Technical Improvements**
-- Width measurements now correctly represent X-axis extent (cross direction)
-- Length measurements now correctly represent Z-axis extent (longitudinal direction)
-- Frame-origin coordinates preserved during all marker transformations
-- Enhanced data integrity with proper coordinate system handling
-
-This update ensures your spatial measurements are accurate and clearly presented, making it easier to work with precision marker data in AR space.
+**Menu Cleanup**
+- "Restart Placing" removed from checkmark menu (replaced by hold-to-place flow)
+- "Manual Two Points" added to checkmark menu for quick access

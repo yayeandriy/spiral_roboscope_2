@@ -85,9 +85,24 @@ extension LaserGuideARSessionView {
                 topBarControls
                     .zIndex(5)
 
-                // Origin placement badge: long-press to toggle Vision ↔ Manual
-                if !hasAutoScoped {
-                    originPlacementBadge
+                // Hold-to-place origin button — always visible at bottom-right (hidden during manual mode)
+                if manualPlacementState == .inactive {
+                    VStack {
+                        Spacer()
+                        HStack(alignment: .center) {
+                            // Instruction block at bottom-left when no origin placed yet
+                            if !hasAutoScoped && !isPlacementButtonHeld {
+                                instructionInfoBlock
+                                    .padding(.leading, 20)
+                                    .allowsHitTesting(false)
+                            }
+                            Spacer()
+                            placementButton
+                                .padding(.trailing, 30)
+                        }
+                        .padding(.bottom, 50)
+                    }
+                    .zIndex(4)
                 }
 
                 // Removed detection settings / frame history panel
@@ -207,6 +222,16 @@ extension LaserGuideARSessionView {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
                     .padding(.horizontal, 40)
                     .zIndex(6)
+                }
+
+                // Space Info overlay
+                if showSpaceInfo {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                        .zIndex(8)
+                        .onTapGesture { showSpaceInfo = false }
+
+                    spaceInfoContent
                 }
             }
         .ignoresSafeArea(.all)
@@ -356,12 +381,21 @@ extension LaserGuideARSessionView {
                     Button { showMinimap = true } label: {
                         Label("Minimap", systemImage: "map")
                     }
+                    Button { showSpaceInfo = true } label: {
+                        Label("Space Info", systemImage: "info.circle")
+                    }
                     Divider()
+                    if manualPlacementState == .inactive {
+                        Button { enterManualTwoPointsMode() } label: {
+                            Label("Manual Two Points", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                        }
+                    } else {
+                        Button(role: .destructive) { cancelManualTwoPointsMode() } label: {
+                            Label("Cancel Manual Placement", systemImage: "xmark")
+                        }
+                    }
                     Button(role: .destructive) { dismiss() } label: {
                         Label("Close Session", systemImage: "xmark")
-                    }
-                    Button { enterDetectionMode() } label: {
-                        Label("Restart Placing", systemImage: "arrow.counterclockwise")
                     }
                 } label: {
                     Image(systemName: "checkmark")
@@ -409,7 +443,7 @@ extension LaserGuideARSessionView {
     var bottomControls: some View {
         if manualPlacementState == .inactive {
             HStack(spacing: 20) {
-                if hasAutoScoped {
+                if hasAutoScoped && !isPlacementButtonHeld {
                     if markerService.targetCrossesEdge {
                         edgeWarningLabel
                     } else {

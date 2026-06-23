@@ -65,6 +65,11 @@ struct LaserGuideARSessionView: View {
     @State var mlModelLoadError: String? = nil
     @State var isLoadingMLModel: Bool = false
 
+    // Hold-to-place origin button state
+    @State var isPlacementButtonHeld: Bool = false
+    @State var savedHasAutoScoped: Bool = false
+    @State var savedFrameOriginTransform: simd_float4x4 = matrix_identity_float4x4
+
     static func cgImageOrientation(for interfaceOrientation: UIInterfaceOrientation) -> CGImagePropertyOrientation {
         // Back camera (not mirrored). This mapping keeps Vision's orientation consistent with
         // ARFrame.displayTransform(for: interfaceOrientation, ...).
@@ -84,13 +89,6 @@ struct LaserGuideARSessionView: View {
 
     let laserGuideDistanceToleranceMeters: Float = 0.03
     let laserGuideSnapCooldownSeconds: TimeInterval = 0.6
-
-    var locatingDistanceText: String {
-        if let d = latestLaserMeasurement?.distanceMeters {
-            return String(format: "%.2f m", d)
-        }
-        return "--"
-    }
 
     init(session: WorkSession) {
         self.session = session
@@ -122,6 +120,8 @@ struct LaserGuideARSessionView: View {
     @State var isRegistering = false
     @State var registrationProgress: String = ""
     @State var showActionsDialog: Bool = false
+    @State var showSpaceInfo = false
+    @State var showGridDetails = false
     @State var frameOriginTransform: simd_float4x4 = matrix_identity_float4x4 {
         didSet {
             // Automatically update all entities when FrameOrigin changes
@@ -270,91 +270,295 @@ struct LaserGuideARSessionView: View {
         }
     }
 
-    // MARK: - Origin badge dynamic text
-
-    var statusTitle: String {
-        switch manualPlacementState {
-        case .inactive:
-            return "Locating Origin"
-        case .placeFirst:
-            return "Place First Point"
-        case .placeSecond:
-            return "Place Second Point"
-        case .readyToApply:
-            return "Ready — Tap Apply"
-        }
-    }
-
-    var statusDescription: String {
-        switch manualPlacementState {
-        case .inactive:
-            return "Point camera at the area you want to map."
-        case .placeFirst:
-            return "Tap to place the first reference point."
-        case .placeSecond:
-            return "Tap to place the second reference point."
-        case .readyToApply:
-            return "Adjust points by dragging, then tap Apply."
-        }
-    }
-
-    // MARK: - Origin placement badge
+    // MARK: - Hold-to-place origin button
 
     @ViewBuilder
-    var originPlacementBadge: some View {
-        VStack {
-            Spacer()
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    Text(statusTitle)
-                        .font(.system(size: 17, weight: .bold))
+    var placementButton: some View {
+        Button {
+            // Action handled by simultaneous gesture below
+        } label: {
+            ZStack {
+                if isPlacementButtonHeld {
+                    // Held state — filled rounded square (like recording)
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.green)
+                        .frame(width: 68, height: 68)
+                    Image(systemName: "scale.3d")
+                        .font(.system(size: 28, weight: .medium))
                         .foregroundColor(.white)
-                }
-
-                Text(statusDescription)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundColor(.white.opacity(0.75))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if manualPlacementState == .inactive, !locatingDistanceText.isEmpty {
-                    Text(locatingDistanceText)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.yellow)
-                }
-
-                Text("Long press to switch to \(manualPlacementState == .inactive ? "Manual" : "Vision")")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.45))
-            }
-            .padding(18)
-            .padding(.horizontal, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [.white.opacity(0.3), .white.opacity(0.08)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-            )
-            .onLongPressGesture(minimumDuration: 0.5) {
-                if manualPlacementState == .inactive {
-                    enterManualTwoPointsMode()
                 } else {
-                    cancelManualTwoPointsMode()
-                    enterDetectionMode()
+                    // Idle state — circle with outline (like record ready)
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 80, height: 80)
+                    Circle()
+                        .strokeBorder(Color.green, lineWidth: 4)
+                        .frame(width: 72, height: 72)
+                    Image(systemName: "scale.3d")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundColor(.green)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 50)
         }
-        .zIndex(4)
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !isPlacementButtonHeld {
+                        isPlacementButtonHeld = true
+                        startPlacement()
+                    }
+                }
+                .onEnded { _ in
+                    isPlacementButtonHeld = false
+                    stopPlacement()
+                }
+        )
+    }
+
+    // MARK: - Instruction info block (shown before first placement)
+
+    @ViewBuilder
+    var instructionInfoBlock: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Hold the button")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+            Text("to start origin placement")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundColor(.white.opacity(0.65))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Space Info
+
+    var spaceInfoModelName: String {
+        mlDetection.assignedModelURL?.lastPathComponent ?? "—"
+    }
+
+    var spaceInfoModelSize: String {
+        if let size = mlDetection.modelInputSize {
+            return "\(Int(size.width))×\(Int(size.height))"
+        }
+        return "—"
+    }
+
+    var spaceInfoClasses: String {
+        "dot, line"
+    }
+
+    var spaceInfoModelDate: String {
+        guard let url = mlDetection.assignedModelURL else { return "—" }
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+            if let date = attrs[.modificationDate] as? Date {
+                let fmt = DateFormatter()
+                fmt.dateStyle = .medium
+                fmt.timeStyle = .short
+                return fmt.string(from: date)
+            }
+        } catch { }
+        return "—"
+    }
+
+    var spaceInfoUpdatedAt: String {
+        let space = spaceService.spaces.first(where: { $0.id == session.spaceId })
+        guard let date = space?.updatedAt ?? space?.createdAt else { return "—" }
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+        fmt.timeStyle = .short
+        return fmt.string(from: date)
+    }
+
+    @ViewBuilder
+    var spaceInfoContent: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Space Info")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+                Spacer()
+                Button {
+                    showSpaceInfo = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+            .padding(.bottom, 16)
+
+            // Content rows
+            VStack(spacing: 12) {
+                infoRow(label: "Space", value: associatedSpaceName ?? "—")
+                Divider().background(.white.opacity(0.15))
+                infoRow(label: "ML Model", value: spaceInfoModelName)
+                Divider().background(.white.opacity(0.15))
+                infoRow(label: "Input Size", value: spaceInfoModelSize)
+                Divider().background(.white.opacity(0.15))
+                infoRow(label: "Classes", value: spaceInfoClasses)
+                Divider().background(.white.opacity(0.15))
+                infoRow(label: "Updated", value: spaceInfoUpdatedAt)
+                Divider().background(.white.opacity(0.15))
+                infoRow(label: "Model Date", value: spaceInfoModelDate)
+                if let guide = laserGuide {
+                    Divider().background(.white.opacity(0.15))
+
+                    // Collapsible grid details
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showGridDetails.toggle()
+                        }
+                    } label: {
+                        HStack {
+                            Text("Laser Grid")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white.opacity(0.6))
+                            Spacer()
+                            Text("\(guide.grid.count) segments")
+                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.white)
+                            Image(systemName: showGridDetails ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.5))
+                                .frame(width: 16)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    if showGridDetails {
+                        VStack(spacing: 6) {
+                            // Column header
+                            HStack {
+                                Text("#").frame(width: 28, alignment: .leading)
+                                Text("X").frame(maxWidth: .infinity, alignment: .trailing)
+                                Text("Z").frame(maxWidth: .infinity, alignment: .trailing)
+                                Text("Len").frame(width: 56, alignment: .trailing)
+                            }
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.35))
+                            .padding(.top, 4)
+
+                            Divider().background(.white.opacity(0.1))
+
+                            ScrollView {
+                                VStack(spacing: 4) {
+                                    ForEach(Array(guide.grid.enumerated()), id: \.offset) { idx, seg in
+                                        HStack {
+                                            Text("\(idx + 1)")
+                                                .frame(width: 28, alignment: .leading)
+                                                .foregroundColor(.white.opacity(0.4))
+                                            Text(String(format: "%.3f", seg.x))
+                                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                            Text(String(format: "%.3f", seg.z))
+                                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                            Text(String(format: "%.3f", seg.segmentLength))
+                                                .frame(width: 56, alignment: .trailing)
+                                        }
+                                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.8))
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 160)
+                        }
+                        .padding(.top, 6)
+                    }
+                }
+            }
+
+            Spacer().frame(height: 24)
+        }
+        .padding(24)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                )
+        )
+        .padding(.horizontal, 24)
+        .zIndex(10)
+    }
+
+    func infoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.white.opacity(0.6))
+                .frame(width: 100, alignment: .leading)
+            Text(value)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white)
+            Spacer()
+        }
+    }
+
+    // MARK: - Placement lifecycle
+
+    func startPlacement() {
+        // Save current origin state so we can restore on failure
+        savedHasAutoScoped = hasAutoScoped
+        savedFrameOriginTransform = frameOriginTransform
+
+        // Hide existing origin gizmo, markers, debug visuals
+        frameOriginAnchor?.isEnabled = false
+        debugDotAnchor?.isEnabled = false
+        debugLineAnchor?.isEnabled = false
+        markerService.setMarkersVisible(false)
+
+        // Enter detection mode (without restarting AR tracking)
+        hasAutoScoped = false
+        latestLaserMeasurement = nil
+        frameAccumulator = []
+        accumulatedDetections = []
+        emptyDetectionFrames = 0
+        lockedDotWorld = nil
+        originStabilityStartTime = 0
+        originStabilityProgress = 0
+        originZBadgeText = nil
+        originZBadgeScreenPoint = nil
+        refZBadgeText = nil
+        refZBadgeScreenPoint = nil
+        refTipBadgeText = nil
+        refTipBadgeScreenPoint = nil
+
+        // Start detection pipeline
+        pipeline.start()
+    }
+
+    func stopPlacement() {
+        pipeline.stop()
+
+        if hasAutoScoped {
+            // Placement succeeded during hold — keep the new origin, show everything
+            frameOriginAnchor?.isEnabled = true
+            debugDotAnchor?.isEnabled = true
+            debugLineAnchor?.isEnabled = true
+            markerService.setMarkersVisible(true)
+        } else if savedHasAutoScoped {
+            // Placement did not complete — restore previous origin and anchor
+            frameOriginTransform = savedFrameOriginTransform
+            hasAutoScoped = true
+            frameOriginAnchor?.isEnabled = true
+            debugDotAnchor?.isEnabled = true
+            debugLineAnchor?.isEnabled = true
+            markerService.setMarkersVisible(true)
+        } else {
+            // No previous origin and placement didn't succeed — stay idle
+            // Nothing to restore; user can hold again to retry
+        }
     }
 }

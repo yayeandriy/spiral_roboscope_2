@@ -54,11 +54,14 @@ extension LaserGuideARSessionView {
             haptic.notificationOccurred(.success)
             AudioServicesPlaySystemSound(1519)
 
-            // After auto-scope, show origin gizmo again.
-            frameOriginAnchor?.isEnabled = true
-
-            Task { @MainActor in
-                markerService.setMarkersVisible(true)
+            // During hold-to-place, keep gizmo/markers hidden; stopPlacement() will show them.
+            if !isPlacementButtonHeld {
+                frameOriginAnchor?.isEnabled = true
+                debugDotAnchor?.isEnabled = true
+                debugLineAnchor?.isEnabled = true
+                Task { @MainActor in
+                    markerService.setMarkersVisible(true)
+                }
             }
 
             pipeline.stop()
