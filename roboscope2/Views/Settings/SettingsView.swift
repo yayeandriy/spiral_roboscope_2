@@ -48,6 +48,34 @@ struct SettingsView: View {
                 Toggle("Test Mode", isOn: $settings.testMode)
                     .tint(.orange)
 
+                // Detection Section
+                Section {
+                    Toggle("Y-delta check", isOn: $settings.useYDeltaCheck)
+                        .tint(.orange)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Segment tolerance")
+                            Spacer()
+                            Text("\(Int((settings.laserGuideDistanceToleranceMeters * 100).rounded())) cm")
+                                .foregroundColor(.secondary)
+                        }
+                        Slider(
+                            value: Binding(
+                                get: { Double(settings.laserGuideDistanceToleranceMeters) },
+                                set: { settings.laserGuideDistanceToleranceMeters = Float($0) }
+                            ),
+                            in: 0.01...0.20,
+                            step: 0.01
+                        )
+                        .tint(.orange)
+                    }
+                } header: {
+                    Text("Detection")
+                } footer: {
+                    Text("Y-delta check rejects lines whose world-Y differs from the locked dot by more than the configured threshold. Segment tolerance controls how closely the measured dot↔line distance must match a laser guide segment.")
+                }
+
                 // Video Mode Section
                 Section {
                     Toggle("Video Mode", isOn: $settings.videoModeEnabled)
