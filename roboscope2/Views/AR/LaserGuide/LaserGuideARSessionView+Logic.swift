@@ -40,16 +40,21 @@ extension LaserGuideARSessionView {
     /// Sets `isLoadingModel` / `modelLoadError` for UI feedback.
     @MainActor
     func loadModelForSession() async {
+        print("[LaserGuideML] loadModelForSession: started spaceId=\(session.spaceId)")
         guard let space = spaceService.spaces.first(where: { $0.id == session.spaceId }) else {
+            print("[LaserGuideML] loadModelForSession: space not found")
             mlModelLoadError = "Space not found for this session."
             return
         }
+        print("[LaserGuideML] loadModelForSession: space found, mlModelUrl=\(space.mlModelUrl ?? "nil")")
         isLoadingMLModel = true
         mlModelLoadError = nil
         do {
             let url = try await MLModelDownloadService.shared.ensureModelForSpace(space)
+            print("[LaserGuideML] loadModelForSession: model ready at \(url.lastPathComponent)")
             mlDetection.setModelURL(url)
         } catch {
+            print("[LaserGuideML] loadModelForSession: FAILED \(error)")
             mlModelLoadError = error.localizedDescription
         }
         isLoadingMLModel = false

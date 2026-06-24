@@ -103,7 +103,7 @@ final class LaserMLDetectionService: ObservableObject {
     var lastStatsLogTime: TimeInterval = 0
     var lastResultsTypeLogTime: TimeInterval = 0
 
-    var modelInputSize: CGSize? = nil
+    @Published var modelInputSize: CGSize? = nil
 
     var request: VNCoreMLRequest? = nil
     /// The currently loaded model path (compiled .mlmodelc) used to build `request`.
@@ -115,8 +115,18 @@ final class LaserMLDetectionService: ObservableObject {
 
     /// Assign a new model URL and reload the internal Vision request on the next frame.
     func setModelURL(_ url: URL) {
+        log("setModelURL: \(url.lastPathComponent)")
         assignedModelURL = url
         reloadModel()
+        // Eagerly infer input size so it's available in the UI without waiting for first detection frame.
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+            if let (mlModel, _) = try? Self.loadLaserPensModel(overrideURL: url) {
+                let size = Self.inferModelInputSize(from: mlModel)
+                self.log("setModelURL: inferredSize=\(size.map { "\(Int($0.width))x\(Int($0.height))" } ?? "nil")")
+                DispatchQueue.main.async { self.modelInputSize = size }
+            }
+        }
     }
 
     func log(_ message: String) {
@@ -124,6 +134,7 @@ final class LaserMLDetectionService: ObservableObject {
     }
 
     func reloadModel() {
+        log("reloadModel called")
         request = nil
         requestModelPath = nil
         didLogModelLoad = false
@@ -136,11 +147,14 @@ final class LaserMLDetectionService: ObservableObject {
         let desiredPath = overrideURL?.path
 
         if let request, requestModelPath == desiredPath {
-            return request
+            return request  // cache hit — intentionally silent
         }
+
+        log("ensureRequest: cache miss, loading model overrideURL=\(overrideURL?.lastPathComponent ?? "nil") desiredPath=\(desiredPath ?? "nil")")
 
         do {
             let (mlModel, modelURL) = try Self.loadLaserPensModel(overrideURL: overrideURL)
+            log("ensureRequest: MLModel loaded, modelURL=\(modelURL?.lastPathComponent ?? "nil")")
             let vnModel = try VNCoreMLModel(for: mlModel)
             let request = VNCoreMLRequest(model: vnModel)
             // YOLO models are typically trained with letterbox (scaleFit) preprocessing.
@@ -152,10 +166,14 @@ final class LaserMLDetectionService: ObservableObject {
 
             if !self.didLogModelLoad {
                 self.didLogModelLoad = true
-                self.modelInputSize = Self.inferModelInputSize(from: mlModel)
+                let inferredSize = Self.inferModelInputSize(from: mlModel)
+                log("ensureRequest: inferredSize=\(inferredSize.map { "\(Int($0.width))x\(Int($0.height))" } ?? "nil")")
+                DispatchQueue.main.async {
+                    self.modelInputSize = inferredSize
+                }
                 if let modelURL {
-                    if let modelInputSize {
-                        self.log("Model loaded (\(modelURL.lastPathComponent)) input=\(Int(modelInputSize.width))x\(Int(modelInputSize.height)) and VNCoreMLRequest created")
+                    if let inferredSize {
+                        self.log("Model loaded (\(modelURL.lastPathComponent)) input=\(Int(inferredSize.width))x\(Int(inferredSize.height)) and VNCoreMLRequest created")
                     } else {
                         self.log("Model loaded (\(modelURL.lastPathComponent)) and VNCoreMLRequest created")
                     }
@@ -165,6 +183,7 @@ final class LaserMLDetectionService: ObservableObject {
             }
             return request
         } catch {
+            log("ensureRequest: FAILED \(error)")
             DispatchQueue.main.async {
                 self.lastError = "Failed to load ML model: \(error.localizedDescription)"
             }
@@ -394,15 +413,42 @@ final class LaserMLDetectionService: ObservableObject {
     }
 
     static func inferModelInputSize(from model: MLModel) -> CGSize? {
-        for (_, input) in model.modelDescription.inputDescriptionsByName {
+        let inputs = model.modelDescription.inputDescriptionsByName
+        print("[LaserGuideML] inferModelInputSize: \(inputs.count) input(s)")
+        for (name, input) in inputs {
+            print("[LaserGuideML]   input '\(name)' type=\(input.type.rawValue)")
+            // Image input (explicit CoreML image type)
             if let constraint = input.imageConstraint {
+                print("[LaserGuideML]     imageConstraint: \(constraint.pixelsWide)x\(constraint.pixelsHigh)")
                 let w = CGFloat(constraint.pixelsWide)
                 let h = CGFloat(constraint.pixelsHigh)
                 if w > 0, h > 0 {
                     return CGSize(width: w, height: h)
                 }
             }
+            // MultiArray input — YOLO typically exports as [1, 3, H, W]
+            if let constraint = input.multiArrayConstraint {
+                let shape = constraint.shape
+                print("[LaserGuideML]     multiArrayConstraint shape=\(shape) dataType=\(constraint.dataType.rawValue)")
+                if shape.count == 4 {
+                    let h = CGFloat(truncating: shape[2])
+                    let w = CGFloat(truncating: shape[3])
+                    if w > 0, h > 0 {
+                        return CGSize(width: w, height: h)
+                    }
+                } else if shape.count == 3 {
+                    let h = CGFloat(truncating: shape[1])
+                    let w = CGFloat(truncating: shape[2])
+                    if w > 0, h > 0 {
+                        return CGSize(width: w, height: h)
+                    }
+                }
+            }
+            if input.imageConstraint == nil && input.multiArrayConstraint == nil {
+                print("[LaserGuideML]     (no imageConstraint or multiArrayConstraint)")
+            }
         }
+        print("[LaserGuideML] inferModelInputSize: returning nil")
         return nil
     }
 
