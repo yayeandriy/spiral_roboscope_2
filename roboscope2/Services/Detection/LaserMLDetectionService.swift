@@ -268,6 +268,9 @@ final class LaserMLDetectionService: ObservableObject {
                 options: [:]
             )
 
+            // Oriented frame size — needed for aspect-ratio crop.
+            let orientedSize = Self.orientedImageSize(for: pixelBuffer, orientation: orientation)
+
             do {
                 // Apply ROI (Vision uses normalized coordinates with origin at bottom-left).
                 // Keep an equivalent top-left normalized rect for mapping decoded tensor outputs.
@@ -280,8 +283,31 @@ final class LaserMLDetectionService: ObservableObject {
                     request.regionOfInterest = CGRect(x: x, y: yBottomLeft, width: size, height: size)
                     roiRectTopLeft = CGRect(x: x, y: yTopLeft, width: size, height: size)
                 } else {
-                    request.regionOfInterest = CGRect(x: 0, y: 0, width: 1, height: 1)
-                    roiRectTopLeft = CGRect(x: 0, y: 0, width: 1, height: 1)
+                    // Center-crop the frame to match the model's aspect ratio so Vision has
+                    // no letterbox padding to add. The decoder's existing ROI→frame mapping
+                    // maps coordinates back to the full frame correctly.
+                    let inputSize = modelInputSize ?? CGSize(width: 640, height: 640)
+                    let modelAspect = inputSize.width / inputSize.height
+                    let frameAspect = orientedSize.width / orientedSize.height
+
+                    let cropW: CGFloat
+                    let cropH: CGFloat
+                    if frameAspect > modelAspect {
+                        cropH = orientedSize.height
+                        cropW = cropH * modelAspect
+                    } else {
+                        cropW = orientedSize.width
+                        cropH = cropW / modelAspect
+                    }
+
+                    let normX = ((orientedSize.width - cropW) / 2.0) / orientedSize.width
+                    let normY = ((orientedSize.height - cropH) / 2.0) / orientedSize.height
+                    let normW = cropW / orientedSize.width
+                    let normH = cropH / orientedSize.height
+
+                    roiRectTopLeft = CGRect(x: normX, y: normY, width: normW, height: normH)
+                    // Vision regionOfInterest uses bottom-left origin.
+                    request.regionOfInterest = CGRect(x: normX, y: 1.0 - normY - normH, width: normW, height: normH)
                 }
 
                 try handler.perform([request])
@@ -337,7 +363,7 @@ final class LaserMLDetectionService: ObservableObject {
                     decodedFromFeatures = self.decodeYOLOLikeDetections(
                         from: coreMLFeatures,
                         modelInputSize: modelInputSize,
-                        orientedImageSize: Self.orientedImageSize(for: pixelBuffer, orientation: orientation),
+                        orientedImageSize: orientedSize,
                         roiRectTopLeftNormalized: roiRectTopLeft,
                         orientation: orientation,
                         cropAndScaleOption: request.imageCropAndScaleOption,
