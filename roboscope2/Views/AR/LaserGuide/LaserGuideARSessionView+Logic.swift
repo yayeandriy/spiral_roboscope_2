@@ -289,9 +289,12 @@ extension LaserGuideARSessionView {
         }
 
         // --- 3-D per-frame raycast using the CURRENT frame's transform ---
+        // Use per-frame detections when available; fall back to accumulated so a dot that
+        // flickered in a previous frame (still visible in the accumulator) still triggers Phase 1.
         if settings.usePerFrame3DPlacement, !hasAutoScoped {
+            let detectionsForPlacement = mlDetection.detections.isEmpty ? accumulatedDetections : mlDetection.detections
             tryPlaceOriginFromDetections(
-                mlDetection.detections,
+                detectionsForPlacement,
                 transform: imageToViewTransform,
                 viewportSize: arSize
             )

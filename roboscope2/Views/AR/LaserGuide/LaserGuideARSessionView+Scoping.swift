@@ -116,12 +116,16 @@ extension LaserGuideARSessionView {
 
         var hitKind = "none"
         var hit: ARRaycastResult?
-        let existingHits = arView.raycast(from: centerPx, allowing: .existingPlaneGeometry, alignment: .any)
-        if let h = existingHits.first { hit = h; hitKind = "existingPlane" }
-        else if let h = arView.raycast(from: centerPx, allowing: .estimatedPlane, alignment: .any).first { hit = h; hitKind = "estimatedPlane" }
+        if let h = arView.raycast(from: centerPx, allowing: .existingPlaneGeometry, alignment: .any).first {
+            hit = h; hitKind = "existingPlane"
+        } else if let h = arView.raycast(from: centerPx, allowing: .estimatedPlane, alignment: .any).first {
+            hit = h; hitKind = "estimatedPlane"
+        } else if let h = arView.raycast(from: centerPx, allowing: .existingPlaneInfinite, alignment: .any).first {
+            hit = h; hitKind = "infinitePlane"
+        }
 
         guard let hit else {
-            logTT("RAYCAST MISS  class=\(detection.label) conf=\(String(format:"%.2f",detection.confidence)) normImg=(\(String(format:"%.3f",bbox.midX)),\(String(format:"%.3f",bbox.midY))) normView=(\(String(format:"%.3f",centerNormView.x)),\(String(format:"%.3f",centerNormView.y))) screenPt=(\(String(format:"%.0f",centerPx.x)),\(String(format:"%.0f",centerPx.y)))")
+            logAlways("RAYCAST MISS  class=\(detection.label) conf=\(String(format:"%.2f",detection.confidence)) normImg=(\(String(format:"%.3f",bbox.midX)),\(String(format:"%.3f",bbox.midY))) normView=(\(String(format:"%.3f",centerNormView.x)),\(String(format:"%.3f",centerNormView.y))) screenPt=(\(String(format:"%.0f",centerPx.x)),\(String(format:"%.0f",centerPx.y)))")
             return nil
         }
         let world = hit.worldTransform.columns.3
@@ -152,7 +156,7 @@ extension LaserGuideARSessionView {
                 logTT("PHASE1 no dot  totalDet=\(filtered.count) dots=\(dotCount) lines=\(lineCount)")
                 return
             }
-            logTT("PHASE1 trying dot  conf=\(String(format:"%.2f",bestDot.confidence)) bbox=(\(String(format:"%.3f",bestDot.boundingBox.midX)),\(String(format:"%.3f",bestDot.boundingBox.midY))) size=(\(String(format:"%.3f",bestDot.boundingBox.width)),\(String(format:"%.3f",bestDot.boundingBox.height)))")
+            logAlways("PHASE1 trying dot  conf=\(String(format:"%.2f",bestDot.confidence)) bbox=(\(String(format:"%.3f",bestDot.boundingBox.midX)),\(String(format:"%.3f",bestDot.boundingBox.midY))) size=(\(String(format:"%.3f",bestDot.boundingBox.width)),\(String(format:"%.3f",bestDot.boundingBox.height)))")
 
             guard let dotWorld = raycastDetection(bestDot, transform: transform, viewportSize: viewportSize) else { return }
             lockedDotWorld = dotWorld
