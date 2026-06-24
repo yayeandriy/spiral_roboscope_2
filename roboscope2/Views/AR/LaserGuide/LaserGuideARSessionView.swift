@@ -90,7 +90,7 @@ struct LaserGuideARSessionView: View {
         }
     }
 
-    let laserGuideDistanceToleranceMeters: Float = 0.03
+    var laserGuideDistanceToleranceMeters: Float { settings.laserGuideDistanceToleranceMeters }
     let laserGuideSnapCooldownSeconds: TimeInterval = 0.6
 
     init(session: WorkSession) {

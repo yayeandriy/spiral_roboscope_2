@@ -99,6 +99,35 @@ struct DetectionSettingsPanel: View {
                     .toggleStyle(.switch)
                     .tint(.orange)
 
+                    Toggle(isOn: $settings.useYDeltaCheck) {
+                        Text("Y-delta check")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                    .toggleStyle(.switch)
+                    .tint(.orange)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Seg. tolerance")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.white.opacity(0.9))
+                            Spacer()
+                            Text("\(Int(settings.laserGuideDistanceToleranceMeters * 100)) cm")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.orange)
+                        }
+                        Slider(
+                            value: Binding(
+                                get: { Double(settings.laserGuideDistanceToleranceMeters) },
+                                set: { settings.laserGuideDistanceToleranceMeters = Float($0) }
+                            ),
+                            in: 0.01...0.20,
+                            step: 0.01
+                        )
+                        .tint(.orange)
+                    }
+
                     if let err = mlDetection.lastError, !err.isEmpty {
                         Text(err)
                             .font(.system(size: 11, weight: .semibold))

@@ -154,23 +154,8 @@ extension LaserGuideARSessionView {
             }
             logTT("PHASE1 trying dot  conf=\(String(format:"%.2f",bestDot.confidence)) bbox=(\(String(format:"%.3f",bestDot.boundingBox.midX)),\(String(format:"%.3f",bestDot.boundingBox.midY))) size=(\(String(format:"%.3f",bestDot.boundingBox.width)),\(String(format:"%.3f",bestDot.boundingBox.height)))")
 
-            // Screen-center proximity gate: reject dots whose bbox center is far from
-            // the reticle center.  The user naturally aims the reticle at the dot, so a
-            // large offset indicates a false positive on a different surface.
-            let bboxNormCenter = CGPoint(x: bestDot.boundingBox.midX, y: bestDot.boundingBox.midY)
-            let bboxViewCenter = bboxNormCenter.applying(transform)
-            let bboxPx = CGPoint(x: bboxViewCenter.x * viewportSize.width, y: bboxViewCenter.y * viewportSize.height)
-            let screenCenter = CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
-            let pxDelta = hypot(bboxPx.x - screenCenter.x, bboxPx.y - screenCenter.y)
-            let maxPxDelta: CGFloat = 150
-            guard pxDelta <= maxPxDelta else {
-                logAlways("PHASE1 REJECTED (off-center)  bboxPx=(\(String(format:"%.0f",bboxPx.x)),\(String(format:"%.0f",bboxPx.y))) screenCenter=(\(String(format:"%.0f",screenCenter.x)),\(String(format:"%.0f",screenCenter.y))) Δ=\(String(format:"%.0f",pxDelta))px > \(String(format:"%.0f",maxPxDelta))px")
-                return
-            }
-
             guard let dotWorld = raycastDetection(bestDot, transform: transform, viewportSize: viewportSize) else { return }
             lockedDotWorld = dotWorld
-            // Immediately place a small red cone at the detected dot's 3-D world position.
             placeDotCone(at: dotWorld)
             logAlways("DOT LOCKED  world=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z)))")
             return
@@ -188,9 +173,11 @@ extension LaserGuideARSessionView {
 
 
         let yDelta = abs(lineWorld.y - dotWorld.y)
-        guard yDelta <= mlDetection.maxDotLineYDeltaMeters else {
-            logAlways("PHASE2 REJECTED  yDelta=\(String(format:"%.3f",yDelta)) > tolerance=\(String(format:"%.3f",mlDetection.maxDotLineYDeltaMeters))")
-            return
+        if settings.useYDeltaCheck {
+            guard yDelta <= mlDetection.maxDotLineYDeltaMeters else {
+                logAlways("PHASE2 REJECTED  yDelta=\(String(format:"%.3f",yDelta)) > tolerance=\(String(format:"%.3f",mlDetection.maxDotLineYDeltaMeters))")
+                return
+            }
         }
 
         let dx = dotWorld.x - lineWorld.x

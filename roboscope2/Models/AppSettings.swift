@@ -26,6 +26,8 @@ class AppSettings: ObservableObject {
         static let showAccumulatedOverlay = "showAccumulatedOverlay"
         static let lineOverDotFilter = "lineOverDotFilter"
         static let usePerFrame3DPlacement = "usePerFrame3DPlacement"
+        static let useYDeltaCheck = "useYDeltaCheck"
+        static let laserGuideDistanceToleranceMeters = "laserGuideDistanceToleranceMeters"
         static let testMode = "testMode"
     }
     
@@ -84,6 +86,18 @@ class AppSettings: ObservableObject {
         didSet { defaults.set(usePerFrame3DPlacement, forKey: Keys.usePerFrame3DPlacement) }
     }
 
+    /// When true, Phase 2 rejects a line whose world Y differs from the locked dot's world Y
+    /// by more than `mlDetection.maxDotLineYDeltaMeters`. Disable to allow lines on different planes.
+    @Published var useYDeltaCheck: Bool {
+        didSet { defaults.set(useYDeltaCheck, forKey: Keys.useYDeltaCheck) }
+    }
+
+    /// Maximum allowed delta between the measured dot↔line distance and the nearest laser guide
+    /// segment length before the origin snap is rejected (meters).
+    @Published var laserGuideDistanceToleranceMeters: Float {
+        didSet { defaults.set(laserGuideDistanceToleranceMeters, forKey: Keys.laserGuideDistanceToleranceMeters) }
+    }
+
     // MARK: - API Environment
 
     enum APIEnvironmentSetting: String, CaseIterable {
@@ -126,6 +140,9 @@ class AppSettings: ObservableObject {
         self.showAccumulatedOverlay = defaults.object(forKey: Keys.showAccumulatedOverlay) as? Bool ?? true
         self.lineOverDotFilter = defaults.object(forKey: Keys.lineOverDotFilter) as? Bool ?? false
         self.usePerFrame3DPlacement = defaults.object(forKey: Keys.usePerFrame3DPlacement) as? Bool ?? true
+        self.useYDeltaCheck = defaults.object(forKey: Keys.useYDeltaCheck) as? Bool ?? true
+        let toleranceSaved = defaults.float(forKey: Keys.laserGuideDistanceToleranceMeters)
+        self.laserGuideDistanceToleranceMeters = toleranceSaved > 0 ? toleranceSaved : 0.03
         self.testMode = defaults.object(forKey: Keys.testMode) as? Bool ?? false
 
         // API environment: default to dev in DEBUG, prod otherwise (first launch only).
