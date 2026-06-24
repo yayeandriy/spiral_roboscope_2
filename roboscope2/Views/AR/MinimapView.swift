@@ -86,8 +86,8 @@ struct MinimapView: View {
             bottomBar
         }
         .task {
-            try? await refSetService.listReferenceSets(spaceId: spaceId)
-            try? await markerService.listMarkers(workSessionId: sessionId)
+            _ = try? await refSetService.listReferenceSets(spaceId: spaceId)
+            _ = try? await markerService.listMarkers(workSessionId: sessionId)
             // Auto-select persisted set or first one
             if selectedRefSetId == nil, let first = refSetService.referenceSets.first {
                 if !persistedRefSetId.isEmpty,

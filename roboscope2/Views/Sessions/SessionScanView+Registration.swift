@@ -73,7 +73,7 @@ extension SessionScanView {
 
             let (modelScene, scanScene): (SCNScene, SCNScene)
             if true {
-                (modelScene, scanScene) = await Task.detached(priority: .userInitiated) {
+                (modelScene, scanScene) = try await Task.detached(priority: .userInitiated) {
                     let m = try SCNScene(url: modelPath, options: loadOptions)
                     let s = try SCNScene(url: scanPath, options: scanLoadOptions)
                     return (m, s)
@@ -195,7 +195,7 @@ extension SessionScanView {
                 let (modelData, _) = try await URLSession.shared.data(from: usdcUrl)
                 let modelPath = FileManager.default.temporaryDirectory.appendingPathComponent("reference_model.usdc")
                 try modelData.write(to: modelPath)
-                let modelEntity = try await ModelEntity.loadModel(contentsOf: modelPath)
+                let modelEntity = try await ModelEntity(contentsOf: modelPath)
                 await MainActor.run {
                     let anchor = AnchorEntity(world: transformMatrix ?? matrix_identity_float4x4)
                     anchor.addChild(modelEntity)
@@ -235,7 +235,7 @@ extension SessionScanView {
                 let fileName = "scanned_model.\(fileExtension.isEmpty ? "usdc" : fileExtension)"
                 let scanPath = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
                 try scanData.write(to: scanPath)
-                let scanEntity = try await ModelEntity.loadModel(contentsOf: scanPath)
+                let scanEntity = try await ModelEntity(contentsOf: scanPath)
                 await MainActor.run {
                     let anchor = AnchorEntity(world: transformMatrix ?? matrix_identity_float4x4)
                     anchor.addChild(scanEntity)

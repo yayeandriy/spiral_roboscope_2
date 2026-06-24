@@ -196,10 +196,9 @@ struct ARSessionView: View {
                 endARSession()
                 cancellables.removeAll()
             }
-            .onChange(of: arView) { newValue in
+            .onChange(of: arView) { _, newValue in
                 markerService.arView = newValue
                 viewModel.bindARView(newValue)
-                
             }
             .onAppear {
                 // Must match the actual rendered AR view size; using UIScreen bounds can drift

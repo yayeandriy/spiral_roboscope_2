@@ -12,7 +12,7 @@ import ARKit
 extension ARSessionView {
     // MARK: - Saved Scan Registration
     func useSavedScan() async {
-        let startTime = Date()
+        _ = Date()
         isRegistering = true
         
     //
@@ -40,7 +40,7 @@ extension ARSessionView {
         
         do {
             // Step 1: Fetch the Space data
-            let stepStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Loading space information..."
             }
@@ -68,7 +68,7 @@ extension ARSessionView {
             
             
             // Step 2: Download USDC model
-            let downloadStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Downloading space model..."
             }
@@ -81,7 +81,7 @@ extension ARSessionView {
             
             
             // Step 3: Download saved scan
-            let scanDownloadStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Downloading saved scan..."
             }
@@ -93,7 +93,7 @@ extension ARSessionView {
             
             
             // Step 4: Load both models into SceneKit
-            let loadStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Loading models..."
             }
@@ -111,7 +111,7 @@ extension ARSessionView {
             
             let (modelScene, scanScene): (SCNScene, SCNScene)
             if true {
-                (modelScene, scanScene) = await Task.detached(priority: .userInitiated) {
+                (modelScene, scanScene) = try await Task.detached(priority: .userInitiated) {
                     let modelScene = try SCNScene(url: modelPath, options: loadOptions)
                     let scanScene = try SCNScene(url: scanPath, options: scanLoadOptions)
                     return (modelScene, scanScene)
@@ -130,7 +130,7 @@ extension ARSessionView {
             
             
             // Step 5: Extract point clouds
-            let extractStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Extracting point clouds..."
             }
@@ -163,7 +163,7 @@ extension ARSessionView {
             }
             
             // Step 6: Perform ICP registration
-            let registrationStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Running registration algorithm..."
             }
@@ -234,7 +234,7 @@ extension ARSessionView {
 extension LaserGuideARSessionView {
     // MARK: - Saved Scan Registration
     func useSavedScan() async {
-        let startTime = Date()
+        _ = Date()
         isRegistering = true
 
         // Optionally pause AR session during registration
@@ -260,7 +260,7 @@ extension LaserGuideARSessionView {
 
         do {
             // Step 1: Fetch the Space data
-            let stepStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Loading space information..."
             }
@@ -286,7 +286,7 @@ extension LaserGuideARSessionView {
             }
 
             // Step 2: Download USDC model
-            let downloadStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Downloading space model..."
             }
@@ -297,7 +297,7 @@ extension LaserGuideARSessionView {
             try modelData.write(to: modelPath)
 
             // Step 3: Download saved scan
-            let scanDownloadStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Downloading saved scan..."
             }
@@ -307,7 +307,7 @@ extension LaserGuideARSessionView {
             try scanData.write(to: scanPath)
 
             // Step 4: Load both models into SceneKit
-            let loadStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Loading models..."
             }
@@ -325,7 +325,7 @@ extension LaserGuideARSessionView {
 
             let (modelScene, scanScene): (SCNScene, SCNScene)
             if true {
-                (modelScene, scanScene) = await Task.detached(priority: .userInitiated) {
+                (modelScene, scanScene) = try await Task.detached(priority: .userInitiated) {
                     let modelScene = try SCNScene(url: modelPath, options: loadOptions)
                     let scanScene = try SCNScene(url: scanPath, options: scanLoadOptions)
                     return (modelScene, scanScene)
@@ -342,7 +342,7 @@ extension LaserGuideARSessionView {
             flattenModelHierarchy(scanScene.rootNode, into: flattenedScanNode)
 
             // Step 5: Extract point clouds
-            let extractStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Extracting point clouds..."
             }
@@ -373,7 +373,7 @@ extension LaserGuideARSessionView {
             }
 
             // Step 6: Perform ICP registration
-            let registrationStart = Date()
+            _ = Date()
             await MainActor.run {
                 registrationProgress = "Running registration algorithm..."
             }
@@ -421,7 +421,6 @@ extension LaserGuideARSessionView {
             }
         }
 
-        _ = startTime
     }
 
     // Helper function to flatten scene hierarchy

@@ -265,7 +265,7 @@ extension LaserGuideARSessionView {
     func processFrameUpdate() {
         guard let arView, let frame = arView.session.currentFrame else { return }
 
-        let interfaceOrientation = arView.window?.windowScene?.interfaceOrientation ?? .portrait
+        let interfaceOrientation = arView.window?.windowScene?.effectiveGeometry.interfaceOrientation ?? .portrait
         pipeline.processPixelBuffer(
             frame.capturedImage,
             orientation: Self.cgImageOrientation(for: interfaceOrientation)

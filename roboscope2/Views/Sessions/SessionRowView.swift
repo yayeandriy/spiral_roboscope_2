@@ -101,8 +101,7 @@ struct SessionRowView: View {
             // Fetch accurate per-session marker count without mutating global markers
             await fetchMarkerCount()
         }
-        .onChange(of: refreshTrigger) { _ in
-            // Re-fetch marker count when refresh trigger changes
+        .onChange(of: refreshTrigger) {
             Task {
                 await fetchMarkerCount()
             }

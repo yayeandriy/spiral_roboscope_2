@@ -74,9 +74,8 @@ struct Space3DViewer: View {
         .sheet(isPresented: $showARView) {
             SpaceARView(space: space)
         }
-        .onChange(of: showARView) { newValue in
+        .onChange(of: showARView) { _, newValue in
             if !newValue {
-                // When AR view is dismissed, switch back to 3D mode
                 currentMode = .view3D
             }
         }
@@ -106,7 +105,7 @@ struct Space3DViewer: View {
                     .tag(SpaceMode.scan)
             }
             .pickerStyle(.segmented)
-            .onChange(of: currentMode) { newMode in
+            .onChange(of: currentMode) { _, newMode in
                 if newMode == .scan {
                     showARView = true
                 }

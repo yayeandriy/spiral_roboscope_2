@@ -262,7 +262,7 @@ final class SpatialMarkerService: ObservableObject {
 
     /// Checks if the given target corners cross an object edge, updates targetCrossesEdge.
     func updateTargetEdgeState(targetCorners: [CGPoint]) {
-        guard let arView, let frame = arView.session.currentFrame else {
+        guard let arView, arView.session.currentFrame != nil else {
             targetCrossesEdge = false
             return
         }

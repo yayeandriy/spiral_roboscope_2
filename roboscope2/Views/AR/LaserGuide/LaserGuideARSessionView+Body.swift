@@ -326,7 +326,7 @@ extension LaserGuideARSessionView {
             endARSession()
             cancellables.removeAll()
         }
-        .onChange(of: arView) { newValue in
+        .onChange(of: arView) { _, newValue in
             markerService.arView = newValue
             viewModel.bindARView(newValue)
             Task { @MainActor in markerService.setMarkersVisible(hasAutoScoped) }

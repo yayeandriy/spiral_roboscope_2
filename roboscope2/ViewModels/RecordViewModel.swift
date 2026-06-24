@@ -31,11 +31,11 @@ final class RecordViewModel: NSObject, ObservableObject {
     nonisolated(unsafe) let captureSession = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "recorder.session")
     private nonisolated(unsafe) var videoDeviceInput: AVCaptureDeviceInput?
-    private let movieOutput = AVCaptureMovieFileOutput()
+    private nonisolated(unsafe) let movieOutput = AVCaptureMovieFileOutput()
     private var recordingTimer: Timer?
     private let maxDuration: Double = 20.0
     /// Capture device format dimensions (width × height in pixels) — used to match the preview crop.
-    private var captureFormatDimensions: CGSize = .zero
+    nonisolated(unsafe) var captureFormatDimensions: CGSize = .zero
 
     // MARK: - Public API
 
@@ -47,12 +47,16 @@ final class RecordViewModel: NSObject, ObservableObject {
         connection.preferredVideoStabilizationMode = .off
 
         // Match video orientation to device so preview and recording align
+        let rotationAngle: CGFloat
         switch UIDevice.current.orientation {
-        case .portrait:           connection.videoOrientation = .portrait
-        case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
-        case .landscapeLeft:      connection.videoOrientation = .landscapeRight
-        case .landscapeRight:     connection.videoOrientation = .landscapeLeft
-        default: break
+        case .portrait:           rotationAngle = 90
+        case .portraitUpsideDown: rotationAngle = 270
+        case .landscapeLeft:      rotationAngle = 0
+        case .landscapeRight:     rotationAngle = 180
+        default:                  rotationAngle = 90
+        }
+        if connection.isVideoRotationAngleSupported(rotationAngle) {
+            connection.videoRotationAngle = rotationAngle
         }
 
         // Re-read format at record time — the session may have changed it
@@ -104,7 +108,7 @@ final class RecordViewModel: NSObject, ObservableObject {
             configureSession()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                if granted { self?.configureSession() }
+                if granted { Task { @MainActor [weak self] in self?.configureSession() } }
             }
         default:
             print("[RecordVM] Camera not authorized: \(status)")
@@ -245,7 +249,7 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
     /// Because the preview layer (.resizeAspectFill) and this crop both
     /// take the center square of the source frame, they match by definition.
     private func cropToSquare(sourceURL: URL) async -> URL {
-        let asset = AVAsset(url: sourceURL)
+        let asset = AVURLAsset(url: sourceURL)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
             return sourceURL
         }
@@ -288,7 +292,11 @@ extension RecordViewModel: AVCaptureFileOutputRecordingDelegate {
         exporter.outputURL = outputURL
         exporter.outputFileType = .mp4
 
-        await exporter.export()
+        if #available(iOS 18, *) {
+            try? await exporter.export(to: outputURL, as: .mp4)
+        } else {
+            await exporter.export()
+        }
 
         try? FileManager.default.removeItem(at: sourceURL)
         return outputURL

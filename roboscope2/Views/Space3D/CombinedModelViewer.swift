@@ -405,8 +405,8 @@ struct CombinedModelViewer: UIViewRepresentable {
                     if let mesh = object as? MDLMesh {
                         let childNode = SCNNode(mdlObject: mesh)
                         containerNode.addChildNode(childNode)
-                    } else if let mdlObject = object as? MDLObject {
-                        let childNode = SCNNode(mdlObject: mdlObject)
+                    } else {
+                        let childNode = SCNNode(mdlObject: object)
                         containerNode.addChildNode(childNode)
                     }
                 }
@@ -461,10 +461,6 @@ struct CombinedModelViewer: UIViewRepresentable {
             return
         }
         
-        // Log registration settings
-        let settings = AppSettings.shared
-        
-        
         // Extract point clouds using settings
         await updateProgress("Extracting primary model points...", context: context)
         let primaryPoints = ModelRegistrationService.extractPointCloud(from: primaryNode, sampleCount: 5000)
@@ -486,7 +482,6 @@ struct CombinedModelViewer: UIViewRepresentable {
         ) {
             // Apply transform to primary model with animation
             await MainActor.run {
-                let originalPos = primaryNode.position
                 let originalTransform = primaryNode.simdTransform
                 
                 // The result.transformMatrix is a world-space transform computed from world-space points
@@ -503,11 +498,6 @@ struct CombinedModelViewer: UIViewRepresentable {
                 // New world transform = T_result (world) * originalTransform (world)
                 let composedTransform = result.transformMatrix * originalTransform
                 primaryNode.simdTransform = composedTransform
-                
-                let newPos = primaryNode.position
-                let translation = SIMD3<Float>(newPos.x - originalPos.x, newPos.y - originalPos.y, newPos.z - originalPos.z)
-                
-                let finalTransform = primaryNode.simdTransform
                 
                 SCNTransaction.commit()
                 

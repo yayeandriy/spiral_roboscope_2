@@ -10,7 +10,7 @@ import Combine
 import BackgroundTasks
 
 /// Manager for background synchronization and conflict resolution
-final class SyncManager: ObservableObject {
+final class SyncManager: ObservableObject, @unchecked Sendable {
     static let shared = SyncManager()
     
     // MARK: - Published Properties

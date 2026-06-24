@@ -66,7 +66,7 @@ enum ARGeometryUtils {
         arView: ARView
     ) -> CGPoint? {
         let camera = frame.camera
-        let orientation = arView.window?.windowScene?.interfaceOrientation ?? .portrait
+        let orientation = arView.window?.windowScene?.effectiveGeometry.interfaceOrientation ?? .portrait
         let viewMatrix = camera.viewMatrix(for: orientation)
         let projectionMatrix = camera.projectionMatrix(
             for: orientation,

@@ -9,7 +9,7 @@ import Foundation
 import Combine
 
 /// Service for managing real-time user presence in work sessions
-final class PresenceService: ObservableObject {
+final class PresenceService: ObservableObject, @unchecked Sendable {
     static let shared = PresenceService()
     
     private let networkManager = NetworkManager.shared

@@ -65,8 +65,7 @@ struct ContentView : View {
                 markerTrackingTimer?.invalidate()
                 markerTrackingTimer = nil
             }
-            .onChange(of: arView) { newValue in
-                // Connect marker service to AR view
+            .onChange(of: arView) { _, newValue in
                 markerService.arView = newValue
             }
             .simultaneousGesture(
@@ -260,21 +259,21 @@ struct ContentView : View {
     }
     
     private func checkMarkersInTarget() {
-        guard let arView = arView else { return }
+        guard arView != nil else { return }
         
         let targetRect = getTargetRect()
         markerService.updateMarkersInTarget(targetRect: targetRect)
     }
     
     private func selectMarkerInTarget() {
-        guard let arView = arView else { return }
+        guard arView != nil else { return }
         
         let targetRect = getTargetRect()
         markerService.selectMarkerInTarget(targetRect: targetRect)
     }
     
     private func startMovingMarker() {
-        guard let arView = arView,
+        guard arView != nil,
               markerService.selectedMarkerID != nil else { return }
         
         // Start moving the selected marker
@@ -289,7 +288,7 @@ struct ContentView : View {
     private func stopMovingMarker() {
         moveUpdateTimer?.invalidate()
         moveUpdateTimer = nil
-        markerService.stopMovingMarker()
+        _ = markerService.stopMovingMarker()
     }
     
     // MARK: - Scanning Functions
@@ -345,15 +344,15 @@ struct ContentView : View {
                 
                 // Approach 1: Try loading from Models subdirectory
                 if let url = Bundle.main.url(forResource: "room", withExtension: "usdc", subdirectory: "Models") {
-                    entity = try await Entity.load(contentsOf: url)
+                    entity = try await Entity(contentsOf: url)
                 }
                 // Approach 2: Try loading from bundle root
                 else if let url = Bundle.main.url(forResource: "room", withExtension: "usdc") {
-                    entity = try await Entity.load(contentsOf: url)
+                    entity = try await Entity(contentsOf: url)
                 }
                 // Approach 3: Try named resource (for Reality Composer scenes)
                 else {
-                    entity = try await Entity.load(named: "room")
+                    entity = try await Entity(named: "room")
                 }
                 
                 guard let loadedEntity = entity else {
@@ -383,7 +382,7 @@ struct ContentView : View {
         }
         
         // Get camera transform for placement
-        guard let cameraTransform = arView.session.currentFrame?.camera.transform else { return }
+        guard arView.session.currentFrame?.camera.transform != nil else { return }
         
         if isModelPlaced, let anchor = placedModelAnchor {
             // Remove existing model

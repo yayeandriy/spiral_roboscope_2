@@ -44,7 +44,7 @@ extension SpatialMarkerService {
 
         guard let minX = xs.min(), let maxX = xs.max(),
             let minZ = zs.min(), let maxZ = zs.max(),
-            let minY = ys.min(), let maxY = ys.max() else { return nil }
+            ys.min() != nil, ys.max() != nil else { return nil }
 
         // Width/Length from axis-aligned extents (user definition)
         let width = maxX - minX

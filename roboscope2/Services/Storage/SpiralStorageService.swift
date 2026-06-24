@@ -310,9 +310,6 @@ class SpiralStorageService {
             throw StorageError.serverError(httpResponse.statusCode, errorMessage)
         }
         
-        // Log the raw response for debugging
-        if let responseString = String(data: data, encoding: .utf8) {
-        }
         
         return try JSONDecoder().decode(CreateUploadResponse.self, from: data)
     }

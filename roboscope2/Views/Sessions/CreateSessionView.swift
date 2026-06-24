@@ -78,7 +78,7 @@ struct CreateSessionView: View {
                 // Session Options
                 Section {
                     Toggle("Start Immediately", isOn: $startImmediately)
-                        .onChange(of: startImmediately) { newValue in
+                        .onChange(of: startImmediately) { _, newValue in
                             sessionStatus = newValue ? .active : .draft
                         }
 

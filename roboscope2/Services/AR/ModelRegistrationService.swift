@@ -32,7 +32,7 @@ class ModelRegistrationService {
             if let vertexSource = geometry.sources(for: .vertex).first {
                 let stride = vertexSource.dataStride
                 let offset = vertexSource.dataOffset
-                let componentsPerVertex = vertexSource.componentsPerVector
+
                 let data = vertexSource.data
                 
                 let vertexCount = vertexSource.vectorCount
@@ -69,7 +69,7 @@ class ModelRegistrationService {
                 maxPoint.y = max(maxPoint.y, p.y)
                 maxPoint.z = max(maxPoint.z, p.z)
             }
-            let size = maxPoint - minPoint
+            _ = maxPoint - minPoint
         }
         
         // Downsample if too many points

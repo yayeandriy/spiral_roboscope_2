@@ -107,7 +107,10 @@ final class VideoModeService: ObservableObject {
         // Derive the correct Vision orientation from the video track's preferredTransform so
         // that pixel buffers (stored in raw/landscape layout by AVFoundation) are correctly
         // described to VNImageRequestHandler and coordinate mapping works properly.
-        imageOrientation = Self.orientationFromAsset(AVAsset(url: url))
+        let asset = AVURLAsset(url: url)
+        Task { [weak self] in
+            self?.imageOrientation = await Self.orientationFromAsset(asset)
+        }
 
         loopObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
@@ -170,9 +173,9 @@ final class VideoModeService: ObservableObject {
     /// AVFoundation stores pixel buffers in the sensor's raw (typically landscape) orientation;
     /// preferredTransform describes the rotation needed to display them correctly.
     /// We invert that to tell Vision how the buffer is physically oriented.
-    private static func orientationFromAsset(_ asset: AVAsset) -> CGImagePropertyOrientation {
-        guard let track = asset.tracks(withMediaType: .video).first else { return .up }
-        let t = track.preferredTransform
+    private static func orientationFromAsset(_ asset: AVAsset) async -> CGImagePropertyOrientation {
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first else { return .up }
+        guard let t = try? await track.load(.preferredTransform) else { return .up }
         // atan2(b, a) gives the CCW rotation angle of the transform.
         let degrees = atan2(t.b, t.a) * (180.0 / .pi)
         switch Int(degrees.rounded()) {

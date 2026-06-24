@@ -60,7 +60,7 @@ struct SceneKitModelViewer: UIViewRepresentable {
             
             
             // Download the model file
-            let (data, response) = try await URLSession.shared.data(from: modelURL)
+            let (data, _) = try await URLSession.shared.data(from: modelURL)
             
             
             
@@ -72,10 +72,6 @@ struct SceneKitModelViewer: UIViewRepresentable {
             
             
             
-            // Verify file exists and has content
-            let fileExists = FileManager.default.fileExists(atPath: tempURL.path)
-            let attributes = try? FileManager.default.attributesOfItem(atPath: tempURL.path)
-            let fileSize = attributes?[.size] as? Int64 ?? 0
             
             
             // Create a container node
@@ -96,13 +92,9 @@ struct SceneKitModelViewer: UIViewRepresentable {
                         let childNode = SCNNode(mdlObject: mesh)
                         node.addChildNode(childNode)
                         
-                    } else if let mdlObject = object as? MDLObject {
-                        // Try converting any MDLObject to SCNNode
-                        let childNode = SCNNode(mdlObject: mdlObject)
-                        node.addChildNode(childNode)
-                        
                     } else {
-                        
+                        let childNode = SCNNode(mdlObject: object)
+                        node.addChildNode(childNode)
                     }
                 }
                 
@@ -233,7 +225,7 @@ struct SceneKitModelViewer: UIViewRepresentable {
                             let entryIDs = sceneSource.identifiersOfEntries(withClass: SCNNode.self)
                             
                             for identifier in entryIDs {
-                                if let entry = sceneSource.entryWithIdentifier(identifier, withClass: SCNNode.self) as? SCNNode {
+                                if let entry = sceneSource.entryWithIdentifier(identifier, withClass: SCNNode.self) {
                                     node.addChildNode(entry)
                                 }
                             }

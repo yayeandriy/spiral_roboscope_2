@@ -68,7 +68,7 @@ struct RealityKitModelViewer: UIViewRepresentable {
             
             
             // Download the model
-            let (data, response) = try await URLSession.shared.data(from: modelURL)
+            let (data, _) = try await URLSession.shared.data(from: modelURL)
             
             
             
@@ -81,22 +81,12 @@ struct RealityKitModelViewer: UIViewRepresentable {
                 .appendingPathExtension(fileExtension)
             try data.write(to: tempURL)
             
-            // Verify file was written
-            let fileSize = try FileManager.default.attributesOfItem(atPath: tempURL.path)[.size] as? Int64 ?? 0
-            
-            
-            // Check if file is actually USDZ by reading magic bytes
-            let fileHandle = try FileHandle(forReadingFrom: tempURL)
-            let headerData = fileHandle.readData(ofLength: 4)
-            fileHandle.closeFile()
-            
-            let magic = headerData.map { String(format: "%02x", $0) }.joined()
             
             // Try loading with RealityKit first
             
             
             do {
-                let entity = try await Entity.load(contentsOf: tempURL)
+                let entity = try await Entity(contentsOf: tempURL)
                 
                 // Wrap in ModelEntity if needed
                 let modelEntity: ModelEntity
@@ -133,10 +123,7 @@ struct RealityKitModelViewer: UIViewRepresentable {
                 
                 // Fall back to SceneKit which has better USDZ support
                 do {
-                    let scene = try SCNScene(url: tempURL, options: nil)
-                    
-                    // Create a wrapper to convert SCNScene to RealityKit
-                    // Since we can't easily convert, show an error
+                    _ = try SCNScene(url: tempURL, options: nil)
                     await MainActor.run {}
                     
                     try? FileManager.default.removeItem(at: tempURL)

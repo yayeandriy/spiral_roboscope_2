@@ -22,6 +22,11 @@ struct RecordView: View {
     @AppStorage("selectedSpaceTabId") private var selectedSpaceId: String = ""
     private let videoBasePath = "class-balance/roboscope"
 
+    private var screenWidth: CGFloat {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.bounds.width
+            ?? 390
+    }
+
     var body: some View {
         ZStack {
             // Full-screen camera background (ignores all safe areas)
@@ -30,7 +35,7 @@ struct RecordView: View {
                     .ignoresSafeArea(.all)
                     .frame(
                         maxHeight: viewModel.settings.proportion.isSquare
-                            ? UIScreen.main.bounds.width
+                            ? screenWidth
                             : .infinity
                     )
                     .clipped()

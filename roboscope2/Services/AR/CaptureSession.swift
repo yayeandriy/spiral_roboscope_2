@@ -353,7 +353,7 @@ extension CaptureSession {
             // Export takes 0-80% of total progress
             progress(exportProgress * 0.8, status)
         }, completion: { [weak self] localURL in
-            guard let self = self, let localURL = localURL else {
+            guard self != nil, let localURL = localURL else {
                 completion(nil, nil)
                 return
             }

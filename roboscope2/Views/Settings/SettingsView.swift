@@ -76,19 +76,6 @@ struct SettingsView: View {
                     Text("Y-delta check rejects lines whose world-Y differs from the locked dot by more than the configured threshold. Segment tolerance controls how closely the measured dot↔line distance must match a laser guide segment.")
                 }
 
-                // Video Mode Section
-                Section {
-                    Toggle("Video Mode", isOn: $settings.videoModeEnabled)
-
-                    if settings.videoModeEnabled {
-                        videoModeRow
-                    }
-                } header: {
-                    Text("Video Mode")
-                } footer: {
-                    Text("Run laser detection on recorded video footage instead of the live AR camera. Upload a video, then open a LaserGuide session to analyse it.")
-                }
-
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showVideoModePicker) {

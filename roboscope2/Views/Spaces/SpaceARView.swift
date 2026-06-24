@@ -56,7 +56,7 @@ struct SpaceARView: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(!hasAvailable3DModel && currentMode == .scan)
-                    .onChange(of: currentMode) { newMode in
+                    .onChange(of: currentMode) { _, newMode in
                         if newMode == .view3D {
                             show3DViewer = true
                         }
@@ -94,9 +94,8 @@ struct SpaceARView: View {
         .sheet(isPresented: $show3DViewer) {
             Space3DViewer(space: space)
         }
-        .onChange(of: show3DViewer) { newValue in
+        .onChange(of: show3DViewer) { _, newValue in
             if !newValue {
-                // When 3D viewer is dismissed, switch back to scan mode
                 currentMode = .scan
             }
         }
@@ -215,7 +214,7 @@ struct SpaceARView: View {
         }
         
         do {
-            let entity = try await Entity.load(contentsOf: url)
+            let entity = try await Entity(contentsOf: url)
             await MainActor.run {
                 if let arView {
                     let anchor = AnchorEntity(world: matrix_identity_float4x4)
@@ -286,7 +285,7 @@ struct SpaceARView: View {
     private func updateSpaceWithScanUrl(_ scanUrl: String) async {
         do {
             let update = UpdateSpace(scanUrl: scanUrl)
-            let updatedSpace = try await spaceService.updateSpace(id: space.id, update: update)
+            _ = try await spaceService.updateSpace(id: space.id, update: update)
             
             await MainActor.run {
                 hasScanData = false
