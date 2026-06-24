@@ -190,6 +190,14 @@ struct SessionsView: View {
                             ProgressView()
                                 .padding(.top, 4)
                         }
+                        VStack {
+                            Spacer()
+                            Text("by Spiral")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .opacity(0.5)
+                                .padding(.bottom, 32)
+                        }
                     }
                     .transition(.opacity)
                 }
@@ -219,6 +227,14 @@ struct SessionsView: View {
                         .fontWeight(.bold)
                     ProgressView()
                         .padding(.top, 4)
+                }
+                VStack {
+                    Spacer()
+                    Text("by Spiral")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                        .opacity(0.5)
+                        .padding(.bottom, 32)
                 }
             }
             .transition(.opacity)
