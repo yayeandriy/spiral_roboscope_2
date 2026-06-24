@@ -130,6 +130,10 @@ extension LaserGuideARSessionView {
         }
         let world = hit.worldTransform.columns.3
         let pos = SIMD3<Float>(world.x, world.y, world.z)
+        guard !pos.x.isNaN, !pos.y.isNaN, !pos.z.isNaN else {
+            logAlways("RAYCAST NaN  class=\(detection.label) kind=\(hitKind) — discarding hit")
+            return nil
+        }
         let dist = camPos.map { simd_distance(pos, $0) }
         let distStr = dist.map { String(format:"%.3f", $0) } ?? "?"
         let arBounds = arView.bounds.size
@@ -356,6 +360,10 @@ extension LaserGuideARSessionView {
     /// The cone is created on first call and then repositioned on every subsequent call.
     func placeDotCone(at position: SIMD3<Float>) {
         guard let arView else { return }
+        guard !position.x.isNaN, !position.y.isNaN, !position.z.isNaN else {
+            print("[DotCone] skipping NaN position")
+            return
+        }
 
         if let existing = dotConeAnchor {
             // Reuse the existing anchor — just move it.
