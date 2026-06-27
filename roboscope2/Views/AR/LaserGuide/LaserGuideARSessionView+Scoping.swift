@@ -258,7 +258,11 @@ extension LaserGuideARSessionView {
         //       • pendingAnchor                 — snapped but not yet committed
         //       • current snap (dotWorld)       — the point being placed right now
         // -----------------------------------------------------------------------
-        let minBaselineMeters: Double = 2.0   // require at least 2 m between levels
+        // Minimum local_z gap between the two reference anchors to trust the baseline.
+        // Must exceed the largest segment_length (dot→line distance) by a meaningful margin
+        // so the anchor baseline actually outperforms dot→line.  0.5 m is ~3× the
+        // typical segment_length (0.15–0.45 m) and covers the Room test (1.65 m gap).
+        let minBaselineMeters: Double = 0.5
 
         struct AnchorPoint { let localZ: Double; let xz: SIMD2<Float> }
         var points: [AnchorPoint] = []
