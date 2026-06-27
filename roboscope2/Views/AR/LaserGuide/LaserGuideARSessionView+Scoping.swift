@@ -236,12 +236,72 @@ extension LaserGuideARSessionView {
     }
 
     func snapFrameOriginToAlignDot(dotWorld: SIMD3<Float>, lineWorld: SIMD3<Float>, segment: LaserGuideGridSegment) {
-        // Compute direction from dot → line
+        // --- Step 1: compute direction from dot → line (short baseline, always available) ---
         let R = lineWorld - dotWorld
         let R_xz = SIMD2<Float>(R.x, R.z)
-        let rawLen = simd_length(R)
-        let r = normalize(R_xz)
+        let rawLen = simd_distance(dotWorld, lineWorld)
+        var r = normalize(R_xz)
         print("[OriginTrace] ★ DIRECTION  dot→line=(\(String(format:"%.3f",R.x)),\(String(format:"%.3f",R.z))) rawLen=\(String(format:"%.3f",rawLen))m  dir=(\(String(format:"%.3f",r.x)),\(String(format:"%.3f",r.y)))")
+
+        // --- Step 2: try to improve direction using the long baseline between
+        //     the most-distant anchors known for this run.
+        //
+        //     Each anchor's world_position is where the laser DOT was detected,
+        //     i.e. the same coordinate that dotWorld carries for the current snap.
+        //     Sorting by local_z and taking near/far gives a baseline proportional
+        //     to the physical distance between two table levels — often 16 m+,
+        //     versus the ~0.5 m dot→line baseline.  Angular errors shrink by the
+        //     same ratio, eliminating the position drift seen at far segments.
+        //
+        //     Sources of known positions (union for this run):
+        //       • AnchorService.shared.anchors  — already persisted to the API
+        //       • pendingAnchor                 — snapped but not yet committed
+        //       • current snap (dotWorld)       — the point being placed right now
+        // -----------------------------------------------------------------------
+        let minBaselineMeters: Double = 2.0   // require at least 2 m between levels
+
+        struct AnchorPoint { let localZ: Double; let xz: SIMD2<Float> }
+        var points: [AnchorPoint] = []
+
+        // Persisted anchors for this run
+        for a in AnchorService.shared.anchors where a.run == currentRun {
+            points.append(AnchorPoint(localZ: a.localZ,
+                                      xz: SIMD2<Float>(Float(a.worldPosition[0]),
+                                                       Float(a.worldPosition[2]))))
+        }
+        // Pending anchor from the previous snap (not yet sent to the API)
+        if let p = pendingAnchor, p.run == currentRun {
+            points.append(AnchorPoint(localZ: p.localZ,
+                                      xz: SIMD2<Float>(p.position.x, p.position.z)))
+        }
+        // Current snap
+        points.append(AnchorPoint(localZ: segment.z,
+                                  xz: SIMD2<Float>(dotWorld.x, dotWorld.z)))
+
+        // Deduplicate by local_z (keep first occurrence — they should be the same point)
+        var seen = Set<Double>()
+        let unique = points.filter { seen.insert($0.localZ).inserted }
+
+        if unique.count >= 2 {
+            let sorted = unique.sorted { $0.localZ < $1.localZ }
+            let near   = sorted.first!
+            let far    = sorted.last!
+            let baseline = far.localZ - near.localZ
+
+            if baseline >= minBaselineMeters {
+                let d = far.xz - near.xz
+                let dLen = simd_length(d)
+                if dLen > 0.05 {   // sanity: at least 5 cm world-space separation
+                    let r_anchors = d / dLen
+                    print("[OriginTrace] ★ DIRECTION  overriding with anchor baseline: nearZ=\(String(format:"%.2f",near.localZ))m farZ=\(String(format:"%.2f",far.localZ))m baseline=\(String(format:"%.2f",baseline))m worldSep=\(String(format:"%.3f",dLen))m  dir=(\(String(format:"%.3f",r_anchors.x)),\(String(format:"%.3f",r_anchors.y)))")
+                    r = r_anchors
+                } else {
+                    print("[OriginTrace] ★ DIRECTION  anchor baseline too short in world space (\(String(format:"%.3f",dLen))m) — keeping dot→line")
+                }
+            } else {
+                print("[OriginTrace] ★ DIRECTION  anchor baseline \(String(format:"%.2f",baseline))m < \(minBaselineMeters)m minimum — keeping dot→line")
+            }
+        }
 
         let S = SIMD2<Float>(Float(segment.x), Float(segment.z))
         let segLen = simd_length(S)
