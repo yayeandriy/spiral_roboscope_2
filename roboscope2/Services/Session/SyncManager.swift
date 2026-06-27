@@ -248,6 +248,7 @@ final class SyncManager: ObservableObject, @unchecked Sendable {
             if let data = operation.data as? CreateAnchor {
                 _ = try await anchorService.placeAnchor(
                     sessionId: data.sessionId,
+                    run: data.run,
                     localZ: data.localZ,
                     position: SIMD3<Float>(
                         Float(data.worldPosition[0]),
