@@ -11,77 +11,120 @@ struct MarkerBadgeView: View {
     let info: SpatialMarkerService.MarkerInfo
     var details: MarkerDetails? = nil
     var onDelete: (() -> Void)? = nil
+
+    @ObservedObject private var settings = AppSettings.shared
     @State private var showNodes: Bool = false
-    
+
+    private var collapsed: Bool { settings.markerCardCollapsed }
+    private var idText: String { info.backendId?.uuidString ?? info.localId.uuidString }
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 20) {
-                // Raw center row
-                metricGroup(title: "Raw center") {
-                    axisRow(axis1: ("x", info.centerX, Color.red), axis2: ("z", info.centerZ, Color.blue))
-                }
-                // Calibrated center row (only show if different from raw)
-                if let c = info.calibratedCenter, calibratedDiffersFromRaw(calibrated: c, rawX: info.centerX, rawZ: info.centerZ) {
-                    metricGroup(title: "Calibrated center") {
-                        axisRow(axis1: ("x", c.x, Color.red), axis2: ("z", c.z, Color.blue))
+            VStack(alignment: .leading, spacing: 0) {
+                // ── Card header (always visible) ─────────────────────────────
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        settings.markerCardCollapsed.toggle()
                     }
-                }
-                // Collapsible: Raw nodes
-                VStack(alignment: .leading, spacing: 8) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { showNodes.toggle() }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: showNodes ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.85))
-                            Text("Nodes")
-                                .font(.system(size: 19, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.95))
-                            Spacer()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .frame(minHeight: 44)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: collapsed ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.75))
+                            .frame(width: 18)
 
-                    if showNodes {
+                        Text("Marker")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.9))
+
+                        Text(shortId(idText))
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.5))
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                // ── Expandable body ──────────────────────────────────────────
+                if !collapsed {
+                    Divider()
+                        .overlay(Color.white.opacity(0.12))
+                        .padding(.horizontal, 16)
+
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Raw center
+                        metricGroup(title: "Raw center") {
+                            axisRow(axis1: ("x", info.centerX, Color.red), axis2: ("z", info.centerZ, Color.blue))
+                        }
+                        // Calibrated center (only when different from raw)
+                        if let c = info.calibratedCenter,
+                           calibratedDiffersFromRaw(calibrated: c, rawX: info.centerX, rawZ: info.centerZ) {
+                            metricGroup(title: "Calibrated center") {
+                                axisRow(axis1: ("x", c.x, Color.red), axis2: ("z", c.z, Color.blue))
+                            }
+                        }
+                        // Collapsible nodes list
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(Array(info.nodes.enumerated()), id: \.0) { idx, p in
-                                HStack(spacing: 10) {
-                                    Text("p\(idx+1)")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(.white.opacity(0.8))
-                                        .frame(width: 22, alignment: .leading)
-                                    coordChip(label: "x", value: p.x, tint: .red)
-                                    coordChip(label: "y", value: p.y, tint: .green)
-                                    coordChip(label: "z", value: p.z, tint: .blue)
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) { showNodes.toggle() }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: showNodes ? "chevron.down" : "chevron.right")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.85))
+                                    Text("Nodes")
+                                        .font(.system(size: 19, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.95))
                                     Spacer()
                                 }
                             }
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                }
-                // Size row
-                metricGroup(title: "Size") {
-                    let width = info.calibratedWidth ?? info.width
-                    let length = info.calibratedLength ?? info.length
-                    axisRow(axis1: ("W", width, Color.red), axis2: ("L", length, Color.blue))
-                }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .frame(minHeight: 44)
 
-                // Subtle id line
-                HStack {
-                    let idText: String = info.backendId?.uuidString ?? info.localId.uuidString
-                    Text("ID: \(shortId(idText))")
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundColor(.white.opacity(0.55))
-                    Spacer()
+                            if showNodes {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(Array(info.nodes.enumerated()), id: \.0) { idx, p in
+                                        HStack(spacing: 10) {
+                                            Text("p\(idx+1)")
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundColor(.white.opacity(0.8))
+                                                .frame(width: 22, alignment: .leading)
+                                            coordChip(label: "x", value: p.x, tint: .red)
+                                            coordChip(label: "y", value: p.y, tint: .green)
+                                            coordChip(label: "z", value: p.z, tint: .blue)
+                                            Spacer()
+                                        }
+                                    }
+                                }
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+                        }
+                        // Size
+                        metricGroup(title: "Size") {
+                            let width = info.calibratedWidth ?? info.width
+                            let length = info.calibratedLength ?? info.length
+                            axisRow(axis1: ("W", width, Color.red), axis2: ("L", length, Color.blue))
+                        }
+                        // ID footer
+                        HStack {
+                            Text("ID: \(shortId(idText))")
+                                .font(.system(size: 11, weight: .regular))
+                                .foregroundColor(.white.opacity(0.55))
+                            Spacer()
+                        }
+                        .padding(.top, 2)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 16)
+                    .padding(.bottom, 28)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                .padding(.top, 2)
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 28)
             .background(
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .fill(.ultraThinMaterial)
@@ -91,6 +134,7 @@ struct MarkerBadgeView: View {
                     )
             )
             .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 8)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
 
             if let onDelete {
                 Button(action: onDelete) {
@@ -99,9 +143,7 @@ struct MarkerBadgeView: View {
                         .foregroundColor(.white)
                         .padding(10)
                         .background(Circle().fill(Color.red.opacity(0.92)))
-                        .overlay(
-                            Circle().stroke(Color.white.opacity(0.6), lineWidth: 1)
-                        )
+                        .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
                         .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
                 }
                 .offset(x: 10, y: -10)

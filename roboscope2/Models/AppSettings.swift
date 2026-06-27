@@ -21,6 +21,7 @@ class AppSettings: ObservableObject {
         static let laserGuideAutoRestartDistanceMeters = "laserGuideAutoRestartDistanceMeters"
         static let laserGuideMinAnchorAutoRestartDistanceMeters = "laserGuideMinAnchorAutoRestartDistanceMeters"
         static let laserGuideAutoScopeStableSeconds = "laserGuideAutoScopeStableSeconds"
+        static let markerCardCollapsed = "markerCardCollapsed"
         static let videoModeEnabled = "videoModeEnabled"
         static let videoModeDistanceScale = "videoModeDistanceScale"
         static let videoModeAccumulatorFrames = "videoModeAccumulatorFrames"
@@ -32,6 +33,14 @@ class AppSettings: ObservableObject {
         static let testMode = "testMode"
     }
     
+    // MARK: - UI State
+
+    /// Whether the marker info card is collapsed. Persisted globally — if the user collapses the
+    /// card it stays collapsed across all markers and sessions until explicitly re-opened.
+    @Published var markerCardCollapsed: Bool {
+        didSet { defaults.set(markerCardCollapsed, forKey: Keys.markerCardCollapsed) }
+    }
+
     // MARK: - Laser Guide
 
     /// When the Laser Guide has auto-scoped (snapped origin), automatically return to detection
@@ -144,6 +153,8 @@ class AppSettings: ObservableObject {
 
         let minAnchorRestart = defaults.double(forKey: Keys.laserGuideMinAnchorAutoRestartDistanceMeters)
         self.laserGuideMinAnchorAutoRestartDistanceMeters = minAnchorRestart > 0 ? minAnchorRestart : 2.0
+
+        self.markerCardCollapsed = defaults.object(forKey: Keys.markerCardCollapsed) as? Bool ?? false
 
         let stableSeconds = defaults.double(forKey: Keys.laserGuideAutoScopeStableSeconds)
         self.laserGuideAutoScopeStableSeconds = stableSeconds > 0 ? stableSeconds : 1.0
