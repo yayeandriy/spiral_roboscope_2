@@ -154,7 +154,7 @@ class AppSettings: ObservableObject {
         let minAnchorRestart = defaults.double(forKey: Keys.laserGuideMinAnchorAutoRestartDistanceMeters)
         self.laserGuideMinAnchorAutoRestartDistanceMeters = minAnchorRestart > 0 ? minAnchorRestart : 2.0
 
-        self.markerCardCollapsed = defaults.object(forKey: Keys.markerCardCollapsed) as? Bool ?? false
+        self.markerCardCollapsed = defaults.object(forKey: Keys.markerCardCollapsed) as? Bool ?? true
 
         let stableSeconds = defaults.double(forKey: Keys.laserGuideAutoScopeStableSeconds)
         self.laserGuideAutoScopeStableSeconds = stableSeconds > 0 ? stableSeconds : 1.0
