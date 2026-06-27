@@ -76,6 +76,28 @@ struct SettingsView: View {
                     Text("Y-delta check rejects lines whose world-Y differs from the locked dot by more than the configured threshold. Segment tolerance controls how closely the measured dot↔line distance must match a laser guide segment.")
                 }
 
+                // Anchor auto-restart section
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Min re-snap distance")
+                            Spacer()
+                            Text(String(format: "%.1f m", settings.laserGuideMinAnchorAutoRestartDistanceMeters))
+                                .foregroundColor(.secondary)
+                        }
+                        Slider(
+                            value: $settings.laserGuideMinAnchorAutoRestartDistanceMeters,
+                            in: 0.5...5.0,
+                            step: 0.5
+                        )
+                        .tint(.orange)
+                    }
+                } header: {
+                    Text("Anchor")
+                } footer: {
+                    Text("Minimum distance (m) the camera must travel from the last anchor dot before a new snap is allowed. Prevents closely-spaced guide segments from triggering a premature re-snap while the phone is still drifting near the previous anchor, which could reverse the Z+ direction. Default: 2 m.")
+                }
+
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showVideoModePicker) {

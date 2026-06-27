@@ -46,6 +46,7 @@ extension LaserGuideARSessionView {
 
             // Dynamic restart threshold: half of the Z spacing to the nearest neighbor segment.
             autoScopeRestartThresholdZMeters = computeAutoRestartThresholdZ(for: snappedSegment)
+            print("[LaserGuideSnap] autoRestartThreshold set to \(String(format: "%.2f", autoScopeRestartThresholdZMeters ?? 0))m (floor=\(String(format: "%.1f", settings.laserGuideMinAnchorAutoRestartDistanceMeters))m)")
 
             hasAutoScoped = true
             lockedDotWorld = nil  // release the two-phase lock

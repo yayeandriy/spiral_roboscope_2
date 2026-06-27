@@ -19,6 +19,7 @@ class AppSettings: ObservableObject {
     private enum Keys {
         static let apiEnvironment = "apiEnvironment"
         static let laserGuideAutoRestartDistanceMeters = "laserGuideAutoRestartDistanceMeters"
+        static let laserGuideMinAnchorAutoRestartDistanceMeters = "laserGuideMinAnchorAutoRestartDistanceMeters"
         static let laserGuideAutoScopeStableSeconds = "laserGuideAutoScopeStableSeconds"
         static let videoModeEnabled = "videoModeEnabled"
         static let videoModeDistanceScale = "videoModeDistanceScale"
@@ -38,6 +39,18 @@ class AppSettings: ObservableObject {
     @Published var laserGuideAutoRestartDistanceMeters: Double {
         didSet {
             defaults.set(laserGuideAutoRestartDistanceMeters, forKey: Keys.laserGuideAutoRestartDistanceMeters)
+        }
+    }
+
+    /// Minimum distance (meters) the camera must travel from the last anchor dot before the app
+    /// returns to detection mode and allows a new anchor snap. This floor prevents closely-spaced
+    /// guide segments from triggering a premature re-snap while the phone is still moving near
+    /// the previous anchor — which can accidentally reverse the anchor-baseline direction.
+    /// Applied as: threshold = max(minAnchorAutoRestart, 0.75 × nearestNeighborGap).
+    @Published var laserGuideMinAnchorAutoRestartDistanceMeters: Double {
+        didSet {
+            defaults.set(laserGuideMinAnchorAutoRestartDistanceMeters,
+                         forKey: Keys.laserGuideMinAnchorAutoRestartDistanceMeters)
         }
     }
 
@@ -128,6 +141,9 @@ class AppSettings: ObservableObject {
         // Load saved values or use defaults
         let autoRestart = defaults.double(forKey: Keys.laserGuideAutoRestartDistanceMeters)
         self.laserGuideAutoRestartDistanceMeters = autoRestart > 0 ? autoRestart : 4.0
+
+        let minAnchorRestart = defaults.double(forKey: Keys.laserGuideMinAnchorAutoRestartDistanceMeters)
+        self.laserGuideMinAnchorAutoRestartDistanceMeters = minAnchorRestart > 0 ? minAnchorRestart : 2.0
 
         let stableSeconds = defaults.double(forKey: Keys.laserGuideAutoScopeStableSeconds)
         self.laserGuideAutoScopeStableSeconds = stableSeconds > 0 ? stableSeconds : 1.0

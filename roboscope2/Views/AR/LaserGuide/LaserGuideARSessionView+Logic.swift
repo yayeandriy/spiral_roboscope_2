@@ -164,10 +164,15 @@ extension LaserGuideARSessionView {
         pipeline.start()
     }
 
-    func computeAutoRestartThresholdZ(for segment: LaserGuideGridSegment) -> Float? {
-        guard let laserGuide, laserGuide.grid.count >= 2 else { return nil }
+    func computeAutoRestartThresholdZ(for segment: LaserGuideGridSegment) -> Float {
+        let minFloor = Float(settings.laserGuideMinAnchorAutoRestartDistanceMeters)
 
-        // Prefer neighbors with the same X (typical "column" alignment), but fall back to any segment.
+        guard let laserGuide, laserGuide.grid.count >= 2 else {
+            // No guide loaded — just use the user-configured floor.
+            return minFloor
+        }
+
+        // Prefer neighbors with the same X (typical "column" alignment), fall back to any segment.
         let xEpsilon: Double = 1e-4
         let sameX = laserGuide.grid.filter { abs($0.x - segment.x) <= xEpsilon }
         let pool = (sameX.count >= 2) ? sameX : laserGuide.grid
@@ -177,8 +182,12 @@ extension LaserGuideARSessionView {
             .map { abs($0.z - z0) }
             .filter { $0 > 1e-6 }
 
-        guard let minDelta = deltas.min() else { return nil }
-        return 0.75 * Float(minDelta)
+        guard let minDelta = deltas.min() else { return minFloor }
+
+        // 75% of the nearest-neighbor gap, but never below the configured floor.
+        // The floor prevents closely-spaced segments from letting a premature re-snap
+        // happen while the phone is still drifting near the last anchor.
+        return max(minFloor, 0.75 * Float(minDelta))
     }
 
     func candidateSegment(for distanceMeters: Float) -> (key: String, segment: LaserGuideGridSegment, delta: Float)? {
