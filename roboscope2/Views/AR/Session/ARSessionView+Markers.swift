@@ -283,26 +283,13 @@ extension LaserGuideARSessionView {
             // Store frame-origin coordinates in the spatial marker
             markerService.setFrameOriginNodes(localId: spatial.id, frameOriginNodes: frameOriginPoints)
 
-            // Capture and clear the pending anchor — this is the snap that produced the
-            // current origin placement. We commit it now because the user confirmed intent
-            // by placing a marker. Subsequent markers in the same origin don't re-commit.
-            let anchorToFlush = pendingAnchor
+            // Clear the pending anchor reference — it was already persisted to the
+            // API in stopPlacement; no second POST needed here.
             pendingAnchor = nil
 
-            // Save to backend with FrameOrigin coordinates
+            // Save marker to backend with FrameOrigin coordinates
             Task {
                 do {
-                    // Flush anchor first so the marker is always associated with a
-                    // persisted anchor on the server side.
-                    if let anchor = anchorToFlush {
-                        try? await AnchorService.shared.placeAnchor(
-                            sessionId: session.id,
-                            run: anchor.run,
-                            localZ: anchor.localZ,
-                            position: anchor.position
-                        )
-                    }
-
                     let created = try await markerApi.createMarker(
                         CreateMarker(
                             workSessionId: session.id,

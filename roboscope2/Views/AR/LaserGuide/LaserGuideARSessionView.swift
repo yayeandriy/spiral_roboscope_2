@@ -593,12 +593,7 @@ struct LaserGuideARSessionView: View {
             historyAnchorDotsAnchor?.isEnabled = true
             markerService.setMarkersVisible(true)
 
-            // Store snap data locally — do NOT persist to the API yet.
-            // The anchor is committed only when the user places a marker afterwards
-            // (in createAndPersistMarker), so accidental holds that are never
-            // followed by a marker leave no DB record.
             if let dotWorld = autoScopedDotWorld, let segment = autoScopedSegment {
-                pendingAnchor = PendingAnchorData(run: currentRun, localZ: segment.z, position: dotWorld)
                 // Record in the local run history so subsequent snaps can use it for
                 // the direction baseline. Latest snap wins per local_z.
                 runAnchors[segment.z] = dotWorld
@@ -610,6 +605,30 @@ struct LaserGuideARSessionView: View {
                 // the just-placed (current) anchor, which is already shown via
                 // the yellow debug sphere.
                 refreshHistoryAnchorDots(excluding: [segment.z])
+
+                // Persist anchor to API immediately. The anchor is the ground-truth
+                // record of where this z-level was physically observed, independent
+                // of whether the user places a marker afterwards.
+                // pendingAnchor is still stored for createAndPersistMarker so it
+                // can associate the marker with the correct anchor on the server.
+                let snapRun = currentRun
+                let snapLocalZ = segment.z
+                let snapPosition = dotWorld
+                let snapSessionId = session.id
+                pendingAnchor = PendingAnchorData(run: snapRun, localZ: snapLocalZ, position: snapPosition)
+                Task {
+                    do {
+                        let anchor = try await AnchorService.shared.placeAnchor(
+                            sessionId: snapSessionId,
+                            run: snapRun,
+                            localZ: snapLocalZ,
+                            position: snapPosition
+                        )
+                        print("[Anchor] persisted: id=\(anchor.id) localZ=\(snapLocalZ) run=\(snapRun)")
+                    } catch {
+                        print("[Anchor] persist failed: \(error)")
+                    }
+                }
             }
         } else if savedHasAutoScoped {
             // Placement did not complete — restore previous origin and anchor
