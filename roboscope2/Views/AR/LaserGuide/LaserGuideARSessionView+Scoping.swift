@@ -264,51 +264,39 @@ extension LaserGuideARSessionView {
         // typical segment_length (0.15–0.45 m) and covers the Room test (1.65 m gap).
         let minBaselineMeters: Double = 0.5
 
-        // Collect known dot positions for this run:
-        //   A) persisted anchors already in the API cache
-        //   B) pending anchor (snapped but not yet committed)
-        //   C) the current snap's dot position
+        // Collect known dot positions for the current run from the LOCAL in-memory
+        // history (no API/AnchorService dependency). The dictionary is keyed by
+        // local_z so each table row has at most one position.
         struct AnchorPoint { let localZ: Double; let xz: SIMD2<Float>; let source: String }
         var points: [AnchorPoint] = []
 
-        let allCached = AnchorService.shared.anchors
-        let forRun = allCached.filter { $0.run == currentRun }
-        for a in forRun {
+        for (z, pos) in runAnchors {
+            // The current snap will be merged in below — skip the same-z entry here.
+            if z == segment.z { continue }
             points.append(AnchorPoint(
-                localZ: a.localZ,
-                xz: SIMD2<Float>(Float(a.worldPosition[0]), Float(a.worldPosition[2])),
-                source: "api"
+                localZ: z,
+                xz: SIMD2<Float>(pos.x, pos.z),
+                source: "history"
             ))
         }
-        if let p = pendingAnchor, p.run == currentRun {
-            points.append(AnchorPoint(
-                localZ: p.localZ,
-                xz: SIMD2<Float>(p.position.x, p.position.z),
-                source: "pending"
-            ))
-        }
+        // Current snap (always wins for its own local_z because runAnchors hasn't
+        // been updated yet — that happens in stopPlacement after we return).
         points.append(AnchorPoint(
             localZ: segment.z,
             xz: SIMD2<Float>(dotWorld.x, dotWorld.z),
             source: "current"
         ))
 
-        // Log all collected points for this run
-        let pendingDesc = pendingAnchor.map { "run=\($0.run) z=\(String(format:"%.2f",$0.localZ))" } ?? "nil"
-        print("[Snap] run=\(currentRun) apiAnchors=\(forRun.count) pending=\(pendingDesc) points=\(points.count)")
-        for p in points {
+        print("[Snap] run=\(currentRun) historyEntries=\(runAnchors.count) points=\(points.count)")
+        for p in points.sorted(by: { $0.localZ < $1.localZ }) {
             print("[Snap]   [\(p.source)] localZ=\(String(format:"%.4f",p.localZ)) xz=(\(String(format:"%.3f",p.xz.x)),\(String(format:"%.3f",p.xz.y)))")
         }
 
-        // Deduplicate by local_z (keep first occurrence)
-        var seen = Set<Double>()
-        let unique = points.filter { seen.insert($0.localZ).inserted }
-
         var dirMethod = "dot→line"
-        if unique.count >= 2 {
-            let sorted = unique.sorted { $0.localZ < $1.localZ }
-            let A1 = sorted.first!   // smallest localZ
-            let A2 = sorted.last!    // largest localZ
+        if points.count >= 2 {
+            let sorted = points.sorted { $0.localZ < $1.localZ }
+            let A1 = sorted.first!   // smallest local_z
+            let A2 = sorted.last!    // largest local_z
             let baseline = A2.localZ - A1.localZ
 
             if baseline >= minBaselineMeters {
@@ -316,10 +304,10 @@ extension LaserGuideARSessionView {
                 let dLen = simd_length(d)
                 if dLen > 0.05 {
                     let r_anchors = d / dLen
-                    // Angle between the (rejected) dot→line direction and the baseline direction.
-                    // Reported for inspection: line detection should NOT influence frame
-                    // orientation, so a large angle here just means the line happens to point
-                    // away from the baseline — that's fine, the override is doing its job.
+                    // Angle between the (rejected) dot→line direction and the chosen
+                    // baseline direction. Logged for visibility — by design the line
+                    // detection does NOT influence frame orientation any more, so a
+                    // large angle here is fine.
                     let dot = simd_dot(r, r_anchors)
                     let angleDeg = acos(max(-1, min(1, dot))) * (180.0 / Float.pi)
                     print("[Snap] BASELINE  A1[\(A1.source)] z=\(String(format:"%.2f",A1.localZ)) xz=(\(String(format:"%.3f",A1.xz.x)),\(String(format:"%.3f",A1.xz.y)))  →  A2[\(A2.source)] z=\(String(format:"%.2f",A2.localZ)) xz=(\(String(format:"%.3f",A2.xz.x)),\(String(format:"%.3f",A2.xz.y)))  gap=\(String(format:"%.2f",baseline))m worldDist=\(String(format:"%.3f",dLen))m  dir=(\(String(format:"%.3f",r_anchors.x)),\(String(format:"%.3f",r_anchors.y)))  (dot→line was \(String(format:"%.0f",angleDeg))° off, ignored)")
@@ -332,7 +320,7 @@ extension LaserGuideARSessionView {
                 print("[Snap] BASELINE  gap \(String(format:"%.2f",baseline))m < \(minBaselineMeters)m — keeping dot→line")
             }
         } else {
-            print("[Snap] BASELINE  only 1 unique point — no baseline available, using dot→line")
+            print("[Snap] BASELINE  only 1 point in run — using dot→line")
         }
 
         let S = SIMD2<Float>(Float(segment.x), Float(segment.z))

@@ -52,6 +52,12 @@ struct LaserGuideARSessionView: View {
     /// once the user actually places a marker at the snapped level, so accidental
     /// button holds that are never followed by a marker leave no DB record.
     @State var pendingAnchor: PendingAnchorData? = nil
+    /// Local-only in-memory history of every successful snap in the current run,
+    /// keyed by canonical local_z. Latest snap wins per local_z (dictionary overwrites).
+    /// This is the SINGLE source of truth for the anchor-direction algorithm — it does
+    /// NOT depend on AnchorService / API state, so the algorithm is fully predictable
+    /// and independent of network/persistence behavior.
+    @State var runAnchors: [Double: SIMD3<Float>] = [:]
     @State var laserGuide: LaserGuide? = nil
     @State var laserGuideFetchError: String? = nil
     @State var lastLaserGuideSnapTime: TimeInterval = 0
@@ -578,6 +584,13 @@ struct LaserGuideARSessionView: View {
             // followed by a marker leave no DB record.
             if let dotWorld = autoScopedDotWorld, let segment = autoScopedSegment {
                 pendingAnchor = PendingAnchorData(run: currentRun, localZ: segment.z, position: dotWorld)
+                // Record in the local run history so subsequent snaps can use it for
+                // the direction baseline. Latest snap wins per local_z.
+                runAnchors[segment.z] = dotWorld
+                print("[Snap] runAnchors updated → \(runAnchors.count) entries:")
+                for (z, pos) in runAnchors.sorted(by: { $0.key < $1.key }) {
+                    print("[Snap]   z=\(String(format:"%.2f",z))m  xz=(\(String(format:"%.3f",pos.x)),\(String(format:"%.3f",pos.z)))")
+                }
             }
         } else if savedHasAutoScoped {
             // Placement did not complete — restore previous origin and anchor
@@ -600,11 +613,17 @@ struct LaserGuideARSessionView: View {
         do {
             let existing = try await AnchorService.shared.listAnchors(sessionId: session.id)
             let maxRun = existing.map(\.run).max() ?? 0
-            await MainActor.run { currentRun = maxRun + 1 }
+            await MainActor.run {
+                currentRun = maxRun + 1
+                runAnchors.removeAll()  // fresh in-memory history for the new run
+            }
             print("[AnchorRun] Session \(session.id) — starting run \(maxRun + 1)")
         } catch {
             print("[AnchorRun] Failed to fetch existing anchors; defaulting to run 1: \(error)")
-            await MainActor.run { currentRun = 1 }
+            await MainActor.run {
+                currentRun = 1
+                runAnchors.removeAll()
+            }
         }
     }
 }
