@@ -16,6 +16,15 @@ import QuartzCore
 
 // MARK: - LaserGuide AR Session View
 
+/// Anchor data captured at snap time but not yet persisted to the API.
+/// Committed to the API only when the user places the first marker after the snap,
+/// so accidental button holds that are never followed by a marker produce no DB record.
+struct PendingAnchorData {
+    let run: Int
+    let localZ: Double
+    let position: SIMD3<Float>
+}
+
 /// Dedicated LaserGuide AR experience (forked from ARSessionView).
 /// This is intentionally separate so LaserGuide workflow changes don't destabilize the default AR session flow.
 struct LaserGuideARSessionView: View {
@@ -38,6 +47,11 @@ struct LaserGuideARSessionView: View {
     /// existing max run for this session and adding 1. All anchors placed in this
     /// view instance are tagged with this run so they form a coherent world-coordinate set.
     @State var currentRun: Int = 1
+    /// Snap data waiting to be committed to the API. Set by stopPlacement() and
+    /// flushed (then cleared) by createAndPersistMarker(). An anchor is only persisted
+    /// once the user actually places a marker at the snapped level, so accidental
+    /// button holds that are never followed by a marker leave no DB record.
+    @State var pendingAnchor: PendingAnchorData? = nil
     @State var laserGuide: LaserGuide? = nil
     @State var laserGuideFetchError: String? = nil
     @State var lastLaserGuideSnapTime: TimeInterval = 0
@@ -558,18 +572,12 @@ struct LaserGuideARSessionView: View {
             debugLineAnchor?.isEnabled = true
             markerService.setMarkersVisible(true)
 
-            // Persist the anchor — use the segment's canonical z value (exact Double from the
-            // laser guide table) rather than the computed dotLocalZ (Float with precision drift)
-            // so that ON CONFLICT correctly deduplicates re-placements at the same level.
+            // Store snap data locally — do NOT persist to the API yet.
+            // The anchor is committed only when the user places a marker afterwards
+            // (in createAndPersistMarker), so accidental holds that are never
+            // followed by a marker leave no DB record.
             if let dotWorld = autoScopedDotWorld, let segment = autoScopedSegment {
-                Task {
-                    try? await AnchorService.shared.placeAnchor(
-                        sessionId: session.id,
-                        run: currentRun,
-                        localZ: segment.z,
-                        position: dotWorld
-                    )
-                }
+                pendingAnchor = PendingAnchorData(run: currentRun, localZ: segment.z, position: dotWorld)
             }
         } else if savedHasAutoScoped {
             // Placement did not complete — restore previous origin and anchor

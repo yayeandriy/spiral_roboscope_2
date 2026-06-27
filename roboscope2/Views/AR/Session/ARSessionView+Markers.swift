@@ -262,7 +262,7 @@ extension LaserGuideARSessionView {
         markerService.placeMarker(targetCorners: corners)
     }
 
-    // Persisted create: place marker in AR and save to backend
+    // Persisted create: place marker in AR, flush any pending anchor, then save both to backend.
     func createAndPersistMarker() {
         guard let arView = arView else { return }
         let screenSize = arView.bounds.size
@@ -283,9 +283,26 @@ extension LaserGuideARSessionView {
             // Store frame-origin coordinates in the spatial marker
             markerService.setFrameOriginNodes(localId: spatial.id, frameOriginNodes: frameOriginPoints)
 
+            // Capture and clear the pending anchor — this is the snap that produced the
+            // current origin placement. We commit it now because the user confirmed intent
+            // by placing a marker. Subsequent markers in the same origin don't re-commit.
+            let anchorToFlush = pendingAnchor
+            pendingAnchor = nil
+
             // Save to backend with FrameOrigin coordinates
             Task {
                 do {
+                    // Flush anchor first so the marker is always associated with a
+                    // persisted anchor on the server side.
+                    if let anchor = anchorToFlush {
+                        try? await AnchorService.shared.placeAnchor(
+                            sessionId: session.id,
+                            run: anchor.run,
+                            localZ: anchor.localZ,
+                            position: anchor.position
+                        )
+                    }
+
                     let created = try await markerApi.createMarker(
                         CreateMarker(
                             workSessionId: session.id,
@@ -295,7 +312,6 @@ extension LaserGuideARSessionView {
                     )
                     markerService.linkSpatialMarker(localId: spatial.id, backendId: created.id)
 
-                    // Immediately refresh marker details for the newly created marker
                     Task {
                         await markerService.refreshMarkerDetails(backendId: created.id)
                     }
