@@ -264,27 +264,37 @@ extension LaserGuideARSessionView {
         // typical segment_length (0.15–0.45 m) and covers the Room test (1.65 m gap).
         let minBaselineMeters: Double = 0.5
 
-        struct AnchorPoint { let localZ: Double; let xz: SIMD2<Float> }
+        struct AnchorPoint { let localZ: Double; let xz: SIMD2<Float>; let source: String }
         var points: [AnchorPoint] = []
 
         // Persisted anchors for this run
-        for a in AnchorService.shared.anchors where a.run == currentRun {
-            points.append(AnchorPoint(localZ: a.localZ,
-                                      xz: SIMD2<Float>(Float(a.worldPosition[0]),
-                                                       Float(a.worldPosition[2]))))
+        let allCached = AnchorService.shared.anchors
+        let forRun = allCached.filter { $0.run == currentRun }
+        print("[BaselineDBG] currentRun=\(currentRun)  cachedTotal=\(allCached.count)  forRun=\(forRun.count)")
+        for a in forRun {
+            let xz = SIMD2<Float>(Float(a.worldPosition[0]), Float(a.worldPosition[2]))
+            print("[BaselineDBG]   PERSISTED  localZ=\(String(format:"%.4f",a.localZ))  worldPos=[\(String(format:"%.3f",a.worldPosition[0])),\(String(format:"%.3f",a.worldPosition[1])),\(String(format:"%.3f",a.worldPosition[2]))]  xz=(\(String(format:"%.3f",xz.x)),\(String(format:"%.3f",xz.y)))")
+            points.append(AnchorPoint(localZ: a.localZ, xz: xz, source: "persisted"))
         }
         // Pending anchor from the previous snap (not yet sent to the API)
-        if let p = pendingAnchor, p.run == currentRun {
-            points.append(AnchorPoint(localZ: p.localZ,
-                                      xz: SIMD2<Float>(p.position.x, p.position.z)))
+        if let p = pendingAnchor {
+            let xz = SIMD2<Float>(p.position.x, p.position.z)
+            print("[BaselineDBG]   PENDING  run=\(p.run)  localZ=\(String(format:"%.4f",p.localZ))  pos=(\(String(format:"%.3f",p.position.x)),\(String(format:"%.3f",p.position.y)),\(String(format:"%.3f",p.position.z)))  xz=(\(String(format:"%.3f",xz.x)),\(String(format:"%.3f",xz.y)))  runMatch=\(p.run == currentRun)")
+            if p.run == currentRun {
+                points.append(AnchorPoint(localZ: p.localZ, xz: xz, source: "pending"))
+            }
+        } else {
+            print("[BaselineDBG]   PENDING  nil")
         }
         // Current snap
-        points.append(AnchorPoint(localZ: segment.z,
-                                  xz: SIMD2<Float>(dotWorld.x, dotWorld.z)))
+        let currentXZ = SIMD2<Float>(dotWorld.x, dotWorld.z)
+        print("[BaselineDBG]   CURRENT  localZ=\(String(format:"%.4f",segment.z))  dotWorld=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z)))  xz=(\(String(format:"%.3f",currentXZ.x)),\(String(format:"%.3f",currentXZ.y)))")
+        points.append(AnchorPoint(localZ: segment.z, xz: currentXZ, source: "current"))
 
         // Deduplicate by local_z (keep first occurrence — they should be the same point)
         var seen = Set<Double>()
         let unique = points.filter { seen.insert($0.localZ).inserted }
+        print("[BaselineDBG] points=\(points.count)  unique=\(unique.count)")
 
         if unique.count >= 2 {
             let sorted = unique.sorted { $0.localZ < $1.localZ }
@@ -292,9 +302,12 @@ extension LaserGuideARSessionView {
             let far    = sorted.last!
             let baseline = far.localZ - near.localZ
 
+            print("[BaselineDBG] near=[\(near.source)] localZ=\(String(format:"%.4f",near.localZ)) xz=(\(String(format:"%.3f",near.xz.x)),\(String(format:"%.3f",near.xz.y)))  far=[\(far.source)] localZ=\(String(format:"%.4f",far.localZ)) xz=(\(String(format:"%.3f",far.xz.x)),\(String(format:"%.3f",far.xz.y)))  baseline=\(String(format:"%.3f",baseline))m")
+
             if baseline >= minBaselineMeters {
                 let d = far.xz - near.xz
                 let dLen = simd_length(d)
+                print("[BaselineDBG] d=(\(String(format:"%.3f",d.x)),\(String(format:"%.3f",d.y)))  dLen=\(String(format:"%.3f",dLen))m")
                 if dLen > 0.05 {   // sanity: at least 5 cm world-space separation
                     let r_anchors = d / dLen
                     print("[OriginTrace] ★ DIRECTION  overriding with anchor baseline: nearZ=\(String(format:"%.2f",near.localZ))m farZ=\(String(format:"%.2f",far.localZ))m baseline=\(String(format:"%.2f",baseline))m worldSep=\(String(format:"%.3f",dLen))m  dir=(\(String(format:"%.3f",r_anchors.x)),\(String(format:"%.3f",r_anchors.y)))")
@@ -305,6 +318,8 @@ extension LaserGuideARSessionView {
             } else {
                 print("[OriginTrace] ★ DIRECTION  anchor baseline \(String(format:"%.2f",baseline))m < \(minBaselineMeters)m minimum — keeping dot→line")
             }
+        } else {
+            print("[BaselineDBG] only \(unique.count) unique point(s) — cannot form baseline")
         }
 
         let S = SIMD2<Float>(Float(segment.x), Float(segment.z))
