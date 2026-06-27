@@ -558,13 +558,15 @@ struct LaserGuideARSessionView: View {
             debugLineAnchor?.isEnabled = true
             markerService.setMarkersVisible(true)
 
-            // Persist the anchor to the API (upsert — safe to call on every placement).
-            if let dotWorld = autoScopedDotWorld, let localZ = autoScopedDotLocalZ {
+            // Persist the anchor — use the segment's canonical z value (exact Double from the
+            // laser guide table) rather than the computed dotLocalZ (Float with precision drift)
+            // so that ON CONFLICT correctly deduplicates re-placements at the same level.
+            if let dotWorld = autoScopedDotWorld, let segment = autoScopedSegment {
                 Task {
                     try? await AnchorService.shared.placeAnchor(
                         sessionId: session.id,
                         run: currentRun,
-                        localZ: Double(localZ),
+                        localZ: segment.z,
                         position: dotWorld
                     )
                 }
