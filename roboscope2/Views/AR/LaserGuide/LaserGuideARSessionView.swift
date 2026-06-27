@@ -34,6 +34,10 @@ struct LaserGuideARSessionView: View {
     /// Reusable detection pipeline — routes raw pixel-buffers to LaserMLDetectionService.
     /// Plug this into Video Mode by feeding CVPixelBuffers from AVPlayerItemVideoOutput.
     @StateObject var pipeline: DetectionPipeline
+    /// Current AR session run index (1-based). Determined on appear by fetching the
+    /// existing max run for this session and adding 1. All anchors placed in this
+    /// view instance are tagged with this run so they form a coherent world-coordinate set.
+    @State var currentRun: Int = 1
     @State var laserGuide: LaserGuide? = nil
     @State var laserGuideFetchError: String? = nil
     @State var lastLaserGuideSnapTime: TimeInterval = 0
@@ -553,6 +557,18 @@ struct LaserGuideARSessionView: View {
             debugDotAnchor?.isEnabled = true
             debugLineAnchor?.isEnabled = true
             markerService.setMarkersVisible(true)
+
+            // Persist the anchor to the API (upsert — safe to call on every placement).
+            if let dotWorld = autoScopedDotWorld, let localZ = autoScopedDotLocalZ {
+                Task {
+                    try? await AnchorService.shared.placeAnchor(
+                        sessionId: session.id,
+                        run: currentRun,
+                        localZ: Double(localZ),
+                        position: dotWorld
+                    )
+                }
+            }
         } else if savedHasAutoScoped {
             // Placement did not complete — restore previous origin and anchor
             frameOriginTransform = savedFrameOriginTransform
@@ -564,6 +580,21 @@ struct LaserGuideARSessionView: View {
         } else {
             // No previous origin and placement didn't succeed — stay idle
             // Nothing to restore; user can hold again to retry
+        }
+    }
+
+    /// Determines the run index for this AR session launch.
+    /// Fetches existing anchors for the session; if any exist, uses max(run) + 1,
+    /// otherwise starts at run 1.
+    func initCurrentRun() async {
+        do {
+            let existing = try await AnchorService.shared.listAnchors(sessionId: session.id)
+            let maxRun = existing.map(\.run).max() ?? 0
+            await MainActor.run { currentRun = maxRun + 1 }
+            print("[AnchorRun] Session \(session.id) — starting run \(maxRun + 1)")
+        } catch {
+            print("[AnchorRun] Failed to fetch existing anchors; defaulting to run 1: \(error)")
+            await MainActor.run { currentRun = 1 }
         }
     }
 }

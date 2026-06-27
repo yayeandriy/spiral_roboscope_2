@@ -384,3 +384,55 @@ struct EditSessionView: View {
         )
     ) { _ in }
 }
+
+// MARK: - Space Picker View
+
+struct SpacePickerView: View {
+    @Binding var selectedSpace: Space?
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var spaceService = SpaceService.shared
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(spaceService.spaces) { space in
+                    Button {
+                        selectedSpace = space
+                        dismiss()
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(space.name)
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                Text(space.key)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                if let description = space.description, !description.isEmpty {
+                                    Text(description)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            Spacer()
+                            if selectedSpace?.id == space.id {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(.blue)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationTitle("Select Space")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}

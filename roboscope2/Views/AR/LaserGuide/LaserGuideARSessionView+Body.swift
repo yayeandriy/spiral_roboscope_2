@@ -304,6 +304,7 @@ extension LaserGuideARSessionView {
             }
             Task { await loadModelForSession() }
             Task { await fetchLaserGuideIfNeeded() }
+            Task { await initCurrentRun() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 placeFrameOriginGizmo(at: frameOriginTransform)
                 startAutoDropFrameOrigin()

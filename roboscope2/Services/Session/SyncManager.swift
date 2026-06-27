@@ -24,6 +24,7 @@ final class SyncManager: ObservableObject, @unchecked Sendable {
     private let spaceService = SpaceService.shared
     private let workSessionService = WorkSessionService.shared
     private let markerService = MarkerService.shared
+    private let anchorService = AnchorService.shared
     
     // MARK: - Configuration
     
@@ -40,6 +41,7 @@ final class SyncManager: ObservableObject, @unchecked Sendable {
     private var pendingSpaceOperations: [PendingOperation] = []
     private var pendingSessionOperations: [PendingOperation] = []
     private var pendingMarkerOperations: [PendingOperation] = []
+    private var pendingAnchorOperations: [PendingOperation] = []
     
     private let operationsQueue = DispatchQueue(label: "com.roboscope.sync.operations", qos: .utility)
     
@@ -95,6 +97,8 @@ final class SyncManager: ObservableObject, @unchecked Sendable {
                 self?.pendingSessionOperations.append(operation)
             case .marker:
                 self?.pendingMarkerOperations.append(operation)
+            case .anchor:
+                self?.pendingAnchorOperations.append(operation)
             }
             
             Task {
@@ -109,6 +113,7 @@ final class SyncManager: ObservableObject, @unchecked Sendable {
             self?.pendingSpaceOperations.removeAll()
             self?.pendingSessionOperations.removeAll()
             self?.pendingMarkerOperations.removeAll()
+            self?.pendingAnchorOperations.removeAll()
             
             Task {
                 await self?.updatePendingChangesCount()
@@ -238,6 +243,36 @@ final class SyncManager: ObservableObject, @unchecked Sendable {
             if let id = operation.resourceId {
                 try await markerService.deleteMarker(id: id)
             }
+
+        case (.anchor, .create):
+            if let data = operation.data as? CreateAnchor {
+                _ = try await anchorService.placeAnchor(
+                    sessionId: data.sessionId,
+                    localZ: data.localZ,
+                    position: SIMD3<Float>(
+                        Float(data.worldPosition[0]),
+                        Float(data.worldPosition[1]),
+                        Float(data.worldPosition[2])
+                    )
+                )
+            }
+
+        case (.anchor, .update):
+            if let data = operation.data as? (UUID, UpdateAnchor) {
+                _ = try await anchorService.updateAnchorPosition(
+                    id: data.0,
+                    position: SIMD3<Float>(
+                        Float(data.1.worldPosition[0]),
+                        Float(data.1.worldPosition[1]),
+                        Float(data.1.worldPosition[2])
+                    )
+                )
+            }
+
+        case (.anchor, .delete):
+            if let id = operation.resourceId {
+                try await anchorService.deleteAnchor(id: id)
+            }
         }
     }
     
@@ -315,7 +350,8 @@ final class SyncManager: ObservableObject, @unchecked Sendable {
                 
                 let allOperations = self.pendingSpaceOperations +
                                   self.pendingSessionOperations +
-                                  self.pendingMarkerOperations
+                                  self.pendingMarkerOperations +
+                                  self.pendingAnchorOperations
                 
                 continuation.resume(returning: allOperations.sorted { $0.timestamp < $1.timestamp })
             }
@@ -332,6 +368,8 @@ final class SyncManager: ObservableObject, @unchecked Sendable {
                     self?.pendingSessionOperations.removeAll { $0.id == operation.id }
                 case .marker:
                     self?.pendingMarkerOperations.removeAll { $0.id == operation.id }
+                case .anchor:
+                    self?.pendingAnchorOperations.removeAll { $0.id == operation.id }
                 }
                 
                 Task {
@@ -364,7 +402,8 @@ final class SyncManager: ObservableObject, @unchecked Sendable {
     private func updatePendingChangesCount() {
         let total = pendingSpaceOperations.count +
                    pendingSessionOperations.count +
-                   pendingMarkerOperations.count
+                   pendingMarkerOperations.count +
+                   pendingAnchorOperations.count
         pendingChanges = total
     }
 }
@@ -386,6 +425,7 @@ struct PendingOperation {
         case space
         case workSession
         case marker
+        case anchor
     }
     
     enum OperationType {

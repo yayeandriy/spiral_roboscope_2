@@ -11,7 +11,6 @@ struct SessionsView: View {
     @StateObject private var workSessionService = WorkSessionService.shared
     @StateObject private var spaceService = SpaceService.shared
     @StateObject private var settings = AppSettings.shared
-    @State private var showingCreateSheet = false
     @State private var selectedSession: WorkSession?
     @State private var showingEditSheet = false
     @State private var showingDeleteAlert = false
@@ -82,14 +81,6 @@ struct SessionsView: View {
                 }
             }
             // Search removed
-            .sheet(isPresented: $showingCreateSheet) {
-                CreateSessionView { newSession in
-                    // Session created, refresh list
-                    Task {
-                        await refreshData()
-                    }
-                }
-            }
             .sheet(item: $selectedSession) { session in
                 EditSessionView(session: session) { updatedSession in
                     // Session updated, refresh list
@@ -573,11 +564,9 @@ struct SessionsView: View {
     // MARK: - Create helpers
 
     private func handleCreateTapped() {
-        if spaceService.spaces.count == 1, let space = spaceService.spaces.first {
-            Task { await quickCreateAndOpen(space: space) }
-        } else {
-            showingCreateSheet = true
-        }
+        guard let spaceId = selectedTabSpaceId,
+              let space = availableSpaces.first(where: { $0.id == spaceId }) else { return }
+        Task { await quickCreateAndOpen(space: space) }
     }
 
     private func quickCreateAndOpen(space: Space) async {
