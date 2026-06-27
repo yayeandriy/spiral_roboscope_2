@@ -241,7 +241,7 @@ extension LaserGuideARSessionView {
         let R_xz = SIMD2<Float>(R.x, R.z)
         let rawLen = simd_distance(dotWorld, lineWorld)
         var r = normalize(R_xz)
-        print("[OriginTrace] ★ DIRECTION  dot→line=(\(String(format:"%.3f",R.x)),\(String(format:"%.3f",R.z))) rawLen=\(String(format:"%.3f",rawLen))m  dir=(\(String(format:"%.3f",r.x)),\(String(format:"%.3f",r.y)))")
+        print("[Snap] dot→line fallback: d=(\(String(format:"%.3f",R.x)),\(String(format:"%.3f",R.z))) len=\(String(format:"%.3f",rawLen))m dir=(\(String(format:"%.3f",r.x)),\(String(format:"%.3f",r.y)))")
 
         // --- Step 2: try to improve direction using the long baseline between
         //     the most-distant anchors known for this run.
@@ -264,69 +264,76 @@ extension LaserGuideARSessionView {
         // typical segment_length (0.15–0.45 m) and covers the Room test (1.65 m gap).
         let minBaselineMeters: Double = 0.5
 
+        // Collect known dot positions for this run:
+        //   A) persisted anchors already in the API cache
+        //   B) pending anchor (snapped but not yet committed)
+        //   C) the current snap's dot position
         struct AnchorPoint { let localZ: Double; let xz: SIMD2<Float>; let source: String }
         var points: [AnchorPoint] = []
 
-        // Persisted anchors for this run
         let allCached = AnchorService.shared.anchors
         let forRun = allCached.filter { $0.run == currentRun }
-        print("[BaselineDBG] currentRun=\(currentRun)  cachedTotal=\(allCached.count)  forRun=\(forRun.count)")
         for a in forRun {
-            let xz = SIMD2<Float>(Float(a.worldPosition[0]), Float(a.worldPosition[2]))
-            print("[BaselineDBG]   PERSISTED  localZ=\(String(format:"%.4f",a.localZ))  worldPos=[\(String(format:"%.3f",a.worldPosition[0])),\(String(format:"%.3f",a.worldPosition[1])),\(String(format:"%.3f",a.worldPosition[2]))]  xz=(\(String(format:"%.3f",xz.x)),\(String(format:"%.3f",xz.y)))")
-            points.append(AnchorPoint(localZ: a.localZ, xz: xz, source: "persisted"))
+            points.append(AnchorPoint(
+                localZ: a.localZ,
+                xz: SIMD2<Float>(Float(a.worldPosition[0]), Float(a.worldPosition[2])),
+                source: "api"
+            ))
         }
-        // Pending anchor from the previous snap (not yet sent to the API)
-        if let p = pendingAnchor {
-            let xz = SIMD2<Float>(p.position.x, p.position.z)
-            print("[BaselineDBG]   PENDING  run=\(p.run)  localZ=\(String(format:"%.4f",p.localZ))  pos=(\(String(format:"%.3f",p.position.x)),\(String(format:"%.3f",p.position.y)),\(String(format:"%.3f",p.position.z)))  xz=(\(String(format:"%.3f",xz.x)),\(String(format:"%.3f",xz.y)))  runMatch=\(p.run == currentRun)")
-            if p.run == currentRun {
-                points.append(AnchorPoint(localZ: p.localZ, xz: xz, source: "pending"))
-            }
-        } else {
-            print("[BaselineDBG]   PENDING  nil")
+        if let p = pendingAnchor, p.run == currentRun {
+            points.append(AnchorPoint(
+                localZ: p.localZ,
+                xz: SIMD2<Float>(p.position.x, p.position.z),
+                source: "pending"
+            ))
         }
-        // Current snap
-        let currentXZ = SIMD2<Float>(dotWorld.x, dotWorld.z)
-        print("[BaselineDBG]   CURRENT  localZ=\(String(format:"%.4f",segment.z))  dotWorld=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z)))  xz=(\(String(format:"%.3f",currentXZ.x)),\(String(format:"%.3f",currentXZ.y)))")
-        points.append(AnchorPoint(localZ: segment.z, xz: currentXZ, source: "current"))
+        points.append(AnchorPoint(
+            localZ: segment.z,
+            xz: SIMD2<Float>(dotWorld.x, dotWorld.z),
+            source: "current"
+        ))
 
-        // Deduplicate by local_z (keep first occurrence — they should be the same point)
+        // Log all collected points for this run
+        let pendingDesc = pendingAnchor.map { "run=\($0.run) z=\(String(format:"%.2f",$0.localZ))" } ?? "nil"
+        print("[Snap] run=\(currentRun) apiAnchors=\(forRun.count) pending=\(pendingDesc) points=\(points.count)")
+        for p in points {
+            print("[Snap]   [\(p.source)] localZ=\(String(format:"%.4f",p.localZ)) xz=(\(String(format:"%.3f",p.xz.x)),\(String(format:"%.3f",p.xz.y)))")
+        }
+
+        // Deduplicate by local_z (keep first occurrence)
         var seen = Set<Double>()
         let unique = points.filter { seen.insert($0.localZ).inserted }
-        print("[BaselineDBG] points=\(points.count)  unique=\(unique.count)")
 
+        var dirMethod = "dot→line"
         if unique.count >= 2 {
             let sorted = unique.sorted { $0.localZ < $1.localZ }
-            let near   = sorted.first!
-            let far    = sorted.last!
-            let baseline = far.localZ - near.localZ
-
-            print("[BaselineDBG] near=[\(near.source)] localZ=\(String(format:"%.4f",near.localZ)) xz=(\(String(format:"%.3f",near.xz.x)),\(String(format:"%.3f",near.xz.y)))  far=[\(far.source)] localZ=\(String(format:"%.4f",far.localZ)) xz=(\(String(format:"%.3f",far.xz.x)),\(String(format:"%.3f",far.xz.y)))  baseline=\(String(format:"%.3f",baseline))m")
+            let A1 = sorted.first!   // smallest localZ
+            let A2 = sorted.last!    // largest localZ
+            let baseline = A2.localZ - A1.localZ
 
             if baseline >= minBaselineMeters {
-                let d = far.xz - near.xz
+                let d = A2.xz - A1.xz       // dir_world = A2 - A1 (XZ projection)
                 let dLen = simd_length(d)
-                print("[BaselineDBG] d=(\(String(format:"%.3f",d.x)),\(String(format:"%.3f",d.y)))  dLen=\(String(format:"%.3f",dLen))m")
-                if dLen > 0.05 {   // sanity: at least 5 cm world-space separation
+                if dLen > 0.05 {
                     let r_anchors = d / dLen
-                    print("[OriginTrace] ★ DIRECTION  overriding with anchor baseline: nearZ=\(String(format:"%.2f",near.localZ))m farZ=\(String(format:"%.2f",far.localZ))m baseline=\(String(format:"%.2f",baseline))m worldSep=\(String(format:"%.3f",dLen))m  dir=(\(String(format:"%.3f",r_anchors.x)),\(String(format:"%.3f",r_anchors.y)))")
+                    print("[Snap] BASELINE  A1[\(A1.source)] z=\(String(format:"%.2f",A1.localZ)) xz=(\(String(format:"%.3f",A1.xz.x)),\(String(format:"%.3f",A1.xz.y)))  →  A2[\(A2.source)] z=\(String(format:"%.2f",A2.localZ)) xz=(\(String(format:"%.3f",A2.xz.x)),\(String(format:"%.3f",A2.xz.y)))  gap=\(String(format:"%.2f",baseline))m worldDist=\(String(format:"%.3f",dLen))m  dir=(\(String(format:"%.3f",r_anchors.x)),\(String(format:"%.3f",r_anchors.y)))")
                     r = r_anchors
+                    dirMethod = "anchor-baseline"
                 } else {
-                    print("[OriginTrace] ★ DIRECTION  anchor baseline too short in world space (\(String(format:"%.3f",dLen))m) — keeping dot→line")
+                    print("[Snap] BASELINE  world dist \(String(format:"%.3f",dLen))m < 0.05m — keeping dot→line")
                 }
             } else {
-                print("[OriginTrace] ★ DIRECTION  anchor baseline \(String(format:"%.2f",baseline))m < \(minBaselineMeters)m minimum — keeping dot→line")
+                print("[Snap] BASELINE  gap \(String(format:"%.2f",baseline))m < \(minBaselineMeters)m — keeping dot→line")
             }
         } else {
-            print("[BaselineDBG] only \(unique.count) unique point(s) — cannot form baseline")
+            print("[Snap] BASELINE  only 1 unique point — no baseline available, using dot→line")
         }
 
         let S = SIMD2<Float>(Float(segment.x), Float(segment.z))
         let segLen = simd_length(S)
         let offset_xz = r * segLen
         let O = SIMD3<Float>(dotWorld.x - offset_xz.x, dotWorld.y, dotWorld.z - offset_xz.y)
-        print("[OriginTrace] ★ ORIGIN  dotWorld=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z)))  dir=(\(String(format:"%.3f",r.x)),\(String(format:"%.3f",r.y)))  segXZ=(\(segment.x),\(segment.z)) len=\(String(format:"%.3f",segLen))  offset=(\(String(format:"%.3f",offset_xz.x)),\(String(format:"%.3f",offset_xz.y)))  origin=(\(String(format:"%.3f",O.x)),\(String(format:"%.3f",O.y)),\(String(format:"%.3f",O.z)))")
+        print("[Snap] RESULT  method=\(dirMethod)  segZ=\(String(format:"%.2f",segment.z))m  dotWorld=(\(String(format:"%.3f",dotWorld.x)),\(String(format:"%.3f",dotWorld.y)),\(String(format:"%.3f",dotWorld.z)))  frameZ+=(\(String(format:"%.3f",r.x)),0,\(String(format:"%.3f",r.y)))  origin=(\(String(format:"%.3f",O.x)),\(String(format:"%.3f",O.y)),\(String(format:"%.3f",O.z)))")
 
         let newZ = SIMD3<Float>(r.x, 0, r.y)
         let newX = SIMD3<Float>(r.y, 0, -r.x)
