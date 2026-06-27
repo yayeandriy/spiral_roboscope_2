@@ -73,6 +73,17 @@ struct LaserGuideARSessionView: View {
     /// Updated every frame a dot is detected; removed when placement ends.
     @State var dotConeAnchor: AnchorEntity? = nil
     @State var debugLineAnchor: AnchorEntity? = nil
+    /// Green debug line drawn from the anchor with the smallest local_z to the
+    /// anchor with the largest local_z (purely from world coordinates) every
+    /// time a 2nd+ anchor is placed. Used to visually verify the anchor
+    /// baseline direction.
+    @State var anchorBaselineLineAnchor: AnchorEntity? = nil
+    /// Persistent blue dots at the world position of every previously placed
+    /// anchor in `runAnchors` (the *current* snap's anchor is excluded since
+    /// it's already shown by the yellow `debugLineAnchor`). Used as a debug
+    /// visual so we can see exactly which world points the green baseline line
+    /// is connecting.
+    @State var historyAnchorDotsAnchor: AnchorEntity? = nil
     @State var showDetectionSettings = false
     @State var detectionHistory: [DetectionFrameRecord] = []
     // Accumulator: ring buffer of last N frames, merged for overlay + measurement.
@@ -544,6 +555,8 @@ struct LaserGuideARSessionView: View {
         frameOriginAnchor?.isEnabled = false
         debugDotAnchor?.isEnabled = false
         debugLineAnchor?.isEnabled = false
+        anchorBaselineLineAnchor?.isEnabled = false
+        historyAnchorDotsAnchor?.isEnabled = false
         removeDotCone()
         markerService.setMarkersVisible(false)
 
@@ -576,6 +589,8 @@ struct LaserGuideARSessionView: View {
             frameOriginAnchor?.isEnabled = true
             debugDotAnchor?.isEnabled = true
             debugLineAnchor?.isEnabled = true
+            anchorBaselineLineAnchor?.isEnabled = true
+            historyAnchorDotsAnchor?.isEnabled = true
             markerService.setMarkersVisible(true)
 
             // Store snap data locally — do NOT persist to the API yet.
@@ -591,6 +606,10 @@ struct LaserGuideARSessionView: View {
                 for (z, pos) in runAnchors.sorted(by: { $0.key < $1.key }) {
                     print("[Snap]   z=\(String(format:"%.2f",z))m  xz=(\(String(format:"%.3f",pos.x)),\(String(format:"%.3f",pos.z)))")
                 }
+                // Refresh blue history dots — everything in runAnchors except
+                // the just-placed (current) anchor, which is already shown via
+                // the yellow debug sphere.
+                refreshHistoryAnchorDots(excluding: [segment.z])
             }
         } else if savedHasAutoScoped {
             // Placement did not complete — restore previous origin and anchor
@@ -599,6 +618,8 @@ struct LaserGuideARSessionView: View {
             frameOriginAnchor?.isEnabled = true
             debugDotAnchor?.isEnabled = true
             debugLineAnchor?.isEnabled = true
+            anchorBaselineLineAnchor?.isEnabled = true
+            historyAnchorDotsAnchor?.isEnabled = true
             markerService.setMarkersVisible(true)
         } else {
             // No previous origin and placement didn't succeed — stay idle
@@ -616,6 +637,8 @@ struct LaserGuideARSessionView: View {
             await MainActor.run {
                 currentRun = maxRun + 1
                 runAnchors.removeAll()  // fresh in-memory history for the new run
+                removeAnchorBaselineLine()
+                removeHistoryAnchorDots()
             }
             print("[AnchorRun] Session \(session.id) — starting run \(maxRun + 1)")
         } catch {
@@ -623,6 +646,8 @@ struct LaserGuideARSessionView: View {
             await MainActor.run {
                 currentRun = 1
                 runAnchors.removeAll()
+                removeAnchorBaselineLine()
+                removeHistoryAnchorDots()
             }
         }
     }

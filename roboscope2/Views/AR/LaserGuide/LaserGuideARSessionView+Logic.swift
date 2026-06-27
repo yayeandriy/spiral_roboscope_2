@@ -123,8 +123,11 @@ extension LaserGuideARSessionView {
     }
 
     func enterDetectionMode() {
-        // Restart AR tracking so detection restarts in a fresh AR world.
-        captureSession.restart()
+        // Do NOT restart AR tracking — we stay in the same world coordinate
+        // frame across detection transitions so that world positions stored in
+        // `runAnchors` remain valid for the anchor-baseline direction algorithm.
+        // captureSession.restart() was here previously but it was resetting the
+        // AR world and invalidating all stored anchor positions.
 
         hasAutoScoped = false
         latestLaserMeasurement = nil
@@ -151,6 +154,8 @@ extension LaserGuideARSessionView {
         refTipBadgeText = nil
         refTipBadgeScreenPoint = nil
         removeDotCone()
+        // Do NOT clear runAnchors here — the history must survive detection
+        // mode transitions so subsequent snaps can use the anchor baseline.
 
         Task { @MainActor in
             markerService.setMarkersVisible(false)

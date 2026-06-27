@@ -60,6 +60,7 @@ extension LaserGuideARSessionView {
                 frameOriginAnchor?.isEnabled = true
                 debugDotAnchor?.isEnabled = true
                 debugLineAnchor?.isEnabled = true
+                anchorBaselineLineAnchor?.isEnabled = true
                 removeDotCone()
                 Task { @MainActor in
                     markerService.setMarkersVisible(true)
@@ -236,38 +237,39 @@ extension LaserGuideARSessionView {
     }
 
     func snapFrameOriginToAlignDot(dotWorld: SIMD3<Float>, lineWorld: SIMD3<Float>, segment: LaserGuideGridSegment) {
-        // --- Step 1: compute direction from dot → line (short baseline, always available) ---
+        // --- Step 1: compute direction from dot → line.
+        //     Used ONLY for the very first anchor of a run (no other anchors to
+        //     compare against yet). All subsequent anchors derive their Z+
+        //     direction from the anchor baseline below and IGNORE this value.
         let R = lineWorld - dotWorld
         let R_xz = SIMD2<Float>(R.x, R.z)
         let rawLen = simd_distance(dotWorld, lineWorld)
         var r = normalize(R_xz)
-        print("[Snap] dot→line fallback: d=(\(String(format:"%.3f",R.x)),\(String(format:"%.3f",R.z))) len=\(String(format:"%.3f",rawLen))m dir=(\(String(format:"%.3f",r.x)),\(String(format:"%.3f",r.y)))")
+        print("[Snap] dot→line direction: d=(\(String(format:"%.3f",R.x)),\(String(format:"%.3f",R.z))) len=\(String(format:"%.3f",rawLen))m dir=(\(String(format:"%.3f",r.x)),\(String(format:"%.3f",r.y)))")
 
-        // --- Step 2: try to improve direction using the long baseline between
-        //     the most-distant anchors known for this run.
+        // --- Step 2: for the 2nd+ anchor in a run, replace the dot→line
+        //     direction with the anchor baseline.
+        //
+        //     Per spec:
+        //       • 1st anchor  → oriented toward line detection (dot→line)
+        //       • 2nd+ anchor → Z+ = direction from the anchor with the SMALLEST
+        //                       local_z toward the anchor with the LARGEST
+        //                       local_z (line detection is ignored entirely).
         //
         //     Each anchor's world_position is where the laser DOT was detected,
         //     i.e. the same coordinate that dotWorld carries for the current snap.
-        //     Sorting by local_z and taking near/far gives a baseline proportional
-        //     to the physical distance between two table levels — often 16 m+,
-        //     versus the ~0.5 m dot→line baseline.  Angular errors shrink by the
-        //     same ratio, eliminating the position drift seen at far segments.
+        //     The anchor baseline is far longer than dot→line, so it also has
+        //     much smaller angular error.
         //
         //     Sources of known positions (union for this run):
-        //       • AnchorService.shared.anchors  — already persisted to the API
-        //       • pendingAnchor                 — snapped but not yet committed
-        //       • current snap (dotWorld)       — the point being placed right now
+        //       • runAnchors     — every successful snap in this run
+        //       • current snap   — the point being placed right now
         // -----------------------------------------------------------------------
-        // Minimum local_z gap between the two reference anchors to trust the baseline.
-        // Must exceed the largest segment_length (dot→line distance) by a meaningful margin
-        // so the anchor baseline actually outperforms dot→line.  0.5 m is ~3× the
-        // typical segment_length (0.15–0.45 m) and covers the Room test (1.65 m gap).
-        let minBaselineMeters: Double = 0.5
 
         // Collect known dot positions for the current run from the LOCAL in-memory
         // history (no API/AnchorService dependency). The dictionary is keyed by
         // local_z so each table row has at most one position.
-        struct AnchorPoint { let localZ: Double; let xz: SIMD2<Float>; let source: String }
+        struct AnchorPoint { let localZ: Double; let world: SIMD3<Float>; let source: String }
         var points: [AnchorPoint] = []
 
         for (z, pos) in runAnchors {
@@ -275,7 +277,7 @@ extension LaserGuideARSessionView {
             if z == segment.z { continue }
             points.append(AnchorPoint(
                 localZ: z,
-                xz: SIMD2<Float>(pos.x, pos.z),
+                world: pos,
                 source: "history"
             ))
         }
@@ -283,13 +285,13 @@ extension LaserGuideARSessionView {
         // been updated yet — that happens in stopPlacement after we return).
         points.append(AnchorPoint(
             localZ: segment.z,
-            xz: SIMD2<Float>(dotWorld.x, dotWorld.z),
+            world: dotWorld,
             source: "current"
         ))
 
         print("[Snap] run=\(currentRun) historyEntries=\(runAnchors.count) points=\(points.count)")
         for p in points.sorted(by: { $0.localZ < $1.localZ }) {
-            print("[Snap]   [\(p.source)] localZ=\(String(format:"%.4f",p.localZ)) xz=(\(String(format:"%.3f",p.xz.x)),\(String(format:"%.3f",p.xz.y)))")
+            print("[Snap]   [\(p.source)] localZ=\(String(format:"%.4f",p.localZ)) world=(\(String(format:"%.3f",p.world.x)),\(String(format:"%.3f",p.world.y)),\(String(format:"%.3f",p.world.z)))")
         }
 
         var dirMethod = "dot→line"
@@ -299,28 +301,29 @@ extension LaserGuideARSessionView {
             let A2 = sorted.last!    // largest local_z
             let baseline = A2.localZ - A1.localZ
 
-            if baseline >= minBaselineMeters {
-                let d = A2.xz - A1.xz       // dir_world = A2 - A1 (XZ projection)
-                let dLen = simd_length(d)
-                if dLen > 0.05 {
-                    let r_anchors = d / dLen
-                    // Angle between the (rejected) dot→line direction and the chosen
-                    // baseline direction. Logged for visibility — by design the line
-                    // detection does NOT influence frame orientation any more, so a
-                    // large angle here is fine.
-                    let dot = simd_dot(r, r_anchors)
-                    let angleDeg = acos(max(-1, min(1, dot))) * (180.0 / Float.pi)
-                    print("[Snap] BASELINE  A1[\(A1.source)] z=\(String(format:"%.2f",A1.localZ)) xz=(\(String(format:"%.3f",A1.xz.x)),\(String(format:"%.3f",A1.xz.y)))  →  A2[\(A2.source)] z=\(String(format:"%.2f",A2.localZ)) xz=(\(String(format:"%.3f",A2.xz.x)),\(String(format:"%.3f",A2.xz.y)))  gap=\(String(format:"%.2f",baseline))m worldDist=\(String(format:"%.3f",dLen))m  dir=(\(String(format:"%.3f",r_anchors.x)),\(String(format:"%.3f",r_anchors.y)))  (dot→line was \(String(format:"%.0f",angleDeg))° off, ignored)")
-                    r = r_anchors
-                    dirMethod = "anchor-baseline"
-                } else {
-                    print("[Snap] BASELINE  world dist \(String(format:"%.3f",dLen))m < 0.05m — keeping dot→line")
-                }
+            let dXZ = SIMD2<Float>(A2.world.x - A1.world.x, A2.world.z - A1.world.z)
+            let dLen = simd_length(dXZ)
+            // Tiny epsilon avoids a divide-by-zero only; we do NOT fall back to
+            // dot→line even for short baselines — the spec mandates anchor-only
+            // direction for 2nd+ anchors.
+            if dLen > 1e-4 {
+                let r_anchors = dXZ / dLen
+                let dotProd = simd_dot(r, r_anchors)
+                let angleDeg = acos(max(-1, min(1, dotProd))) * (180.0 / Float.pi)
+                print("[Snap] BASELINE  A1[\(A1.source)] z=\(String(format:"%.2f",A1.localZ)) world=(\(String(format:"%.3f",A1.world.x)),\(String(format:"%.3f",A1.world.y)),\(String(format:"%.3f",A1.world.z)))  →  A2[\(A2.source)] z=\(String(format:"%.2f",A2.localZ)) world=(\(String(format:"%.3f",A2.world.x)),\(String(format:"%.3f",A2.world.y)),\(String(format:"%.3f",A2.world.z)))  gap=\(String(format:"%.2f",baseline))m worldDist=\(String(format:"%.3f",dLen))m  dir=(\(String(format:"%.3f",r_anchors.x)),\(String(format:"%.3f",r_anchors.y)))  (dot→line was \(String(format:"%.0f",angleDeg))° off, ignored)")
+                r = r_anchors
+                dirMethod = "anchor-baseline"
             } else {
-                print("[Snap] BASELINE  gap \(String(format:"%.2f",baseline))m < \(minBaselineMeters)m — keeping dot→line")
+                print("[Snap] BASELINE  world dist \(String(format:"%.5f",dLen))m below epsilon — anchors coincide in XZ; keeping dot→line as a safety")
             }
+
+            // Debug: draw a green line in WORLD between A1 and A2 so we can
+            // visually verify the anchor baseline. Uses raw world coordinates
+            // only — independent of any frame origin rotation.
+            placeAnchorBaselineLine(from: A1.world, to: A2.world)
         } else {
-            print("[Snap] BASELINE  only 1 point in run — using dot→line")
+            print("[Snap] BASELINE  only 1 point in run — using dot→line (first anchor case)")
+            removeAnchorBaselineLine()
         }
 
         let S = SIMD2<Float>(Float(segment.x), Float(segment.z))
@@ -373,6 +376,11 @@ extension LaserGuideARSessionView {
         var newTransform = rotMatrix
         newTransform.columns.3 = SIMD4<Float>(O.x, O.y, O.z, 1)
 
+        // Capture the old transform BEFORE overwriting it — needed to rebase
+        // existing markers from the old coordinate system to the new one.
+        let oldTransform = frameOriginTransform
+        let isFirstAnchor = runAnchors.isEmpty
+
         frameOriginTransform = newTransform
         print("[LaserGuideSnap]   ✓ frameOriginTransform updated")
 
@@ -396,8 +404,79 @@ extension LaserGuideARSessionView {
             print("[LaserGuideSnap]   recreating gizmo at new position")
             placeFrameOriginGizmo(at: frameOriginTransform)
         }
-        updateMarkersForNewFrameOrigin()
-        print("[LaserGuideSnap]   snap complete")
+
+        if isFirstAnchor {
+            // First anchor: re-render ARKit markers using the new (first) origin.
+            // Markers from a previous session are stored relative to whatever
+            // frame was active then — this corrects them to the new frame.
+            updateMarkersForNewFrameOrigin()
+            print("[LaserGuideSnap]   snap complete (markers: ARKit re-rendered, first anchor)")
+        } else {
+            // 2nd+ anchor: the frame origin has been refined.
+            // Re-express every existing marker's stored local coords in the new
+            // (more accurate) coordinate system so that all markers in the
+            // session use a consistent frame, regardless of which anchor level
+            // was active when each was placed.
+            // Formula: newLocal = newTransform.inverse × (oldTransform × oldLocal)
+            rebaseMarkersToCurrentFrame(oldTransform: oldTransform, newTransform: newTransform)
+            print("[LaserGuideSnap]   snap complete (markers: rebasing to new frame, subsequent anchor)")
+        }
+    }
+
+    /// Re-expresses all persisted markers' local coordinates from `oldTransform`
+    /// into `newTransform`, then patches them in the backend.
+    ///
+    /// Each marker's local coords (p1–p4) were stored as:
+    ///   localOld = oldTransform.inverse × worldPos
+    ///
+    /// We want them expressed in the new frame:
+    ///   localNew = newTransform.inverse × worldPos
+    ///           = newTransform.inverse × (oldTransform × localOld)
+    ///
+    /// This keeps a single consistent coordinate system across all anchor levels
+    /// so the portal renders all markers in the same space.
+    func rebaseMarkersToCurrentFrame(oldTransform: simd_float4x4, newTransform: simd_float4x4) {
+        Task {
+            do {
+                let persisted = try await markerApi.getMarkersForSession(session.id)
+                guard !persisted.isEmpty else {
+                    print("[Rebase] no existing markers to rebase")
+                    return
+                }
+
+                let newInv = newTransform.inverse
+
+                for marker in persisted {
+                    guard marker.points.count == 4 else { continue }
+
+                    let newPoints: [SIMD3<Float>] = marker.points.map { oldLocal in
+                        // old local → world → new local
+                        let worldH = oldTransform * SIMD4<Float>(oldLocal.x, oldLocal.y, oldLocal.z, 1)
+                        let newH   = newInv * worldH
+                        return SIMD3<Float>(newH.x, newH.y, newH.z)
+                    }
+
+                    let update = UpdateMarker(
+                        points: newPoints,
+                        version: marker.version
+                    )
+
+                    do {
+                        _ = try await markerApi.updateMarker(id: marker.id, update: update)
+                        print("[Rebase] marker \(marker.id) rebased successfully")
+                    } catch {
+                        print("[Rebase] marker \(marker.id) rebase failed: \(error)")
+                    }
+                }
+
+                // After rebasing backend coords, refresh ARKit visuals so they match.
+                await MainActor.run {
+                    updateMarkersForNewFrameOrigin()
+                }
+            } catch {
+                print("[Rebase] failed to fetch markers: \(error)")
+            }
+        }
     }
 
     func placeReferenceCross(at position: SIMD3<Float>, name: String, color: UIColor, orientation: simd_float4x4, anchorState: Binding<AnchorEntity?>) {
@@ -468,6 +547,124 @@ extension LaserGuideARSessionView {
             dotConeAnchor = anchor
             print("[DotCone] placed at \(position)")
         }
+    }
+
+    /// Draws (or replaces) a green line in WORLD between two anchor positions.
+    /// Used purely as a debug visual to confirm the anchor baseline used for the
+    /// frame origin Z+ direction — independent of any frame origin orientation.
+    func placeAnchorBaselineLine(from: SIMD3<Float>, to: SIMD3<Float>) {
+        guard let arView else { return }
+        guard !from.x.isNaN, !from.y.isNaN, !from.z.isNaN,
+              !to.x.isNaN, !to.y.isNaN, !to.z.isNaN else { return }
+
+        if let existing = anchorBaselineLineAnchor {
+            arView.scene.removeAnchor(existing)
+            anchorBaselineLineAnchor = nil
+        }
+
+        let dir = to - from
+        let len = simd_length(dir)
+        guard len > 0.0001 else { return }
+
+        let green = UIColor(red: 0.0, green: 1.0, blue: 0.2, alpha: 1.0)
+
+        // Thicker than the existing yellow measurement line so it stands out.
+        let line = ModelEntity(
+            mesh: .generateCylinder(height: len, radius: 0.003),
+            materials: [UnlitMaterial(color: green)]
+        )
+        let mid = (from + to) / 2
+        line.position = mid
+        let up = normalize(dir)
+        let yAxis = SIMD3<Float>(0, 1, 0)
+        let crossVal = cross(yAxis, up)
+        if simd_length(crossVal) > 0.0001 {
+            let axis = normalize(crossVal)
+            let angle = acos(max(-1, min(1, dot(yAxis, up))))
+            line.orientation = simd_quatf(angle: angle, axis: axis)
+        }
+        line.name = "anchor_baseline_line"
+
+        // Small spheres at both endpoints so we can see the exact anchor
+        // positions the algorithm is using.
+        let endpointMat = UnlitMaterial(color: green)
+        let sphereFrom = ModelEntity(
+            mesh: .generateSphere(radius: 0.012),
+            materials: [endpointMat]
+        )
+        sphereFrom.position = from
+        let sphereTo = ModelEntity(
+            mesh: .generateSphere(radius: 0.012),
+            materials: [endpointMat]
+        )
+        sphereTo.position = to
+
+        let anchor = AnchorEntity(world: .zero)
+        anchor.addChild(line)
+        anchor.addChild(sphereFrom)
+        anchor.addChild(sphereTo)
+        arView.scene.addAnchor(anchor)
+        anchorBaselineLineAnchor = anchor
+
+        print("[Snap] BASELINE LINE drawn  from=(\(String(format:"%.3f",from.x)),\(String(format:"%.3f",from.y)),\(String(format:"%.3f",from.z)))  to=(\(String(format:"%.3f",to.x)),\(String(format:"%.3f",to.y)),\(String(format:"%.3f",to.z)))  len=\(String(format:"%.3f",len))m")
+    }
+
+    /// Removes the green anchor-baseline debug line from the scene.
+    func removeAnchorBaselineLine() {
+        guard let arView, let anchor = anchorBaselineLineAnchor else {
+            anchorBaselineLineAnchor = nil
+            return
+        }
+        arView.scene.removeAnchor(anchor)
+        anchorBaselineLineAnchor = nil
+    }
+
+    /// Renders a blue sphere at every world position in `runAnchors` whose
+    /// local_z is NOT in `excluding`. The excluded local_z is typically the
+    /// current snap (which is shown by `debugLineAnchor` / dot cone) — this
+    /// keeps the visual distinction "yellow = current, blue = history".
+    func refreshHistoryAnchorDots(excluding: Set<Double> = []) {
+        guard let arView else { return }
+
+        if let existing = historyAnchorDotsAnchor {
+            arView.scene.removeAnchor(existing)
+            historyAnchorDotsAnchor = nil
+        }
+
+        let entries = runAnchors.filter { !excluding.contains($0.key) }
+        guard !entries.isEmpty else { return }
+
+        let anchor = AnchorEntity(world: .zero)
+        let blueMat = UnlitMaterial(color: UIColor(red: 0.2, green: 0.55, blue: 1.0, alpha: 1.0))
+
+        for (z, pos) in entries {
+            guard !pos.x.isNaN, !pos.y.isNaN, !pos.z.isNaN else { continue }
+            let sphere = ModelEntity(
+                mesh: .generateSphere(radius: 0.018),
+                materials: [blueMat]
+            )
+            sphere.position = pos
+            sphere.name = "anchor_history_z=\(z)"
+            anchor.addChild(sphere)
+        }
+
+        arView.scene.addAnchor(anchor)
+        historyAnchorDotsAnchor = anchor
+
+        print("[Snap] HISTORY DOTS rendered for \(entries.count) anchor(s):")
+        for (z, pos) in entries.sorted(by: { $0.key < $1.key }) {
+            print("[Snap]   z=\(String(format:"%.2f",z))m  world=(\(String(format:"%.3f",pos.x)),\(String(format:"%.3f",pos.y)),\(String(format:"%.3f",pos.z)))")
+        }
+    }
+
+    /// Removes the persistent blue dots for history anchors.
+    func removeHistoryAnchorDots() {
+        guard let arView, let anchor = historyAnchorDotsAnchor else {
+            historyAnchorDotsAnchor = nil
+            return
+        }
+        arView.scene.removeAnchor(anchor)
+        historyAnchorDotsAnchor = nil
     }
 
     /// Removes the dot-indicator cone from the scene.

@@ -334,6 +334,8 @@ extension LaserGuideARSessionView {
             frameOriginAnchor?.isEnabled = hasAutoScoped
             debugDotAnchor?.isEnabled = hasAutoScoped
             debugLineAnchor?.isEnabled = hasAutoScoped
+            anchorBaselineLineAnchor?.isEnabled = hasAutoScoped
+            historyAnchorDotsAnchor?.isEnabled = hasAutoScoped
             if let arView = newValue {
                 arView.scene.subscribe(to: SceneEvents.Update.self) { _ in
                     self.processFrameUpdate()
