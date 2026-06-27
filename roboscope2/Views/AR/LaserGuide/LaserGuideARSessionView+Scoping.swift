@@ -316,12 +316,13 @@ extension LaserGuideARSessionView {
                 let dLen = simd_length(d)
                 if dLen > 0.05 {
                     let r_anchors = d / dLen
-                    // Angle between dot→line (r) and anchor baseline (r_anchors).
-                    // Should be small for a correctly placed test setup / real laser guide.
-                    // Large angle (> 45°) means the papers are not in the expected layout.
+                    // Angle between the (rejected) dot→line direction and the baseline direction.
+                    // Reported for inspection: line detection should NOT influence frame
+                    // orientation, so a large angle here just means the line happens to point
+                    // away from the baseline — that's fine, the override is doing its job.
                     let dot = simd_dot(r, r_anchors)
                     let angleDeg = acos(max(-1, min(1, dot))) * (180.0 / Float.pi)
-                    print("[Snap] BASELINE  A1[\(A1.source)] z=\(String(format:"%.2f",A1.localZ)) xz=(\(String(format:"%.3f",A1.xz.x)),\(String(format:"%.3f",A1.xz.y)))  →  A2[\(A2.source)] z=\(String(format:"%.2f",A2.localZ)) xz=(\(String(format:"%.3f",A2.xz.x)),\(String(format:"%.3f",A2.xz.y)))  gap=\(String(format:"%.2f",baseline))m worldDist=\(String(format:"%.3f",dLen))m  dir=(\(String(format:"%.3f",r_anchors.x)),\(String(format:"%.3f",r_anchors.y)))  angle_vs_dotline=\(String(format:"%.0f",angleDeg))°\(angleDeg > 45 ? " ⚠️ large — test layout inconsistent?" : "")")
+                    print("[Snap] BASELINE  A1[\(A1.source)] z=\(String(format:"%.2f",A1.localZ)) xz=(\(String(format:"%.3f",A1.xz.x)),\(String(format:"%.3f",A1.xz.y)))  →  A2[\(A2.source)] z=\(String(format:"%.2f",A2.localZ)) xz=(\(String(format:"%.3f",A2.xz.x)),\(String(format:"%.3f",A2.xz.y)))  gap=\(String(format:"%.2f",baseline))m worldDist=\(String(format:"%.3f",dLen))m  dir=(\(String(format:"%.3f",r_anchors.x)),\(String(format:"%.3f",r_anchors.y)))  (dot→line was \(String(format:"%.0f",angleDeg))° off, ignored)")
                     r = r_anchors
                     dirMethod = "anchor-baseline"
                 } else {
