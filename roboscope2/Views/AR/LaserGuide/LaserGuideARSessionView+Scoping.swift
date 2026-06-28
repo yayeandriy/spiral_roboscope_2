@@ -454,7 +454,14 @@ extension LaserGuideARSessionView {
                         // old local → world → new local
                         let worldH = oldTransform * SIMD4<Float>(oldLocal.x, oldLocal.y, oldLocal.z, 1)
                         let newH   = newInv * worldH
-                        return SIMD3<Float>(newH.x, newH.y, newH.z)
+                        // Preserve the canonical table-position Z exactly.
+                        // Z is the physical position along the laser guide (e.g. 1.5m) and
+                        // must stay stable across anchor refinements so the portal displays
+                        // the marker at the correct guide position.  X and Y are updated
+                        // because the lateral offset and height adjust as the frame is
+                        // refined (the X-axis rotates slightly with each direction update,
+                        // and the origin Y shifts with the current dot's height).
+                        return SIMD3<Float>(newH.x, newH.y, oldLocal.z)
                     }
 
                     let update = UpdateMarker(
