@@ -19,6 +19,8 @@ struct SessionsView: View {
     @State private var arSession: WorkSession?
     @State private var dashboardSession: WorkSession?
     @State private var minimapSession: WorkSession?
+    // Repair module entry — additive, does not affect the Laser Guide flow above.
+    @State private var repairSession: WorkSession?
     @State private var isLaunchingAR: Bool = false
     @State private var refreshTrigger: Bool = false  // Force row refresh
     @State private var isQuickCreating: Bool = false
@@ -122,6 +124,10 @@ struct SessionsView: View {
             }
             .fullScreenCover(item: $minimapSession) { session in
                 MinimapView(spaceId: session.spaceId.uuidString, sessionId: session.id)
+            }
+            // Repair module entry — additive, does not affect the Laser Guide flow above.
+            .fullScreenCover(item: $repairSession) { session in
+                RepairDashboardView(session: session)
             }
             .alert("Delete Session", isPresented: $showingDeleteAlert, presenting: sessionToDelete) { session in
                 Button("Delete", role: .destructive) {
@@ -343,6 +349,14 @@ struct SessionsView: View {
                                     Label("Edit", systemImage: "pencil")
                                 }
                                 .tint(.blue)
+
+                                // Repair module entry — additive, does not affect the Laser Guide branch above.
+                                Button {
+                                    repairSession = session
+                                } label: {
+                                    Label("Repair", systemImage: "wrench.and.screwdriver")
+                                }
+                                .tint(.orange)
                             }
                         }
                         .listRowBackground(Color.clear)
