@@ -51,14 +51,27 @@ final class RepairSettings: ObservableObject {
         static let preferredValidationModelId = "repairPreferredValidationModelId"
         static let pinRadiusMeters = "repairPinRadiusMeters"
         static let showDetectionOverlay = "repairShowDetectionOverlay"
+        static let useAccumulator = "repairUseAccumulator"
     }
 
-    /// Sliding window size (frames) used for temporal confirmation.
+    /// Whether Planning mode requires several repeated detections ("N of the last M frames",
+    /// tuned by `repairConfirmThreshold`/`repairTemporalWindowFrames` below) before placing a
+    /// pin. ON by default (classic "15 of the last 20" behavior). Turning this off collapses to
+    /// a pin dropping on the very FIRST detection of an object — RepairARSessionView enforces
+    /// this by pinning `RepairAutoPlacer.windowSize`/`confirmThreshold` to 1 whenever this is
+    /// false, rather than by changing the algorithm itself (see `applyAccumulatorSettings()`).
+    @Published var repairUseAccumulator: Bool {
+        didSet { defaults.set(repairUseAccumulator, forKey: Keys.useAccumulator) }
+    }
+
+    /// Sliding window size (frames) used for temporal confirmation — only in effect while
+    /// `repairUseAccumulator == true`.
     @Published var repairTemporalWindowFrames: Int {
         didSet { defaults.set(repairTemporalWindowFrames, forKey: Keys.windowFrames) }
     }
 
-    /// Hits required within the window before a candidate is confirmed (of the last N frames).
+    /// Hits required within the window before a candidate is confirmed (of the last N frames) —
+    /// only in effect while `repairUseAccumulator == true`.
     @Published var repairConfirmThreshold: Int {
         didSet { defaults.set(repairConfirmThreshold, forKey: Keys.confirmThreshold) }
     }
@@ -134,6 +147,11 @@ final class RepairSettings: ObservableObject {
     }
 
     private init() {
+        // Default ON — no explicit key written yet means "not yet set", not "false".
+        self.repairUseAccumulator = defaults.object(forKey: Keys.useAccumulator) == nil
+            ? true
+            : defaults.bool(forKey: Keys.useAccumulator)
+
         let window = defaults.integer(forKey: Keys.windowFrames)
         self.repairTemporalWindowFrames = window > 0 ? window : 20
 

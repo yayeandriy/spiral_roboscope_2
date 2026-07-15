@@ -7,6 +7,9 @@
 //  In-session settings sheet for the Repair AR view. Replaces the old standalone "eye" button:
 //  the detection-box overlay toggle now lives here, alongside letting the operator swap the
 //  live detector model without leaving AR, and tune pin size / placement sensitivity.
+//  "Clear All Pins" moved OUT of this sheet onto the main AR viewport as a recycle-bin button
+//  (RepairARSessionView.topBar) — it's used often enough to want a one-tap + one-confirmation
+//  flow without a trip through Settings.
 //
 
 import SwiftUI
@@ -25,8 +28,6 @@ struct RepairSessionSettingsView: View {
     /// responsible for downloading/loading it and swapping the live detection request for
     /// whichever mode is currently active.
     let onSelectModel: (CoremlModel) -> Void
-    /// Called after the user confirms the destructive "Clear All Pins" action.
-    let onClearScene: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -34,7 +35,6 @@ struct RepairSessionSettingsView: View {
     @State private var models: [CoremlModel] = []
     @State private var isLoadingModels = false
     @State private var loadError: String?
-    @State private var showClearConfirm = false
 
     /// Reads/writes whichever confidence threshold matches `sessionMode` — the two are
     /// independent settings (see RepairSettings) since Planning and Validation run different
@@ -54,16 +54,6 @@ struct RepairSessionSettingsView: View {
         NavigationView {
             Form {
                 if sessionMode == .planning {
-                    Section {
-                        Button(role: .destructive) {
-                            showClearConfirm = true
-                        } label: {
-                            Label("Clear All Pins", systemImage: "trash")
-                        }
-                    } footer: {
-                        Text("Removes every pin placed in this session, both here and on the server. This cannot be undone.")
-                    }
-
                     Section {
                         Toggle("Show detection boxes", isOn: $settings.repairShowDetectionOverlay)
                             .tint(.orange)
@@ -181,6 +171,63 @@ struct RepairSessionSettingsView: View {
                         ? "Same-object radius: two confirmed detections within this distance are treated as the same physical object — only the first gets a pin. Confidence threshold: minimum YOLO score for a detection to be tracked at all. Both apply immediately to this live session."
                         : "Confidence threshold: minimum YOLO score for a detection to be shown in the Validation overlay at all. Applies immediately to this live session.")
                 }
+
+                if sessionMode == .planning {
+                    Section {
+                        Toggle("Require repeated detections", isOn: $settings.repairUseAccumulator)
+                            .tint(.orange)
+
+                        if settings.repairUseAccumulator {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("Accumulator window")
+                                    Spacer()
+                                    Text("\(settings.repairTemporalWindowFrames) frames")
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(
+                                    value: Binding(
+                                        get: { Double(settings.repairTemporalWindowFrames) },
+                                        set: { newValue in
+                                            let window = Int(newValue.rounded())
+                                            settings.repairTemporalWindowFrames = window
+                                            if settings.repairConfirmThreshold > window {
+                                                settings.repairConfirmThreshold = window
+                                            }
+                                        }
+                                    ),
+                                    in: 5...60,
+                                    step: 1
+                                )
+                                .tint(.orange)
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("Confirm threshold")
+                                    Spacer()
+                                    Text("\(settings.repairConfirmThreshold) of \(settings.repairTemporalWindowFrames)")
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(
+                                    value: Binding(
+                                        get: { Double(settings.repairConfirmThreshold) },
+                                        set: { settings.repairConfirmThreshold = Int($0.rounded()) }
+                                    ),
+                                    in: 1...Double(max(1, settings.repairTemporalWindowFrames)),
+                                    step: 1
+                                )
+                                .tint(.orange)
+                            }
+                        }
+                    } header: {
+                        Text("Detection Accumulator")
+                    } footer: {
+                        Text(settings.repairUseAccumulator
+                            ? "On (default): a pin is placed once a tracked object hits the confirm threshold within the last N frames of the accumulator window (the classic \"15 of the last 20\" behavior). Higher thresholds are steadier but slower to place a pin."
+                            : "A pin is placed immediately on the very first detection of an object, no accumulation delay. This trades off steadiness (more prone to single-frame noise) for instant placement.")
+                    }
+                }
             }
             .navigationTitle("\(sessionMode.displayName) Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -194,15 +241,6 @@ struct RepairSessionSettingsView: View {
                 Button("OK") { loadError = nil }
             } message: {
                 if let loadError { Text(loadError) }
-            }
-            .alert("Clear All Pins?", isPresented: $showClearConfirm) {
-                Button("Clear All Pins", role: .destructive) {
-                    onClearScene()
-                    dismiss()
-                }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("This permanently deletes every pin in this session, on this device and on the server. This action cannot be undone.")
             }
         }
     }

@@ -109,6 +109,22 @@ struct RepairARSessionView: View {
     /// of deleting immediately.
     @State var selectedPinId: UUID? = nil
 
+    /// "Clear All Pins" now lives on the main viewport as a recycle-bin button (moved out of the
+    /// settings sheet — it's used often enough to want a single tap + one confirmation, not a
+    /// trip through Settings). Planning-only, same as the pins it clears.
+    @State var showClearConfirm = false
+
+    /// Every distinct `detectionClass` confirmed as a pin so far this session (e.g. "l1", "r2"
+    /// for the corners2 model) — used only to drive `hasLeftAndRightMarkers` below. Deliberately
+    /// never removed on delete/re-placement: once a left+right reference pair has been seen for
+    /// this session, the defect badge stays put rather than flickering in/out as individual pins
+    /// are tidied up. Reset on `clearScene()`.
+    @State var placedClasses: Set<String> = []
+    /// Placeholder "defect record" panel (see RepairDefectPanelView) — surfaced once a full
+    /// left+right reference frame has been detected, since that's presumably the moment a
+    /// known defect location becomes identifiable in this session.
+    @State var showDefectPanel = false
+
     @State var cancellables = Set<AnyCancellable>()
 
     init(session: RepairSession, model: CoremlModel) {
@@ -130,12 +146,36 @@ struct RepairARSessionView: View {
         _pinServiceObj = StateObject(wrappedValue: PinService.shared)
 
         let s = RepairSettings.shared
+        let initialAccumulator = Self.resolvedAccumulatorParams(useAccumulator: s.repairUseAccumulator, windowFrames: s.repairTemporalWindowFrames, confirmThreshold: s.repairConfirmThreshold)
         self.autoPlacer = RepairAutoPlacer(
-            windowSize: s.repairTemporalWindowFrames,
-            confirmThreshold: s.repairConfirmThreshold,
+            windowSize: initialAccumulator.window,
+            confirmThreshold: initialAccumulator.confirm,
             dedupRadiusMeters: s.repairDedupRadiusMeters,
             iouThreshold: s.repairAssocIoUThreshold
         )
+    }
+
+    /// Maps the accumulator toggle + its two sliders down to the actual RepairAutoPlacer
+    /// parameters: OFF collapses to window=1/confirm=1 (a pin drops on the very first
+    /// detection), independent of whatever window/threshold the operator last dialed in — so
+    /// flipping the toggle back ON restores their prior tuning rather than resetting it.
+    static func resolvedAccumulatorParams(useAccumulator: Bool, windowFrames: Int, confirmThreshold: Int) -> (window: Int, confirm: Int) {
+        guard useAccumulator else { return (1, 1) }
+        let window = max(1, windowFrames)
+        let confirm = max(1, min(confirmThreshold, window))
+        return (window, confirm)
+    }
+
+    /// True once at least one "left" and one "right" reference-marker class have both been
+    /// confirmed as pins this session. Heuristic tied to the corners2 model's naming convention
+    /// (classes "l1"/"l2" = left, "r1"/"r2" = right) — a class simply starting with "l"/"r"
+    /// (case-insensitive). Good enough for a placeholder signal; would need to move to an
+    /// explicit per-class "side" attribute (mirroring RepairClassStyle.corner) if this needs to
+    /// generalize beyond corners-style models.
+    var hasLeftAndRightMarkers: Bool {
+        let hasLeft = placedClasses.contains { $0.lowercased().hasPrefix("l") }
+        let hasRight = placedClasses.contains { $0.lowercased().hasPrefix("r") }
+        return hasLeft && hasRight
     }
 
     var body: some View {
@@ -185,6 +225,8 @@ struct RepairARSessionView: View {
 
                 if selectedPinId != nil {
                     deleteConfirmBar
+                } else if sessionMode == .planning && hasLeftAndRightMarkers {
+                    defectBadge
                 }
 
                 if photoFlash {
@@ -193,6 +235,7 @@ struct RepairARSessionView: View {
                         .transition(.opacity)
                 }
             }
+            .animation(.easeOut(duration: 0.3), value: hasLeftAndRightMarkers)
         }
         .ignoresSafeArea(.all)
         .navigationBarBackButtonHidden()
@@ -200,6 +243,14 @@ struct RepairARSessionView: View {
             Button("OK") { errorMessage = nil }
         } message: {
             if let errorMessage { Text(errorMessage) }
+        }
+        .alert("Clear this space?", isPresented: $showClearConfirm) {
+            Button("Clear All Pins", role: .destructive) {
+                Task { await clearScene() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This permanently deletes every pin in this session, on this device and on the server. This action cannot be undone.")
         }
         .onChange(of: mlDetection.detections) { _, rawDetections in
             // Validation mode is passive — it reads mlDetection.detections directly for its
@@ -217,6 +268,9 @@ struct RepairARSessionView: View {
         .onChange(of: settings.repairDedupRadiusMeters) { _, newValue in
             autoPlacer.dedupRadiusMeters = newValue
         }
+        .onChange(of: settings.repairUseAccumulator) { _, _ in applyAccumulatorSettings() }
+        .onChange(of: settings.repairTemporalWindowFrames) { _, _ in applyAccumulatorSettings() }
+        .onChange(of: settings.repairConfirmThreshold) { _, _ in applyAccumulatorSettings() }
         .onChange(of: settings.repairPinRadiusMeters) { _, newValue in
             pinRenderer.updateAllPinSizes(to: newValue)
         }
@@ -233,11 +287,11 @@ struct RepairARSessionView: View {
                             await swapValidationModel(to: newModel)
                         }
                     }
-                },
-                onClearScene: {
-                    Task { await clearScene() }
                 }
             )
+        }
+        .sheet(isPresented: $showDefectPanel) {
+            RepairDefectPanelView()
         }
     }
 
@@ -300,6 +354,18 @@ struct RepairARSessionView: View {
                 .background(Capsule().fill(.black.opacity(0.35)))
 
                 Spacer()
+
+                if sessionMode == .planning {
+                    Button {
+                        showClearConfirm = true
+                    } label: {
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(.black.opacity(0.35)))
+                    }
+                }
 
                 Button {
                     Task { await captureSessionPhoto() }
@@ -430,5 +496,46 @@ struct RepairARSessionView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 32)
         }
+    }
+
+    /// Beige "Defect" badge — appears at the bottom of the viewport once
+    /// `hasLeftAndRightMarkers` goes true, and opens the placeholder `RepairDefectPanelView`.
+    @ViewBuilder
+    private var defectBadge: some View {
+        VStack {
+            Spacer()
+            Button {
+                showDefectPanel = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(Color(red: 0.55, green: 0.38, blue: 0.12))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Defect")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.black.opacity(0.85))
+                        Text("QCRID 032QN028705")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.black.opacity(0.6))
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.black.opacity(0.4))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color(red: 0.93, green: 0.85, blue: 0.68))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 32)
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }

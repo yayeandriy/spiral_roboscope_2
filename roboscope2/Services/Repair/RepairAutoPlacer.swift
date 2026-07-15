@@ -195,6 +195,7 @@ final class RepairAutoPlacer {
         // frame; they'll naturally re-associate (or spawn fresh) once the reset candidate's
         // cleared window lets it re-accumulate. This avoids a flood of duplicate candidates
         // the instant two objects' boxes touch.
+        let firstNewCandidateIndex = candidates.count
         for (dIdx, det) in rawDetections.enumerated() where !detectionsWithAnyMatch.contains(dIdx) {
             let newCandidate = RepairCandidate(
                 id: UUID(),
@@ -205,13 +206,22 @@ final class RepairAutoPlacer {
             )
             candidates.append(newCandidate)
         }
+        let newCandidateIndices = Set(firstNewCandidateIndex..<candidates.count)
 
         // MARK: Push `false` for every candidate not matched (and not just reset) this frame.
         // This includes retired (hasProducedPin) candidates, which are never in activeIndices
         // and therefore never matched — they decay out of the window naturally (05 §5.6 Notes).
+        // Brand-new candidates (just appended above, this same frame) are also excluded here —
+        // their `hitWindow` already starts as `[true]` from the detection that spawned them;
+        // without this exclusion this loop would immediately stomp that single `true` with a
+        // `false` (since a fresh candidate is in neither matchedCandidateIndices nor
+        // resetIndices), which is invisible with a 20-frame window but fatal to the
+        // "confirmThreshold == 1" no-accumulator mode — it would delay first-detection
+        // placement by a frame (or forever, if the box jitters just enough to miss re-matching).
         for idx in candidates.indices {
             if resetIndices.contains(idx) { continue } // window already cleared above
             if matchedCandidateIndices.contains(idx) { continue } // already pushed `true` above
+            if newCandidateIndices.contains(idx) { continue } // already seeded with `[true]` above
             candidates[idx].hitWindow.append(false)
         }
 

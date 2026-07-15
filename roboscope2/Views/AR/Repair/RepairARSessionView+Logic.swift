@@ -207,6 +207,20 @@ extension RepairARSessionView {
         }
     }
 
+    /// Pushes the current accumulator toggle + sliders (RepairSettings) down into the live
+    /// `autoPlacer`. Called once at launch (see init) and on every relevant `onChange` — see
+    /// `RepairARSessionView.resolvedAccumulatorParams` for the OFF -> window=1/confirm=1 mapping.
+    @MainActor
+    func applyAccumulatorSettings() {
+        let resolved = Self.resolvedAccumulatorParams(
+            useAccumulator: settings.repairUseAccumulator,
+            windowFrames: settings.repairTemporalWindowFrames,
+            confirmThreshold: settings.repairConfirmThreshold
+        )
+        autoPlacer.windowSize = resolved.window
+        autoPlacer.confirmThreshold = resolved.confirm
+    }
+
     // MARK: - Per-frame update
 
     /// Called from the `SceneEvents.Update` subscription set up in RepairARSessionView.
@@ -406,6 +420,7 @@ extension RepairARSessionView {
                 boundingBoxCorners: pin.boundingBox
             )
             pendingPinsBuffer.append((localId: pin.id, pin: body))
+            placedClasses.insert(pin.detectionClass)
         }
         placedPinCount = autoPlacer.placedPins.count
     }
@@ -621,6 +636,7 @@ extension RepairARSessionView {
         pinPhotoUploadAttempts.removeAll()
         selectedPinId = nil
         placedPinCount = 0
+        placedClasses.removeAll()
         withAnimation(.easeOut(duration: 0.25)) {
             maturingCandidates = []
         }
