@@ -13,6 +13,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct RepairDetectionOverlay: View {
     let detections: [RepairDetection]
@@ -20,29 +21,87 @@ struct RepairDetectionOverlay: View {
     /// Maps normalized image coordinates to normalized view coordinates.
     let imageToViewTransform: CGAffineTransform
     var boxColor: Color = .green
+    /// Per-class marker color (from the active model's `RepairClassStyle.color`, v0.2), used when
+    /// present so Validation mode's "highlight different classes" reads visually the same way
+    /// Planning's pin colors do. Falls back to `boxColor` for any class without a configured color.
+    var classStyles: [String: RepairClassStyle]? = nil
+    /// When true, draws `detection.maskPolygon` (filled + stroked, YOLOv8-segmentation only) in
+    /// place of the plain rectangle, for any detection that has one — falling back to the
+    /// rectangle for detections without a polygon (plain-detect models, or extraction miss).
+    /// Off by default so Planning's debug overlay keeps its existing plain-box look; Validation
+    /// mode's passive overlay turns this on.
+    var showMaskPolygon: Bool = false
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 ForEach(detections) { detection in
-                    let rect = mappedRect(detection.boundingBox, viewSize: geometry.size)
-                    ZStack(alignment: .topLeading) {
-                        Rectangle()
-                            .stroke(boxColor, lineWidth: 2)
-                            .frame(width: rect.width, height: rect.height)
-                            .position(x: rect.midX, y: rect.midY)
+                    let color = resolvedColor(for: detection.label)
+                    let polygonPoints = showMaskPolygon ? mappedPolygon(detection.maskPolygon, viewSize: geometry.size) : nil
 
-                        Text("\(detection.label) \(String(format: "%.2f", detection.confidence))")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(boxColor.opacity(0.85))
-                            .position(x: rect.minX + 30, y: max(8, rect.minY - 8))
+                    if let polygonPoints, polygonPoints.count >= 3 {
+                        let labelAnchor = polygonPoints.min(by: { $0.y < $1.y }) ?? polygonPoints[0]
+                        ZStack(alignment: .topLeading) {
+                            Path { path in
+                                path.move(to: polygonPoints[0])
+                                for p in polygonPoints.dropFirst() { path.addLine(to: p) }
+                                path.closeSubpath()
+                            }
+                            .fill(color.opacity(0.28))
+
+                            Path { path in
+                                path.move(to: polygonPoints[0])
+                                for p in polygonPoints.dropFirst() { path.addLine(to: p) }
+                                path.closeSubpath()
+                            }
+                            .stroke(color, lineWidth: 2)
+
+                            Text("\(detection.label) \(String(format: "%.2f", detection.confidence))")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(color.opacity(0.85))
+                                .position(x: labelAnchor.x + 30, y: max(8, labelAnchor.y - 8))
+                        }
+                    } else {
+                        let rect = mappedRect(detection.boundingBox, viewSize: geometry.size)
+                        ZStack(alignment: .topLeading) {
+                            Rectangle()
+                                .stroke(color, lineWidth: 2)
+                                .frame(width: rect.width, height: rect.height)
+                                .position(x: rect.midX, y: rect.midY)
+
+                            Text("\(detection.label) \(String(format: "%.2f", detection.confidence))")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(color.opacity(0.85))
+                                .position(x: rect.minX + 30, y: max(8, rect.minY - 8))
+                        }
                     }
                 }
             }
             .allowsHitTesting(false)
+        }
+    }
+
+    private func resolvedColor(for label: String) -> Color {
+        if let hex = classStyles?[label]?.color, let uiColor = UIColor(hex: hex) {
+            return Color(uiColor)
+        }
+        return boxColor
+    }
+
+    /// Maps each polygon point (normalized image space, top-left origin — same space as
+    /// `boundingBox`) through `imageToViewTransform` then scales into on-screen points, same
+    /// per-point approach as `mappedRect`'s corners.
+    private func mappedPolygon(_ polygon: [CGPoint]?, viewSize: CGSize) -> [CGPoint]? {
+        guard let polygon, polygon.count >= 3 else { return nil }
+        return polygon.map { p in
+            let viewNorm = p.applying(imageToViewTransform)
+            return CGPoint(x: viewNorm.x * viewSize.width, y: viewNorm.y * viewSize.height)
         }
     }
 

@@ -7,8 +7,10 @@
 //  pattern used by SessionsView/WorkSession without sharing any state with it.
 //
 //  "+" creates and starts a repair session immediately (server-default or operator-preferred
-//  model from RepairSettings.preferredModelId — see RepairModelPickerSection in Settings) —
-//  there is no intermediate model-picker screen blocking the flow.
+//  model from RepairSettings.preferredPlanningModelId — see RepairModelPickerSection in
+//  Settings) — there is no intermediate model-picker screen blocking the flow. Always launches
+//  in Planning mode (RepairSessionMode); Validation mode is a live in-session switch, not a
+//  launch-time choice.
 //
 //  Part of the Repair module. Does NOT use or modify the Laser Guide / anchoring system.
 //
@@ -327,10 +329,13 @@ struct RepairView: View {
         let models = try await modelRegistry.list()
         guard !models.isEmpty else { return nil }
 
-        if let preferredIdString = RepairSettings.shared.preferredModelId,
+        if let preferredIdString = RepairSettings.shared.preferredPlanningModelId,
            let preferredUUID = UUID(uuidString: preferredIdString),
            let match = models.first(where: { $0.id == preferredUUID }) {
             return match
+        }
+        if let def = models.first(where: { $0.isDefaultPlanning == true }) {
+            return def
         }
         if let def = try await modelRegistry.getDefault(), let matched = models.first(where: { $0.id == def.id }) {
             return matched

@@ -59,6 +59,121 @@ final class RepairPhotoStore {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    // MARK: - Software overlay burn-in (Validation mode manual captures)
+
+    /// Draws a "box + class + confidence" overlay onto `image`, matching what
+    /// `RepairDetectionOverlay` shows live on screen — used because Validation mode's overlay is
+    /// a flat SwiftUI layer, never part of the ARView's own Metal scene, so `ARView.snapshotAsync`
+    /// alone can't capture it (see `captureSessionPhoto` in RepairARSessionView+Logic.swift).
+    ///
+    /// `detections` are in raw camera-buffer normalized space (top-left origin) — the same space
+    /// `imageToViewTransform` maps into normalized *view* space; this then scales that into
+    /// `image`'s own pixel dimensions, so no separate viewport size is needed.
+    func renderDetectionOverlay(
+        onto image: UIImage,
+        detections: [RepairDetection],
+        imageToViewTransform: CGAffineTransform,
+        classStyles: [String: RepairClassStyle]?
+    ) -> UIImage {
+        guard !detections.isEmpty else { return image }
+
+        let renderer = UIGraphicsImageRenderer(size: image.size)
+        return renderer.image { ctx in
+            image.draw(at: .zero)
+            let cg = ctx.cgContext
+
+            for detection in detections {
+                let color = Self.resolvedColor(for: detection.label, classStyles: classStyles)
+                let polygon = Self.mappedPolygon(detection.maskPolygon, imageToViewTransform: imageToViewTransform, targetSize: image.size)
+
+                let labelAnchor: CGPoint
+                if let polygon, polygon.count >= 3 {
+                    let path = CGMutablePath()
+                    path.addLines(between: polygon)
+                    path.closeSubpath()
+
+                    cg.saveGState()
+                    cg.addPath(path)
+                    cg.setFillColor(color.withAlphaComponent(0.28).cgColor)
+                    cg.fillPath()
+                    cg.restoreGState()
+
+                    cg.addPath(path)
+                    cg.setStrokeColor(color.cgColor)
+                    cg.setLineWidth(max(2, image.size.width * 0.0025))
+                    cg.strokePath()
+
+                    labelAnchor = polygon.min(by: { $0.y < $1.y }) ?? polygon[0]
+                } else {
+                    let rect = Self.mappedRect(
+                        detection.boundingBox,
+                        imageToViewTransform: imageToViewTransform,
+                        targetSize: image.size
+                    )
+                    cg.setStrokeColor(color.cgColor)
+                    cg.setLineWidth(max(2, image.size.width * 0.0025))
+                    cg.stroke(rect)
+                    labelAnchor = CGPoint(x: rect.minX, y: rect.minY)
+                }
+
+                let labelText = "\(detection.label) \(String(format: "%.2f", detection.confidence))"
+                let fontSize = max(12, image.size.width * 0.018)
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.boldSystemFont(ofSize: fontSize),
+                    .foregroundColor: UIColor.white,
+                    .backgroundColor: color.withAlphaComponent(0.85)
+                ]
+                let labelOrigin = CGPoint(x: labelAnchor.x, y: max(0, labelAnchor.y - fontSize - 4))
+                (labelText as NSString).draw(at: labelOrigin, withAttributes: attrs)
+            }
+        }
+    }
+
+    /// Same per-point mapping as `mappedRect`'s corners, for `RepairDetection.maskPolygon`.
+    private static func mappedPolygon(
+        _ polygon: [CGPoint]?,
+        imageToViewTransform: CGAffineTransform,
+        targetSize: CGSize
+    ) -> [CGPoint]? {
+        guard let polygon, polygon.count >= 3 else { return nil }
+        return polygon.map { p in
+            let viewNorm = p.applying(imageToViewTransform)
+            return CGPoint(x: viewNorm.x * targetSize.width, y: viewNorm.y * targetSize.height)
+        }
+    }
+
+    /// Same corner-mapping math as `RepairDetectionOverlay.mappedRect` — kept independent (not
+    /// shared) since one draws with SwiftUI and the other with Core Graphics, and duplicating
+    /// ~10 lines here is simpler than threading a shared helper across a SwiftUI view file and
+    /// this plain-class file.
+    private static func mappedRect(
+        _ rectNormImgTopLeft: CGRect,
+        imageToViewTransform: CGAffineTransform,
+        targetSize: CGSize
+    ) -> CGRect {
+        let p1 = CGPoint(x: rectNormImgTopLeft.minX, y: rectNormImgTopLeft.minY).applying(imageToViewTransform)
+        let p2 = CGPoint(x: rectNormImgTopLeft.maxX, y: rectNormImgTopLeft.minY).applying(imageToViewTransform)
+        let p3 = CGPoint(x: rectNormImgTopLeft.minX, y: rectNormImgTopLeft.maxY).applying(imageToViewTransform)
+        let p4 = CGPoint(x: rectNormImgTopLeft.maxX, y: rectNormImgTopLeft.maxY).applying(imageToViewTransform)
+
+        let xs = [p1.x, p2.x, p3.x, p4.x]
+        let ys = [p1.y, p2.y, p3.y, p4.y]
+
+        let minX = (xs.min() ?? 0) * targetSize.width
+        let maxX = (xs.max() ?? 0) * targetSize.width
+        let minY = (ys.min() ?? 0) * targetSize.height
+        let maxY = (ys.max() ?? 0) * targetSize.height
+
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private static func resolvedColor(for label: String, classStyles: [String: RepairClassStyle]?) -> UIColor {
+        if let hex = classStyles?[label]?.color, let color = UIColor(hex: hex) {
+            return color
+        }
+        return UIColor.systemGreen
+    }
+
     // MARK: - Manual session-level captures ("take picture" button)
 
     /// Saves a manually-triggered capture: the raw camera frame, plus (best-effort) a second

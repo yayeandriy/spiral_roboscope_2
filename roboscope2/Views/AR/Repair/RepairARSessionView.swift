@@ -69,11 +69,17 @@ struct RepairARSessionView: View {
     /// timer as `flushPendingPins`.
     @State var pinsAwaitingPhotoUpload: [UUID: UUID] = [:]
     @State var pinPhotoUploadAttempts: [UUID: Int] = [:]
+    /// Reentrancy guard for `flushPendingPinPhotoUploads` — it's invoked both immediately and
+    /// from the periodic timer, and without this a second call could race the first while it's
+    /// suspended on a network `await`, uploading the same photo twice.
+    @State var isFlushingPinPhotos = false
 
     /// Manual session-photo captures still needing an upload to
     /// `POST /repair-sessions/{id}/photos` (already saved to local disk regardless of upload
     /// outcome — see RepairPhotoStore). Retried on the same timer as `flushPendingPins`.
     @State var pendingSessionPhotoUploads: [PendingSessionPhotoUpload] = []
+    /// Reentrancy guard for `flushPendingSessionPhotoUploads` — see `isFlushingPinPhotos`.
+    @State var isFlushingSessionPhotos = false
 
     /// The model actually driving live detection right now. Starts as the session's launch
     /// model but can be swapped in-session from RepairSessionSettingsView; the server-side
@@ -81,6 +87,14 @@ struct RepairARSessionView: View {
     @State var activeModel: CoremlModel
     @State var showSettingsSheet = false
     @State var isSwappingModel = false
+
+    /// v0.4 — Planning/Validation sub-mode split. Always starts in Planning; Validation is a
+    /// live in-session switch (see the topBar mode control), never a launch-time choice.
+    @State var sessionMode: RepairSessionMode = .planning
+    /// The Validation-mode detector model, resolved lazily the first time the operator switches
+    /// into Validation (see `resolveValidationModel()`) — nil until then. Independent of
+    /// `activeModel`, which is Planning's model.
+    @State var validationModel: CoremlModel? = nil
 
     /// Manual "take picture" capture (session-level, not tied to a specific pin).
     @State var isCapturingPhoto = false
@@ -106,7 +120,7 @@ struct RepairARSessionView: View {
         _captureSession = StateObject(wrappedValue: capture)
 
         let mlDet = RepairMLDetectionService.make()
-        mlDet.confidenceThreshold = RepairSettings.shared.repairConfidenceThreshold
+        mlDet.confidenceThreshold = RepairSettings.shared.repairPlanningConfidenceThreshold
         _mlDetection = StateObject(wrappedValue: mlDet)
         _pipeline = StateObject(wrappedValue: RepairDetectionPipeline(ml: mlDet))
 
@@ -129,20 +143,35 @@ struct RepairARSessionView: View {
             ZStack {
                 arViewLayer(geometry: geometry)
 
-                if settings.repairShowDetectionOverlay {
+                if sessionMode == .validation {
+                    // Validation is passive-only: always show the live box+class+confidence
+                    // overlay (that's the entire point of this mode), independent of the
+                    // Planning debug-overlay toggle in settings.
                     RepairDetectionOverlay(
                         detections: mlDetection.detections,
                         viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
-                        imageToViewTransform: imageToViewTransform
+                        imageToViewTransform: imageToViewTransform,
+                        classStyles: validationModel?.classStyles,
+                        showMaskPolygon: true
+                    )
+                    .allowsHitTesting(false)
+                } else if settings.repairShowDetectionOverlay {
+                    RepairDetectionOverlay(
+                        detections: mlDetection.detections,
+                        viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
+                        imageToViewTransform: imageToViewTransform,
+                        classStyles: activeModel.classStyles
                     )
                     .allowsHitTesting(false)
                 }
 
-                RepairMaturingOverlay(
-                    candidates: maturingCandidates,
-                    viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
-                    imageToViewTransform: imageToViewTransform
-                )
+                if sessionMode == .planning {
+                    RepairMaturingOverlay(
+                        candidates: maturingCandidates,
+                        viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
+                        imageToViewTransform: imageToViewTransform
+                    )
+                }
 
                 topBar
 
@@ -173,10 +202,17 @@ struct RepairARSessionView: View {
             if let errorMessage { Text(errorMessage) }
         }
         .onChange(of: mlDetection.detections) { _, rawDetections in
-            processDetections(rawDetections)
+            // Validation mode is passive — it reads mlDetection.detections directly for its
+            // overlay above, and never runs the auto-placer (no pins in Validation).
+            if sessionMode == .planning {
+                processDetections(rawDetections)
+            }
         }
-        .onChange(of: settings.repairConfidenceThreshold) { _, newValue in
-            mlDetection.confidenceThreshold = newValue
+        .onChange(of: settings.repairPlanningConfidenceThreshold) { _, newValue in
+            if sessionMode == .planning { mlDetection.confidenceThreshold = newValue }
+        }
+        .onChange(of: settings.repairValidationConfidenceThreshold) { _, newValue in
+            if sessionMode == .validation { mlDetection.confidenceThreshold = newValue }
         }
         .onChange(of: settings.repairDedupRadiusMeters) { _, newValue in
             autoPlacer.dedupRadiusMeters = newValue
@@ -187,9 +223,16 @@ struct RepairARSessionView: View {
         .sheet(isPresented: $showSettingsSheet) {
             RepairSessionSettingsView(
                 settings: settings,
-                activeModel: activeModel,
+                sessionMode: sessionMode,
+                currentModel: sessionMode == .planning ? activeModel : validationModel,
                 onSelectModel: { newModel in
-                    Task { await swapActiveModel(to: newModel) }
+                    Task {
+                        if sessionMode == .planning {
+                            await swapActiveModel(to: newModel)
+                        } else {
+                            await swapValidationModel(to: newModel)
+                        }
+                    }
                 },
                 onClearScene: {
                     Task { await clearScene() }
@@ -287,8 +330,38 @@ struct RepairARSessionView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 56)
+
+            modeSwitcher
+                .padding(.top, 10)
+
             Spacer()
         }
+    }
+
+    /// Planning <-> Validation switch (v0.4). Lives in the viewport, right below the icon row,
+    /// so it's reachable alongside settings/snapshot without a trip out of AR.
+    @ViewBuilder
+    private var modeSwitcher: some View {
+        HStack(spacing: 2) {
+            ForEach(RepairSessionMode.allCases, id: \.self) { mode in
+                Button {
+                    guard !isSwappingModel else { return }
+                    Task { await switchMode(to: mode) }
+                } label: {
+                    Text(mode.displayName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(sessionMode == mode ? .black : .white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule().fill(sessionMode == mode ? Color.orange : Color.clear)
+                        )
+                }
+            }
+        }
+        .padding(2)
+        .background(Capsule().fill(.black.opacity(0.35)))
+        .disabled(isSwappingModel)
     }
 
     @ViewBuilder

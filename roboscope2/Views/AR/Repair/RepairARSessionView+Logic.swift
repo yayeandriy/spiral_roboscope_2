@@ -106,7 +106,7 @@ extension RepairARSessionView {
     /// Swaps the live detector model mid-session (from RepairSessionSettingsView). Downloads/
     /// installs the new model if not already cached, reloads the Vision request, and resets
     /// only the in-flight tracking candidates — already-placed pins (and the 3D dedup set that
-    /// protects them) are left untouched.
+    /// protects them) are left untouched. Only ever called while in Planning mode.
     @MainActor
     func swapActiveModel(to newModel: CoremlModel) async {
         guard newModel.id != activeModel.id else { return }
@@ -122,6 +122,89 @@ extension RepairARSessionView {
             errorMessage = "Failed to switch detector model: \(error.localizedDescription)"
         }
         isSwappingModel = false
+    }
+
+    /// Swaps the Validation-mode detector model mid-session (from RepairSessionSettingsView,
+    /// only reachable while already in Validation mode). No candidates/pins to reset — Validation
+    /// never places anything — just reloads the live Vision request if it's the active mode.
+    @MainActor
+    func swapValidationModel(to newModel: CoremlModel) async {
+        guard newModel.id != validationModel?.id else { return }
+        isSwappingModel = true
+        modelLoadError = nil
+        do {
+            let url = try await RepairModelDownloadService.shared.ensureModel(for: newModel)
+            validationModel = newModel
+            if sessionMode == .validation {
+                mlDetection.setModelURL(url, classLabels: newModel.classLabels)
+            }
+        } catch {
+            errorMessage = "Failed to switch validation model: \(error.localizedDescription)"
+        }
+        isSwappingModel = false
+    }
+
+    /// Resolves the model to use the FIRST time an operator switches this session into
+    /// Validation mode: operator's global preference (RepairSettings.preferredValidationModelId)
+    /// -> CoremlModel.isDefaultValidation -> legacy isDefault -> first active model. Mirrors
+    /// RepairView.resolveModelToUse's fallback chain for Planning.
+    func resolveValidationModel() async throws -> CoremlModel? {
+        let models = try await ModelRegistryService.shared.list()
+        guard !models.isEmpty else { return nil }
+
+        if let preferredIdString = settings.preferredValidationModelId,
+           let preferredUUID = UUID(uuidString: preferredIdString),
+           let match = models.first(where: { $0.id == preferredUUID }) {
+            return match
+        }
+        if let def = models.first(where: { $0.isDefaultValidation == true }) {
+            return def
+        }
+        if let def = models.first(where: { $0.isDefault == true }) {
+            return def
+        }
+        return models.first
+    }
+
+    /// Switches this session's live sub-mode. Planning <-> Validation swap the entire detection
+    /// pipeline's model/threshold; Planning's placed pins, candidates, and dedup state are never
+    /// touched by a trip through Validation and back — only the maturing-ring display (which has
+    /// no meaning while Validation's model is loaded) is cleared going into Validation.
+    @MainActor
+    func switchMode(to newMode: RepairSessionMode) async {
+        guard newMode != sessionMode else { return }
+        isSwappingModel = true
+        modelLoadError = nil
+        defer { isSwappingModel = false }
+
+        do {
+            let targetModel: CoremlModel
+            if newMode == .planning {
+                targetModel = activeModel
+            } else if let existing = validationModel {
+                targetModel = existing
+            } else {
+                guard let resolved = try await resolveValidationModel() else {
+                    errorMessage = "No detector model is available for Validation mode. Ask an admin to mark a default validation model on Robovision."
+                    return
+                }
+                validationModel = resolved
+                targetModel = resolved
+            }
+
+            let url = try await RepairModelDownloadService.shared.ensureModel(for: targetModel)
+            mlDetection.setModelURL(url, classLabels: targetModel.classLabels)
+            mlDetection.confidenceThreshold = newMode == .planning
+                ? settings.repairPlanningConfidenceThreshold
+                : settings.repairValidationConfidenceThreshold
+
+            if newMode == .validation {
+                withAnimation(.easeOut(duration: 0.2)) { maturingCandidates = [] }
+            }
+            sessionMode = newMode
+        } catch {
+            errorMessage = "Failed to switch to \(newMode.displayName) mode: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Per-frame update
@@ -149,26 +232,21 @@ extension RepairARSessionView {
 
     // MARK: - Raycast (existingPlaneGeometry -> estimatedPlane fallback)
 
-    /// Raycasts a normalized-image-space bbox's center to a real ARKit-world point.
-    /// Copied (fallback chain + worldTransform.columns.3 extraction) from
+    /// Raycasts a single normalized-image-space point to a real ARKit-world point. Copied
+    /// (fallback chain + worldTransform.columns.3 extraction) from
     /// LaserGuideARSessionView+Scoping.raycastDetection (READ-ONLY reference) per §5.2.
-    func raycastBBoxCenter(_ bbox: CGRect) -> SIMD3<Float>? {
+    func raycastImagePoint(_ normImg: CGPoint, viewportSize vp: CGSize) -> SIMD3<Float>? {
         guard let arView else { return nil }
-        let vp = viewportSize.width > 0 ? viewportSize : arView.bounds.size
-        guard vp.width > 0, vp.height > 0 else { return nil }
-
-        let centerNormImg = CGPoint(x: bbox.midX, y: bbox.midY)
-        let centerNormView = centerNormImg.applying(imageToViewTransform)
-        let centerPx = CGPoint(x: centerNormView.x * vp.width, y: centerNormView.y * vp.height)
+        let normView = normImg.applying(imageToViewTransform)
+        let px = CGPoint(x: normView.x * vp.width, y: normView.y * vp.height)
 
         var hit: ARRaycastResult?
-        if let h = arView.raycast(from: centerPx, allowing: .existingPlaneGeometry, alignment: .any).first {
+        if let h = arView.raycast(from: px, allowing: .existingPlaneGeometry, alignment: .any).first {
             hit = h
-        } else if let h = arView.raycast(from: centerPx, allowing: .estimatedPlane, alignment: .any).first {
+        } else if let h = arView.raycast(from: px, allowing: .estimatedPlane, alignment: .any).first {
             hit = h
         }
-
-        guard let hit else { return nil } // raycast miss -> no pin (05 §5.6)
+        guard let hit else { return nil }
 
         let world = hit.worldTransform.columns.3
         let pos = SIMD3<Float>(world.x, world.y, world.z)
@@ -176,17 +254,122 @@ extension RepairARSessionView {
         return pos
     }
 
+    /// Raycasts a normalized-image-space bbox to a real ARKit-world placement point — at the
+    /// bbox's centroid by default, or at a specific corner if `detectionClass` has a
+    /// `RepairClassStyle.corner` configured on the active model — plus a best-effort 3D
+    /// bounding box (Pin.bounding_box v0.3) around the detection.
+    ///
+    /// The box is built by raycasting all 4 image-space corners of `bbox` onto the same surface
+    /// (the object's on-plane footprint), then extruding that footprint straight up along world
+    /// +Y by a height proportional to the footprint size. World +Y is a safe "up" here because
+    /// this session's ARWorldTrackingConfiguration runs with `worldAlignment = .gravity`
+    /// (startARSession) — it's always the real-world vertical regardless of device orientation.
+    /// We have no actual depth/height sensing for the object itself, so the height is a rough
+    /// visual approximation only; it never blocks placement — if any footprint corner misses,
+    /// `box` is simply nil (Pin.bounding_box is fully optional).
+    func raycastBBoxAnchor(_ bbox: CGRect, detectionClass: String) -> (world: SIMD3<Float>, box: [SIMD3<Float>]?)? {
+        guard let arView else { return nil }
+        let vp = viewportSize.width > 0 ? viewportSize : arView.bounds.size
+        guard vp.width > 0, vp.height > 0 else { return nil }
+
+        let anchorNormImg = Self.anchorPoint(
+            for: bbox,
+            detectionClass: detectionClass,
+            model: activeModel,
+            imageToViewTransform: imageToViewTransform
+        )
+        guard let anchorWorld = raycastImagePoint(anchorNormImg, viewportSize: vp) else {
+            return nil // raycast miss -> no pin (05 §5.6)
+        }
+
+        let footprintImgPoints: [CGPoint] = [
+            CGPoint(x: bbox.minX, y: bbox.minY),
+            CGPoint(x: bbox.maxX, y: bbox.minY),
+            CGPoint(x: bbox.maxX, y: bbox.maxY),
+            CGPoint(x: bbox.minX, y: bbox.maxY),
+        ]
+        let footprint = footprintImgPoints.compactMap { raycastImagePoint($0, viewportSize: vp) }
+
+        var box: [SIMD3<Float>]? = nil
+        if footprint.count == 4 {
+            let widthEdge = simd_distance(footprint[0], footprint[1])
+            let depthEdge = simd_distance(footprint[1], footprint[2])
+            let height = min(max(min(widthEdge, depthEdge) * 0.6, 0.005), 0.05)
+            let up = SIMD3<Float>(0, height, 0)
+            box = footprint + footprint.map { $0 + up } // corners 0-3 near face, 4-7 far face
+        }
+
+        return (world: anchorWorld, box: box)
+    }
+
+    /// Resolves which point of `bbox` (in raw camera-buffer normalized space, top-left origin —
+    /// same space as `RepairDetection.boundingBox`) to raycast for `detectionClass`: the bbox
+    /// centroid by default, or a specific corner if the active model's `classStyles` configures
+    /// one (PROVISIONAL schema — see RepairClassStyle).
+    ///
+    /// The raw camera buffer's own coordinate space does NOT line up with "physical top-left of
+    /// the phone screen in portrait" — it's rotated/mirrored by however ARKit happens to hand it
+    /// back, and that relationship changes with device orientation. Rather than hardcode a
+    /// specific rotation, this transforms all 4 raw-space corners through the SAME
+    /// `imageToViewTransform` already used to place pins on screen (`frame.displayTransform`,
+    /// which is what actually compensates for device/camera orientation), then picks whichever
+    /// transformed corner is closest to the requested corner OF THE SCREEN. That keeps this
+    /// correct automatically under any orientation, since it's driven by the real transform
+    /// rather than an assumption about it.
+    static func anchorPoint(
+        for bbox: CGRect,
+        detectionClass: String,
+        model: CoremlModel,
+        imageToViewTransform: CGAffineTransform
+    ) -> CGPoint {
+        guard let corner = model.classStyles?[detectionClass]?.corner else {
+            return CGPoint(x: bbox.midX, y: bbox.midY)
+        }
+
+        let rawCorners: [CGPoint] = [
+            CGPoint(x: bbox.minX, y: bbox.minY),
+            CGPoint(x: bbox.maxX, y: bbox.minY),
+            CGPoint(x: bbox.minX, y: bbox.maxY),
+            CGPoint(x: bbox.maxX, y: bbox.maxY),
+        ]
+        let viewPoints = rawCorners.map { $0.applying(imageToViewTransform) }
+
+        // Screen-space convention (after imageToViewTransform, so already orientation-correct):
+        // top_left = smallest (x+y), bottom_right = largest (x+y), top_right = largest (x-y),
+        // bottom_left = largest (y-x). This holds regardless of how the transform happens to
+        // rotate/mirror the raw buffer for the current device orientation.
+        let sums = viewPoints.map { $0.x + $0.y }
+        let diffs = viewPoints.map { $0.x - $0.y }
+
+        let bestIndex: Int
+        switch corner {
+        case .topLeft:
+            bestIndex = sums.indices.min(by: { sums[$0] < sums[$1] }) ?? 0
+        case .bottomRight:
+            bestIndex = sums.indices.max(by: { sums[$0] < sums[$1] }) ?? 0
+        case .topRight:
+            bestIndex = diffs.indices.max(by: { diffs[$0] < diffs[$1] }) ?? 0
+        case .bottomLeft:
+            bestIndex = diffs.indices.min(by: { diffs[$0] < diffs[$1] }) ?? 0
+        }
+
+        return rawCorners[bestIndex]
+    }
+
     // MARK: - Auto-placement driver
 
     /// Feeds raw per-frame detections into RepairAutoPlacer, renders any newly-confirmed
-    /// pins, and buffers their CreatePin bodies for the next flush.
+    /// pins, and buffers their CreatePin bodies for the next flush. Only ever invoked while
+    /// `sessionMode == .planning` (see the `onChange(of: mlDetection.detections)` gate in
+    /// RepairARSessionView) — Validation mode is passive and reads `mlDetection.detections`
+    /// directly for its overlay, without ever calling this or touching the auto-placer/pins.
     func processDetections(_ rawDetections: [RepairDetection]) {
         // `RepairARSessionView` is a struct, not a class — there's no retain-cycle risk here,
         // so this captures a plain (non-weak) copy, matching the existing Timer-closure
         // convention in LaserGuideARSessionView+ManualTwoPoints.swift (READ-ONLY reference).
         // `[weak self]` is a compile error on struct `self` ("weak" requires a class type).
-        let placed = autoPlacer.ingest(rawDetections, raycast: { bbox in
-            raycastBBoxCenter(bbox)
+        let placed = autoPlacer.ingest(rawDetections, raycast: { bbox, detectionClass in
+            raycastBBoxAnchor(bbox, detectionClass: detectionClass)
         })
 
         // Drives the always-visible "maturing" progress ring — updated every frame regardless
@@ -213,12 +396,14 @@ extension RepairARSessionView {
         }
 
         for pin in placed {
-            pinRenderer.addPin(id: pin.id, at: pin.world)
+            let style = activeModel.classStyles?[pin.detectionClass]
+            pinRenderer.addPin(id: pin.id, at: pin.world, style: style)
             let body = CreatePin(
                 repairSessionId: session.id,
                 world: pin.world,
                 detectionClass: pin.detectionClass,
-                confidence: pin.confidence
+                confidence: pin.confidence,
+                boundingBoxCorners: pin.boundingBox
             )
             pendingPinsBuffer.append((localId: pin.id, pin: body))
         }
@@ -273,10 +458,21 @@ extension RepairARSessionView {
     /// `processDetections`) to `POST /pins/{id}/photo`, now that the server id is known. Best-
     /// effort and silent on failure — a missing pin photo never blocks anything else, and the
     /// original frame stays safe on disk (RepairPhotoStore) regardless of upload outcome.
+    ///
+    /// Guarded by `isFlushingPinPhotos`: this is called both immediately and from the periodic
+    /// timer, and each iteration `await`s a network call — Swift's cooperative concurrency lets
+    /// a second call reenter this same MainActor function while the first is suspended on that
+    /// await, which without the guard would let both calls race over the same
+    /// `pinsAwaitingPhotoUpload` entries and upload each photo twice.
     @MainActor
     func flushPendingPinPhotoUploads() async {
+        guard !isFlushingPinPhotos else { return }
         guard !pinsAwaitingPhotoUpload.isEmpty else { return }
-        for (serverId, localId) in pinsAwaitingPhotoUpload {
+        isFlushingPinPhotos = true
+        defer { isFlushingPinPhotos = false }
+
+        let toFlush = pinsAwaitingPhotoUpload
+        for (serverId, localId) in toFlush {
             guard let url = RepairPhotoStore.shared.pinSnapshotURL(sessionId: session.id, pinId: localId) else {
                 // Snapshot write (fire-and-forget, off-thread) may not have landed yet — retry a
                 // few more ticks before giving up if it truly never appears.
@@ -309,11 +505,26 @@ extension RepairARSessionView {
     /// Uploads any manual session-photo captures still pending (immediate upload attempts in
     /// `captureSessionPhoto` failed, or the app was briefly offline). Silent on failure, same
     /// reasoning as pin photos — the frames are already safe on disk either way.
+    ///
+    /// Guarded by `isFlushingSessionPhotos` for the same reason as `flushPendingPinPhotoUploads`:
+    /// `captureSessionPhoto` calls this immediately AND the periodic timer calls it too, and
+    /// without a reentrancy guard those two calls could both pick up the SAME queued capture
+    /// while the first is suspended awaiting its network call, uploading it twice (this is the
+    /// most likely cause of a single capture appearing to produce two server-side entries).
     @MainActor
     func flushPendingSessionPhotoUploads() async {
+        guard !isFlushingSessionPhotos else { return }
         guard !pendingSessionPhotoUploads.isEmpty else { return }
+        isFlushingSessionPhotos = true
+        defer { isFlushingSessionPhotos = false }
+
+        // Dequeue everything up front, before any `await` below, so a reentrant call (blocked
+        // by the guard above anyway, but defensive-in-depth) can never see the same item twice.
+        let toFlush = pendingSessionPhotoUploads
+        pendingSessionPhotoUploads = []
+
         var stillPending: [PendingSessionPhotoUpload] = []
-        for var upload in pendingSessionPhotoUploads {
+        for var upload in toFlush {
             guard let rawData = try? Data(contentsOf: upload.rawURL) else { continue } // file gone — drop silently
             let annotatedData = upload.annotatedURL.flatMap { try? Data(contentsOf: $0) }
             do {
@@ -327,7 +538,7 @@ extension RepairARSessionView {
                 }
             }
         }
-        pendingSessionPhotoUploads = stillPending
+        pendingSessionPhotoUploads.append(contentsOf: stillPending)
     }
 
     // MARK: - Tap-to-select-then-delete (§5.7)
@@ -431,11 +642,17 @@ extension RepairARSessionView {
     // MARK: - Manual photo capture (session-level "take picture" button)
 
     /// Saves two images: the raw camera frame at (ideally) 4K — see `preferredHighResVideoFormat`
-    /// — and a second image with the current pins baked in. The latter uses RealityKit's own
-    /// live-rendered composite (`ARView.snapshotAsync`), which already includes the pin spheres
-    /// as real scene entities, rather than re-projecting each pin's 3D position by hand; the
-    /// trade-off is that this second image is captured at screen resolution, not the raw
-    /// buffer's forced-4K resolution.
+    /// — and a second, "with overlay" image.
+    ///
+    /// In Planning mode the overlay is RealityKit's own live-rendered composite
+    /// (`ARView.snapshotAsync`), which already includes the pin spheres as real scene entities,
+    /// rather than re-projecting each pin's 3D position by hand.
+    ///
+    /// In Validation mode there ARE no 3D scene entities to bake in — the detection boxes are a
+    /// separate flat SwiftUI layer (RepairDetectionOverlay) that's never part of the ARView's own
+    /// Metal render target, so `snapshotAsync` alone would come back looking identical to the raw
+    /// frame. So for Validation this additionally burns the current live detections (box + class
+    /// + confidence, same geometry math as the on-screen overlay) onto the snapshot in software.
     @MainActor
     func captureSessionPhoto() async {
         guard !isCapturingPhoto, let arView, let frame = arView.session.currentFrame else { return }
@@ -451,7 +668,18 @@ extension RepairARSessionView {
         }
 
         let capturedAt = Date()
-        let bakedImage = await arView.snapshotAsync(saveToHDR: false)
+        let arSnapshot = await arView.snapshotAsync(saveToHDR: false)
+        let bakedImage: UIImage?
+        if sessionMode == .validation, let arSnapshot {
+            bakedImage = RepairPhotoStore.shared.renderDetectionOverlay(
+                onto: arSnapshot,
+                detections: mlDetection.detections,
+                imageToViewTransform: imageToViewTransform,
+                classStyles: validationModel?.classStyles
+            )
+        } else {
+            bakedImage = arSnapshot
+        }
 
         do {
             // Save to local disk FIRST — this is the durable copy; the upload below is

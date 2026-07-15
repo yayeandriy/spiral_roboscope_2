@@ -8,9 +8,11 @@
 //  Copied from Services/Detection/LaserMLDetectionService.swift (READ-ONLY reference) per
 //  05-ios-repair.md §5.2. Renamed LaserMLDetection -> RepairDetection, service ->
 //  RepairMLDetectionService. Keeps VNCoreMLRequest setup, processPixelBuffer(_:orientation:),
-//  and YOLO tensor decode verbatim in spirit. The +Segmentation.swift half (oriented quads /
-//  mask points) is DROPPED — Repair places single-point pins, not quads, so RepairDetection
-//  carries only a bounding box (no orientedQuad / maskPoints fields).
+//  and YOLO tensor decode verbatim in spirit. The +Segmentation.swift half (oriented quads) is
+//  DROPPED — Repair still places single-point pins, not quads. v0.4 (Validation mode) DOES add
+//  back a `maskPolygon` field for the passive overlay's benefit (see +Decode.swift), ported
+//  from class-balance-ios's live YOLOv8-seg polygon extraction — this is used for DISPLAY only
+//  and never feeds pin placement/raycasting, which still uses `boundingBox`.
 //
 
 import Foundation
@@ -34,19 +36,28 @@ struct RepairDetection: Identifiable, Equatable {
     let label: String
     let confidence: Float
     let timestamp: Date
+    /// Segmentation mask contour, in the SAME normalized image space (0..1, top-left origin)
+    /// as `boundingBox` — populated only for YOLOv8-segmentation exports (32 mask-coefficient
+    /// channels + a proto tensor both present in the model's raw output; see
+    /// `RepairMLDetectionService+Decode.swift.extractMaskPolygon`). nil for plain-detect models,
+    /// or if extraction fails for a given box — callers should fall back to drawing
+    /// `boundingBox` in that case.
+    var maskPolygon: [CGPoint]? = nil
 
     init(
         boundingBox: CGRect,
         classIndex: Int? = nil,
         label: String,
         confidence: Float,
-        timestamp: Date
+        timestamp: Date,
+        maskPolygon: [CGPoint]? = nil
     ) {
         self.boundingBox = boundingBox
         self.classIndex = classIndex
         self.label = label
         self.confidence = confidence
         self.timestamp = timestamp
+        self.maskPolygon = maskPolygon
     }
 }
 
@@ -135,6 +146,21 @@ final class RepairMLDetectionService: ObservableObject {
         do {
             let (mlModel, modelURL) = try Self.loadRepairModel(overrideURL: overrideURL)
             log("ensureRequest: MLModel loaded, modelURL=\(modelURL?.lastPathComponent ?? "nil")")
+
+            // Prefer the model's OWN embedded class order (Ultralytics `names` metadata, baked
+            // into the same artifact as the weights) over the backend's `class_labels` array.
+            // The two are SUPPOSED to agree, but class_labels is separately maintained metadata
+            // on the backend — if it ever drifts out of sync with the actual export, indexing
+            // classLabels[argmax] silently attaches the wrong NAME to a correctly-detected box
+            // (this is exactly what happened with "corners2": index 0 matched by coincidence,
+            // indices 1-3 were cyclically wrong). The model's own metadata can't drift from its
+            // own tensor, so it's the ground truth whenever present.
+            if let embedded = Self.embeddedClassNames(from: mlModel, expectedCount: self.classLabels.count),
+               embedded != self.classLabels {
+                log("ensureRequest: classLabels mismatch — backend=\(self.classLabels) modelEmbedded=\(embedded). Using model-embedded order.")
+                self.classLabels = embedded
+            }
+
             let vnModel = try VNCoreMLModel(for: mlModel)
             let request = VNCoreMLRequest(model: vnModel)
             // YOLO models are typically trained with letterbox (scaleFit) preprocessing.
@@ -424,6 +450,38 @@ final class RepairMLDetectionService: ObservableObject {
             }
         }
         return nil
+    }
+
+    /// Parses Ultralytics-style CoreML metadata (`modelDescription.metadata[.creatorDefinedKey]
+    /// ["names"]`, a Python-dict-literal string like `{0: 'l1', 1: 'r2', 2: 'r1', 3: 'l2'}`) into
+    /// an array ordered by the tensor's own class index. Copied (parsing logic) from
+    /// class-balance-ios/Services/ModelManager.swift.parseClassNamesDict — the sister app's
+    /// proven approach for reading class order straight from the model artifact instead of a
+    /// separately-maintained label list that can drift out of sync with it.
+    /// Returns nil if the model has no such metadata (e.g. a non-Ultralytics export), in which
+    /// case the caller should keep using the backend's `class_labels` order as-is.
+    static func embeddedClassNames(from model: MLModel, expectedCount: Int) -> [String]? {
+        guard let userMeta = model.modelDescription.metadata[.creatorDefinedKey] as? [String: String],
+              let namesRaw = userMeta["names"] else {
+            return nil
+        }
+        let trimmed = namesRaw.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}") else { return nil }
+        let inner = String(trimmed.dropFirst().dropLast())
+
+        var map: [Int: String] = [:]
+        for pair in inner.components(separatedBy: ",") {
+            let parts = pair.components(separatedBy: ":")
+            guard parts.count >= 2 else { continue }
+            let key = parts[0].trimmingCharacters(in: .whitespaces)
+            let value = parts.dropFirst().joined(separator: ":")
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+            if let idx = Int(key) { map[idx] = value }
+        }
+        guard !map.isEmpty else { return nil }
+        let count = max(expectedCount, (map.keys.max() ?? -1) + 1)
+        return (0..<count).map { map[$0] ?? "class_\($0)" }
     }
 
     static func orientedImageSize(for pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) -> CGSize {

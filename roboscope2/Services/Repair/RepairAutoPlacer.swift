@@ -41,6 +41,10 @@ struct RepairPlacedPin {
     let world: SIMD3<Float>
     let detectionClass: String
     let confidence: Float
+    /// Best-effort 3D box (8 corners, same world space as `world`) around the detection at
+    /// confirmation time — nil if the caller's raycast couldn't build one (e.g. a corner
+    /// raycast miss). Optional end-to-end, matching Pin.bounding_box (v0.3).
+    let boundingBox: [SIMD3<Float>]?
 }
 
 /// The core auto-placement state machine. One instance per Repair AR session.
@@ -123,14 +127,17 @@ final class RepairAutoPlacer {
     /// (05 §5.6: association needs raw per-frame boxes; the union-merge machinery is reused
     /// only as the association primitive, i.e. the IoU check, not as a pre-merge).
     ///
-    /// `raycast` maps a confirming candidate's normalized-image-space bbox to a real-world
-    /// ARKit point (existing-plane -> estimated-plane fallback, implemented by the caller).
-    /// Returns nil on a raycast miss, in which case no pin is placed this frame but the
-    /// candidate keeps evaluating on subsequent frames.
+    /// `raycast` maps a confirming candidate's normalized-image-space bbox (+ its detection
+    /// class, so the caller can look up a per-class placement anchor — see
+    /// RepairARSessionView+Logic.anchorPoint) to a real-world ARKit point plus a best-effort 3D
+    /// bounding box (existing-plane -> estimated-plane fallback, implemented by the caller).
+    /// Returns nil on a placement-point raycast miss, in which case no pin is placed this frame
+    /// and the candidate keeps evaluating on subsequent frames; the box half of the tuple may be
+    /// nil independently (placement still succeeds without a box).
     @discardableResult
     func ingest(
         _ rawDetections: [RepairDetection],
-        raycast: (CGRect) -> SIMD3<Float>?
+        raycast: (CGRect, String) -> (world: SIMD3<Float>, box: [SIMD3<Float>]?)?
     ) -> [RepairPlacedPin] {
 
         // MARK: 1. ASSOCIATE (2D)
@@ -230,10 +237,11 @@ final class RepairAutoPlacer {
             guard !candidate.hasProducedPin else { continue }
             guard candidate.confirmedHitCount >= confirmThreshold else { continue }
 
-            guard let world = raycast(candidate.lastBBox) else {
+            guard let hitResult = raycast(candidate.lastBBox, candidate.lastClass) else {
                 // Raycast miss -> no pin, keep evaluating (do nothing this frame).
                 continue
             }
+            let world = hitResult.world
             guard !world.x.isNaN, !world.y.isNaN, !world.z.isNaN else { continue }
 
             let tooClose = placedPins.contains { existing in
@@ -255,7 +263,8 @@ final class RepairAutoPlacer {
                 id: pinId,
                 world: world,
                 detectionClass: candidate.lastClass,
-                confidence: candidate.lastConfidence
+                confidence: candidate.lastConfidence,
+                boundingBox: hitResult.box
             )
             newlyPlaced.append(placed)
         }

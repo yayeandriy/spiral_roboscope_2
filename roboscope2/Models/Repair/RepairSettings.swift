@@ -15,6 +15,22 @@
 import Foundation
 import Combine
 
+/// A Repair AR session is split into two sub-modes (v0.4). Planning is the original
+/// auto-placement workflow, unchanged. Validation is a new passive mode: no auto-placement, no
+/// pins — just a live YOLO detection overlay (box + class + confidence) using a SEPARATE model,
+/// for visually confirming detection quality without touching the planning pin set.
+enum RepairSessionMode: String, CaseIterable {
+    case planning
+    case validation
+
+    var displayName: String {
+        switch self {
+        case .planning: return "Planning"
+        case .validation: return "Validation"
+        }
+    }
+}
+
 final class RepairSettings: ObservableObject {
     static let shared = RepairSettings()
 
@@ -25,9 +41,14 @@ final class RepairSettings: ObservableObject {
         static let confirmThreshold = "repairConfirmThreshold"
         static let dedupRadiusMeters = "repairDedupRadiusMeters"
         static let assocIoUThreshold = "repairAssocIoUThreshold"
-        static let confidenceThreshold = "repairConfidenceThreshold"
+        // Kept as the on-disk key for the (renamed) planning threshold, so an existing install's
+        // saved value carries over rather than silently resetting to the new 0.35 default.
+        static let planningConfidenceThreshold = "repairConfidenceThreshold"
+        static let validationConfidenceThreshold = "repairValidationConfidenceThreshold"
         static let bulkFlushIntervalSeconds = "repairBulkFlushIntervalSeconds"
-        static let preferredModelId = "repairPreferredModelId"
+        // Kept as the on-disk key for the (renamed) planning model preference, same reasoning.
+        static let preferredPlanningModelId = "repairPreferredModelId"
+        static let preferredValidationModelId = "repairPreferredValidationModelId"
         static let pinRadiusMeters = "repairPinRadiusMeters"
         static let showDetectionOverlay = "repairShowDetectionOverlay"
     }
@@ -52,9 +73,16 @@ final class RepairSettings: ObservableObject {
         didSet { defaults.set(repairAssocIoUThreshold, forKey: Keys.assocIoUThreshold) }
     }
 
-    /// Minimum YOLO confidence for a raw detection to be considered at all.
-    @Published var repairConfidenceThreshold: Float {
-        didSet { defaults.set(repairConfidenceThreshold, forKey: Keys.confidenceThreshold) }
+    /// Minimum YOLO confidence for a raw detection to be considered at all, in Planning mode.
+    @Published var repairPlanningConfidenceThreshold: Float {
+        didSet { defaults.set(repairPlanningConfidenceThreshold, forKey: Keys.planningConfidenceThreshold) }
+    }
+
+    /// Minimum YOLO confidence for a raw detection to be shown at all, in Validation mode.
+    /// Independent of the planning threshold — Validation runs a different model for a different
+    /// purpose (passive confirmation, not placement), so it gets its own tunable.
+    @Published var repairValidationConfidenceThreshold: Float {
+        didSet { defaults.set(repairValidationConfidenceThreshold, forKey: Keys.validationConfidenceThreshold) }
     }
 
     /// How often buffered pins are flushed to the API during an active session (seconds).
@@ -76,16 +104,31 @@ final class RepairSettings: ObservableObject {
         didSet { defaults.set(repairShowDetectionOverlay, forKey: Keys.showDetectionOverlay) }
     }
 
-    /// Operator-chosen detector model (CoremlModel.id, as a UUID string) used for NEW repair
-    /// sessions instead of the server's registry default. nil = use the server default.
-    /// Only affects sessions started from now on — a session already created keeps whatever
-    /// model it was created with (there is no endpoint to retarget an existing session's model).
-    @Published var preferredModelId: String? {
+    /// Operator-chosen Planning-mode detector model (CoremlModel.id, as a UUID string) used for
+    /// NEW repair sessions instead of the server's registry default. nil = use the server/model
+    /// registry default (CoremlModel.isDefaultPlanning, falling back to isDefault). Only affects
+    /// sessions started from now on — a session already created keeps whatever model it was
+    /// created with (there is no endpoint to retarget an existing session's model).
+    @Published var preferredPlanningModelId: String? {
         didSet {
-            if let preferredModelId {
-                defaults.set(preferredModelId, forKey: Keys.preferredModelId)
+            if let preferredPlanningModelId {
+                defaults.set(preferredPlanningModelId, forKey: Keys.preferredPlanningModelId)
             } else {
-                defaults.removeObject(forKey: Keys.preferredModelId)
+                defaults.removeObject(forKey: Keys.preferredPlanningModelId)
+            }
+        }
+    }
+
+    /// Operator-chosen Validation-mode detector model (CoremlModel.id, as a UUID string). nil =
+    /// use CoremlModel.isDefaultValidation, falling back further to isDefault/first active model.
+    /// Resolved lazily — only looked up the first time a session's operator switches into
+    /// Validation mode, never at session creation.
+    @Published var preferredValidationModelId: String? {
+        didSet {
+            if let preferredValidationModelId {
+                defaults.set(preferredValidationModelId, forKey: Keys.preferredValidationModelId)
+            } else {
+                defaults.removeObject(forKey: Keys.preferredValidationModelId)
             }
         }
     }
@@ -98,25 +141,31 @@ final class RepairSettings: ObservableObject {
         self.repairConfirmThreshold = confirm > 0 ? confirm : 15
 
         let dedup = defaults.float(forKey: Keys.dedupRadiusMeters)
-        self.repairDedupRadiusMeters = dedup > 0 ? dedup : 0.05
+        self.repairDedupRadiusMeters = dedup > 0 ? dedup : 0.02
 
         let iou = defaults.float(forKey: Keys.assocIoUThreshold)
         self.repairAssocIoUThreshold = iou > 0 ? iou : 0.3
 
-        let conf = defaults.float(forKey: Keys.confidenceThreshold)
-        self.repairConfidenceThreshold = conf > 0 ? conf : 0.5
+        let planningConf = defaults.float(forKey: Keys.planningConfidenceThreshold)
+        self.repairPlanningConfidenceThreshold = planningConf > 0 ? planningConf : 0.35
+
+        let validationConf = defaults.float(forKey: Keys.validationConfidenceThreshold)
+        self.repairValidationConfidenceThreshold = validationConf > 0 ? validationConf : 0.35
 
         let flush = defaults.double(forKey: Keys.bulkFlushIntervalSeconds)
         self.repairBulkFlushIntervalSeconds = flush > 0 ? flush : 5.0
 
         let pinRadius = defaults.float(forKey: Keys.pinRadiusMeters)
-        self.repairPinRadiusMeters = pinRadius > 0 ? pinRadius : 0.012
+        // Default diameter 1 cm -> radius 0.005 m. Slider (RepairSessionSettingsView) allows
+        // down to 0.05 cm radius (0.1 cm diameter).
+        self.repairPinRadiusMeters = pinRadius > 0 ? pinRadius : 0.005
 
         // Default ON — no explicit key written yet means "not yet set", not "false".
         self.repairShowDetectionOverlay = defaults.object(forKey: Keys.showDetectionOverlay) == nil
             ? true
             : defaults.bool(forKey: Keys.showDetectionOverlay)
 
-        self.preferredModelId = defaults.string(forKey: Keys.preferredModelId)
+        self.preferredPlanningModelId = defaults.string(forKey: Keys.preferredPlanningModelId)
+        self.preferredValidationModelId = defaults.string(forKey: Keys.preferredValidationModelId)
     }
 }

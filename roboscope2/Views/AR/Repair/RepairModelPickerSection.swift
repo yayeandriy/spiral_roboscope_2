@@ -36,7 +36,13 @@ struct RepairModelPickerSection: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             } else {
-                Picker("Detector Model", selection: $repairSettings.preferredModelId) {
+                Picker("Planning Model", selection: $repairSettings.preferredPlanningModelId) {
+                    Text("Server Default").tag(nil as String?)
+                    ForEach(models) { model in
+                        Text(model.name).tag(model.id.uuidString as String?)
+                    }
+                }
+                Picker("Validation Model", selection: $repairSettings.preferredValidationModelId) {
                     Text("Server Default").tag(nil as String?)
                     ForEach(models) { model in
                         Text(model.name).tag(model.id.uuidString as String?)
@@ -46,7 +52,7 @@ struct RepairModelPickerSection: View {
         } header: {
             Text("Repair")
         } footer: {
-            Text("Applies to new repair sessions started from the Repair tab. Sessions already in progress keep the model they were started with.")
+            Text("Planning Model applies to new repair sessions started from the Repair tab. Validation Model applies the first time an operator switches a session into Validation mode. \"Server Default\" defers to whichever model is flagged as the default for that mode on Robovision. Sessions already in progress keep the models they're already using.")
         }
         .task { await loadModels() }
         .alert("Error", isPresented: .constant(errorMessage != nil)) {
