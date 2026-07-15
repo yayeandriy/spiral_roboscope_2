@@ -63,6 +63,18 @@ struct RepairARSessionView: View {
     @State var flushTimer: Timer? = nil
     @State var isClosing = false
 
+    /// Pins whose server id is known but whose locally-cached snapshot (RepairPhotoStore)
+    /// hasn't been uploaded to `POST /pins/{id}/photo` yet, keyed by server id -> local id
+    /// (the snapshot file on disk is keyed by local id, not server id). Retried on the same
+    /// timer as `flushPendingPins`.
+    @State var pinsAwaitingPhotoUpload: [UUID: UUID] = [:]
+    @State var pinPhotoUploadAttempts: [UUID: Int] = [:]
+
+    /// Manual session-photo captures still needing an upload to
+    /// `POST /repair-sessions/{id}/photos` (already saved to local disk regardless of upload
+    /// outcome — see RepairPhotoStore). Retried on the same timer as `flushPendingPins`.
+    @State var pendingSessionPhotoUploads: [PendingSessionPhotoUpload] = []
+
     /// The model actually driving live detection right now. Starts as the session's launch
     /// model but can be swapped in-session from RepairSessionSettingsView; the server-side
     /// session record's coreml_model_id is NOT updated (no endpoint for that).

@@ -87,6 +87,69 @@ final class RepairHTTP {
         let _: RepairEmptyResponse = try await perform(request, allowEmptyBody: true)
     }
 
+    // MARK: - Multipart (photo uploads — 02-contracts.md §2.1 pin/session photo endpoints)
+
+    struct MultipartFilePart {
+        let name: String
+        let filename: String
+        let mimeType: String
+        let data: Data
+    }
+
+    /// POST multipart/form-data with one or more file parts plus optional plain text fields
+    /// (e.g. `captured_at`). Used by the pin-photo and session-photo upload endpoints — both
+    /// return the created/updated JSON object directly, decoded the same way as any other verb.
+    func postMultipart<T: Decodable>(
+        _ path: String,
+        fileParts: [MultipartFilePart],
+        textFields: [String: String] = [:]
+    ) async throws -> T {
+        let request = try buildMultipartRequest(path: path, method: "POST", fileParts: fileParts, textFields: textFields)
+        return try await perform(request)
+    }
+
+    private func buildMultipartRequest(
+        path: String,
+        method: String,
+        fileParts: [MultipartFilePart],
+        textFields: [String: String]
+    ) throws -> URLRequest {
+        guard let url = URL(string: "\(VerandaAPIConfiguration.baseURL)\(path)") else {
+            throw RepairAPIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+
+        let boundary = "RepairBoundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let lineBreak = "\r\n"
+        var body = Data()
+
+        for (key, value) in textFields {
+            body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(key)\"\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+            body.append("\(value)\(lineBreak)".data(using: .utf8)!)
+        }
+
+        for part in fileParts {
+            body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+            body.append(
+                "Content-Disposition: form-data; name=\"\(part.name)\"; filename=\"\(part.filename)\"\(lineBreak)"
+                    .data(using: .utf8)!
+            )
+            body.append("Content-Type: \(part.mimeType)\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+            body.append(part.data)
+            body.append(lineBreak.data(using: .utf8)!)
+        }
+
+        body.append("--\(boundary)--\(lineBreak)".data(using: .utf8)!)
+        request.httpBody = body
+        return request
+    }
+
     // MARK: - Request building
 
     private func buildRequest<Body: Encodable>(

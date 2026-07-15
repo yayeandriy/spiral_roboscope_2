@@ -44,4 +44,18 @@ final class PinService: ObservableObject {
     func deletePin(_ id: UUID) async throws {
         try await http.delete("/pins/\(id.uuidString)")
     }
+
+    /// POST /v1/pins/{id}/photo — the pin must already exist (created via createPin/
+    /// createPinsBulk). Calling this again on the same pin replaces the photo server-side.
+    func uploadPinPhoto(pinId: UUID, jpegData: Data) async throws -> Pin {
+        try await http.postMultipart(
+            "/pins/\(pinId.uuidString)/photo",
+            fileParts: [RepairHTTP.MultipartFilePart(name: "photo", filename: "pin.jpg", mimeType: "image/jpeg", data: jpegData)]
+        )
+    }
+
+    /// DELETE /v1/pins/{id}/photo — clears Pin.photoUrl back to null.
+    func deletePinPhoto(pinId: UUID) async throws {
+        try await http.delete("/pins/\(pinId.uuidString)/photo")
+    }
 }

@@ -19,6 +19,16 @@ import UIKit
 import Combine
 import QuartzCore
 
+/// A manual session-photo capture still waiting to reach `POST /repair-sessions/{id}/photos`,
+/// pointing at the already-saved-to-disk local files (see RepairPhotoStore) rather than holding
+/// the image data itself.
+struct PendingSessionPhotoUpload {
+    let rawURL: URL
+    let annotatedURL: URL?
+    let capturedAt: Date
+    var attempts: Int = 0
+}
+
 extension RepairARSessionView {
 
     static func cgImageOrientation(for interfaceOrientation: UIInterfaceOrientation) -> CGImagePropertyOrientation {
@@ -226,6 +236,10 @@ extension RepairARSessionView {
         flushTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
                 await flushPendingPins()
+                // Ordered after flushPendingPins: a pin's server id (needed for the photo
+                // endpoint) is only known once its bulk-create flush above has succeeded.
+                await flushPendingPinPhotoUploads()
+                await flushPendingSessionPhotoUploads()
             }
         }
     }
@@ -246,12 +260,74 @@ extension RepairARSessionView {
             // to learn each pin's server-assigned id (needed later for delete).
             for (index, serverPin) in created.enumerated() where index < toFlush.count {
                 serverIdByLocalId[toFlush[index].localId] = serverPin.id
+                pinsAwaitingPhotoUpload[serverPin.id] = toFlush[index].localId
             }
         } catch {
             // Put them back for the next attempt rather than dropping data silently.
             pendingPinsBuffer.append(contentsOf: toFlush)
             errorMessage = "Failed to sync pins: \(error.localizedDescription)"
         }
+    }
+
+    /// Uploads each newly-confirmed pin's locally-cached snapshot (captured at placement time in
+    /// `processDetections`) to `POST /pins/{id}/photo`, now that the server id is known. Best-
+    /// effort and silent on failure — a missing pin photo never blocks anything else, and the
+    /// original frame stays safe on disk (RepairPhotoStore) regardless of upload outcome.
+    @MainActor
+    func flushPendingPinPhotoUploads() async {
+        guard !pinsAwaitingPhotoUpload.isEmpty else { return }
+        for (serverId, localId) in pinsAwaitingPhotoUpload {
+            guard let url = RepairPhotoStore.shared.pinSnapshotURL(sessionId: session.id, pinId: localId) else {
+                // Snapshot write (fire-and-forget, off-thread) may not have landed yet — retry a
+                // few more ticks before giving up if it truly never appears.
+                pinPhotoUploadAttempts[serverId, default: 0] += 1
+                if pinPhotoUploadAttempts[serverId, default: 0] > 10 {
+                    pinsAwaitingPhotoUpload.removeValue(forKey: serverId)
+                    pinPhotoUploadAttempts.removeValue(forKey: serverId)
+                }
+                continue
+            }
+            guard let data = try? Data(contentsOf: url) else {
+                pinsAwaitingPhotoUpload.removeValue(forKey: serverId)
+                pinPhotoUploadAttempts.removeValue(forKey: serverId)
+                continue
+            }
+            do {
+                _ = try await pinServiceObj.uploadPinPhoto(pinId: serverId, jpegData: data)
+                pinsAwaitingPhotoUpload.removeValue(forKey: serverId)
+                pinPhotoUploadAttempts.removeValue(forKey: serverId)
+            } catch {
+                pinPhotoUploadAttempts[serverId, default: 0] += 1
+                if pinPhotoUploadAttempts[serverId, default: 0] > 5 {
+                    pinsAwaitingPhotoUpload.removeValue(forKey: serverId)
+                    pinPhotoUploadAttempts.removeValue(forKey: serverId)
+                }
+            }
+        }
+    }
+
+    /// Uploads any manual session-photo captures still pending (immediate upload attempts in
+    /// `captureSessionPhoto` failed, or the app was briefly offline). Silent on failure, same
+    /// reasoning as pin photos — the frames are already safe on disk either way.
+    @MainActor
+    func flushPendingSessionPhotoUploads() async {
+        guard !pendingSessionPhotoUploads.isEmpty else { return }
+        var stillPending: [PendingSessionPhotoUpload] = []
+        for var upload in pendingSessionPhotoUploads {
+            guard let rawData = try? Data(contentsOf: upload.rawURL) else { continue } // file gone — drop silently
+            let annotatedData = upload.annotatedURL.flatMap { try? Data(contentsOf: $0) }
+            do {
+                _ = try await RepairSessionPhotoService.shared.upload(
+                    sessionId: session.id, raw: rawData, annotated: annotatedData, capturedAt: upload.capturedAt
+                )
+            } catch {
+                upload.attempts += 1
+                if upload.attempts <= 8 {
+                    stillPending.append(upload)
+                }
+            }
+        }
+        pendingSessionPhotoUploads = stillPending
     }
 
     // MARK: - Tap-to-select-then-delete (§5.7)
@@ -303,6 +379,8 @@ extension RepairARSessionView {
         pendingPinsBuffer.removeAll { $0.localId == pinId }
 
         guard let serverId = serverIdByLocalId.removeValue(forKey: pinId) else { return }
+        pinsAwaitingPhotoUpload.removeValue(forKey: serverId)
+        pinPhotoUploadAttempts.removeValue(forKey: serverId)
         Task {
             do {
                 try await pinServiceObj.deletePin(serverId)
@@ -328,6 +406,8 @@ extension RepairARSessionView {
         autoPlacer.reset()
         pendingPinsBuffer.removeAll()
         serverIdByLocalId.removeAll()
+        pinsAwaitingPhotoUpload.removeAll()
+        pinPhotoUploadAttempts.removeAll()
         selectedPinId = nil
         placedPinCount = 0
         withAnimation(.easeOut(duration: 0.25)) {
@@ -370,14 +450,24 @@ extension RepairARSessionView {
             return
         }
 
+        let capturedAt = Date()
         let bakedImage = await arView.snapshotAsync(saveToHDR: false)
 
         do {
-            try await RepairPhotoStore.shared.saveManualCapture(sessionId: session.id, raw: rawImage, baked: bakedImage)
+            // Save to local disk FIRST — this is the durable copy; the upload below is
+            // best-effort and retried by flushPendingSessionPhotoUploads if it fails here.
+            let saved = try await RepairPhotoStore.shared.saveManualCapture(sessionId: session.id, raw: rawImage, baked: bakedImage)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation(.easeOut(duration: 0.12)) { photoFlash = true }
             try? await Task.sleep(nanoseconds: 120_000_000)
             withAnimation(.easeOut(duration: 0.3)) { photoFlash = false }
+
+            pendingSessionPhotoUploads.append(
+                PendingSessionPhotoUpload(rawURL: saved.raw, annotatedURL: saved.baked, capturedAt: capturedAt)
+            )
+            // Try right away so the common case (network is fine) uploads immediately rather
+            // than waiting for the next periodic flush tick.
+            await flushPendingSessionPhotoUploads()
         } catch {
             errorMessage = "Failed to save photo: \(error.localizedDescription)"
         }
@@ -390,6 +480,8 @@ extension RepairARSessionView {
         guard !isClosing else { return }
         isClosing = true
         await flushPendingPins()
+        await flushPendingPinPhotoUploads()
+        await flushPendingSessionPhotoUploads()
         do {
             _ = try await sessionService.close(id: session.id)
         } catch {

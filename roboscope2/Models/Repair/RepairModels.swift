@@ -85,6 +85,8 @@ struct Pin: Codable, Identifiable, Hashable {
     let detectionClass: String
     let confidence: Float
     let customProps: [String: AnyCodable]?
+    /// Set via `POST /pins/{id}/photo` (0006_pin_photo.sql); null until a photo is attached.
+    let photoUrl: String?
     let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -92,6 +94,7 @@ struct Pin: Codable, Identifiable, Hashable {
         case repairSessionId = "repair_session_id"
         case detectionClass = "detection_class"
         case customProps = "custom_props"
+        case photoUrl = "photo_url"
         case createdAt = "created_at"
     }
 
@@ -167,4 +170,32 @@ struct CreatePin: Codable {
 struct CreatePinsBulk: Codable {
     /// All entries must share one repair_session_id (API validates this too).
     let pins: [CreatePin]
+}
+
+// MARK: - RepairSessionPhoto (0007_session_photos.sql — manual "take picture" captures)
+
+/// One manual capture event: always a `raw` frame, plus a best-effort `annotated` (pins baked
+/// in) frame that may be null if that render/upload failed. Not tied to any specific pin —
+/// distinct from `Pin.photoUrl`.
+struct RepairSessionPhoto: Codable, Identifiable, Hashable {
+    let id: UUID
+    let repairSessionId: UUID
+    let rawUrl: String
+    let annotatedUrl: String?
+    let capturedAt: Date
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case repairSessionId = "repair_session_id"
+        case rawUrl = "raw_url"
+        case annotatedUrl = "annotated_url"
+        case capturedAt = "captured_at"
+        case createdAt = "created_at"
+    }
+}
+
+/// GET /repair-sessions/{id}/photos response envelope (not a bare array).
+struct RepairSessionPhotosResponse: Codable {
+    let photos: [RepairSessionPhoto]
 }
