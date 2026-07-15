@@ -122,8 +122,12 @@ extension RepairARSessionView {
     /// Feeds raw per-frame detections into RepairAutoPlacer, renders any newly-confirmed
     /// pins, and buffers their CreatePin bodies for the next flush.
     func processDetections(_ rawDetections: [RepairDetection]) {
-        let placed = autoPlacer.ingest(rawDetections, raycast: { [weak self] bbox in
-            self?.raycastBBoxCenter(bbox)
+        // `RepairARSessionView` is a struct, not a class — there's no retain-cycle risk here,
+        // so this captures a plain (non-weak) copy, matching the existing Timer-closure
+        // convention in LaserGuideARSessionView+ManualTwoPoints.swift (READ-ONLY reference).
+        // `[weak self]` is a compile error on struct `self` ("weak" requires a class type).
+        let placed = autoPlacer.ingest(rawDetections, raycast: { bbox in
+            raycastBBoxCenter(bbox)
         })
         guard !placed.isEmpty else { return }
 
@@ -146,9 +150,12 @@ extension RepairARSessionView {
     func startFlushTimer() {
         stopFlushTimer()
         let interval = max(1.0, settings.repairBulkFlushIntervalSeconds)
-        flushTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        // No `[weak self]` — `RepairARSessionView` is a struct, so `weak` doesn't apply (it's a
+        // compile error on a non-class type). Matches the plain-capture Timer pattern already
+        // used in LaserGuideARSessionView+ManualTwoPoints.swift (READ-ONLY reference).
+        flushTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
-                await self?.flushPendingPins()
+                await flushPendingPins()
             }
         }
     }
