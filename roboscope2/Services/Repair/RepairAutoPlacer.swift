@@ -46,10 +46,12 @@ struct RepairPlacedPin {
 /// The core auto-placement state machine. One instance per Repair AR session.
 final class RepairAutoPlacer {
 
-    let windowSize: Int
-    let confirmThreshold: Int
-    let dedupRadiusMeters: Float
-    let iouThreshold: Float
+    // `var`, not `let` — the in-session settings sheet lets the operator retune these live
+    // (RepairARSessionView observes RepairSettings and pushes changes in here on the fly).
+    var windowSize: Int
+    var confirmThreshold: Int
+    var dedupRadiusMeters: Float
+    var iouThreshold: Float
 
     private(set) var candidates: [RepairCandidate] = []
     /// All pins placed so far this session — used for the 3D dedup check.
@@ -71,6 +73,37 @@ final class RepairAutoPlacer {
     func reset() {
         candidates = []
         placedPins = []
+    }
+
+    /// Clears only in-flight tracking candidates, keeping `placedPins` (and therefore the 3D
+    /// dedup set) intact. Used when swapping the detector model mid-session — old candidates
+    /// reference the previous model's class labels/box geometry and must not carry over, but
+    /// pins already placed must still block re-placement at the same spot.
+    func resetCandidatesOnly() {
+        candidates = []
+    }
+
+    /// Candidates currently accumulating hits toward confirmation, for UI feedback (e.g. a
+    /// "maturing" progress ring drawn over the live detection box). Filters out:
+    ///  - Candidates that already produced a pin (obviously).
+    ///  - Very fresh candidates (< ~20% of confirmThreshold hits) — single/couple-frame noise
+    ///    blips (reflections, wood grain, etc.) that would otherwise flash a ring on screen for
+    ///    one frame and vanish, reading as visual "artifacts" rather than useful feedback.
+    ///  - Candidates overlapping a retired (already-placed-a-pin) candidate's last box — these
+    ///    only exist because the object is still visible after its pin was placed (the retired
+    ///    candidate is excluded from further association by design); showing a second ring right
+    ///    on top of an already-placed pin is confusing, even though it'll never produce a
+    ///    duplicate pin (the 3D dedup check still catches it at confirm time).
+    var maturingCandidates: [(id: UUID, bbox: CGRect, progress: Float)] {
+        let minHitsToShow = max(2, confirmThreshold / 5)
+        let retiredBoxes = candidates.filter { $0.hasProducedPin }.map { $0.lastBBox }
+
+        return candidates
+            .filter { !$0.hasProducedPin && $0.confirmedHitCount >= minHitsToShow }
+            .filter { candidate in
+                !retiredBoxes.contains { repairBBoxIoU(candidate.lastBBox, $0) >= iouThreshold }
+            }
+            .map { ($0.id, $0.lastBBox, min(1.0, Float($0.confirmedHitCount) / Float(max(1, confirmThreshold)))) }
     }
 
     /// Seed the dedup set from pins already persisted for this session (e.g. after re-opening

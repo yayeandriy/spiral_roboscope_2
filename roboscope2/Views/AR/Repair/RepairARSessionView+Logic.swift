@@ -41,8 +41,36 @@ extension RepairARSessionView {
 
     // MARK: - Session lifecycle
 
+    /// Picks the highest-resolution camera format ARKit exposes on this device — ideally an
+    /// exact 4K (3840x2160) format, for `captureSessionPhoto()`'s "always 4K" raw capture.
+    /// Not every device exposes a true 4K ARKit format, so this falls back to whatever the
+    /// highest-resolution option actually available is.
+    static func preferredHighResVideoFormat() -> ARConfiguration.VideoFormat? {
+        let formats = ARWorldTrackingConfiguration.supportedVideoFormats
+        guard !formats.isEmpty else { return nil }
+        if let uhd = formats.first(where: { $0.imageResolution.width == 3840 && $0.imageResolution.height == 2160 }) {
+            return uhd
+        }
+        return formats.max { $0.imageResolution.width * $0.imageResolution.height < $1.imageResolution.width * $1.imageResolution.height }
+    }
+
     func startARSession() {
         captureSession.start()
+
+        // Upgrade the camera feed to the highest-resolution (ideally 4K) format available on
+        // this device, so manual "take picture" captures and per-pin confirmation snapshots use
+        // a full-resolution frame rather than ARKit's lower-res tracking default. Composed on
+        // top of CaptureSession's own `.start()` (without editing that shared, reused-as-is
+        // file) by re-running its ARSession with an upgraded configuration — the same pattern
+        // CaptureSession.restart() itself uses to reconfigure a running session.
+        if let videoFormat = Self.preferredHighResVideoFormat() {
+            let config = ARWorldTrackingConfiguration()
+            config.planeDetection = [.horizontal, .vertical]
+            config.worldAlignment = .gravity
+            config.videoFormat = videoFormat
+            captureSession.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        }
+
         isSessionActive = true
     }
 
@@ -56,13 +84,34 @@ extension RepairARSessionView {
         isLoadingModel = true
         modelLoadError = nil
         do {
-            let url = try await RepairModelDownloadService.shared.ensureModel(for: model)
-            mlDetection.setModelURL(url, classLabels: model.classLabels)
+            let url = try await RepairModelDownloadService.shared.ensureModel(for: activeModel)
+            mlDetection.setModelURL(url, classLabels: activeModel.classLabels)
             pipeline.start()
         } catch {
             modelLoadError = error.localizedDescription
         }
         isLoadingModel = false
+    }
+
+    /// Swaps the live detector model mid-session (from RepairSessionSettingsView). Downloads/
+    /// installs the new model if not already cached, reloads the Vision request, and resets
+    /// only the in-flight tracking candidates — already-placed pins (and the 3D dedup set that
+    /// protects them) are left untouched.
+    @MainActor
+    func swapActiveModel(to newModel: CoremlModel) async {
+        guard newModel.id != activeModel.id else { return }
+        isSwappingModel = true
+        modelLoadError = nil
+        do {
+            let url = try await RepairModelDownloadService.shared.ensureModel(for: newModel)
+            mlDetection.setModelURL(url, classLabels: newModel.classLabels)
+            autoPlacer.resetCandidatesOnly()
+            maturingCandidates = []
+            activeModel = newModel
+        } catch {
+            errorMessage = "Failed to switch detector model: \(error.localizedDescription)"
+        }
+        isSwappingModel = false
     }
 
     // MARK: - Per-frame update
@@ -129,18 +178,39 @@ extension RepairARSessionView {
         let placed = autoPlacer.ingest(rawDetections, raycast: { bbox in
             raycastBBoxCenter(bbox)
         })
+
+        // Drives the always-visible "maturing" progress ring — updated every frame regardless
+        // of whether a pin was placed this frame. Animated so rings fade in/out ("dissolve")
+        // instead of abruptly popping when a candidate appears, decays, or matures into a pin.
+        withAnimation(.easeOut(duration: 0.25)) {
+            maturingCandidates = autoPlacer.maturingCandidates
+        }
+
         guard !placed.isEmpty else { return }
+
+        // Capture the current camera frame once for this batch of newly-confirmed pins, so a
+        // photo of "what was actually there" travels with each pin record. Fire-and-forget /
+        // best-effort — see RepairPhotoStore for where these land until a server destination
+        // for pin images is decided.
+        if let arView, let frame = arView.session.currentFrame {
+            let interfaceOrientation = arView.window?.windowScene?.effectiveGeometry.interfaceOrientation ?? .portrait
+            let orientation = Self.cgImageOrientation(for: interfaceOrientation)
+            if let snapshot = RepairPhotoStore.shared.image(from: frame.capturedImage, orientation: orientation) {
+                for pin in placed {
+                    RepairPhotoStore.shared.savePinSnapshotAsync(sessionId: session.id, pinId: pin.id, image: snapshot)
+                }
+            }
+        }
 
         for pin in placed {
             pinRenderer.addPin(id: pin.id, at: pin.world)
-            pendingPinsBuffer.append(
-                CreatePin(
-                    repairSessionId: session.id,
-                    world: pin.world,
-                    detectionClass: pin.detectionClass,
-                    confidence: pin.confidence
-                )
+            let body = CreatePin(
+                repairSessionId: session.id,
+                world: pin.world,
+                detectionClass: pin.detectionClass,
+                confidence: pin.confidence
             )
+            pendingPinsBuffer.append((localId: pin.id, pin: body))
         }
         placedPinCount = autoPlacer.placedPins.count
     }
@@ -171,7 +241,12 @@ extension RepairARSessionView {
         let toFlush = pendingPinsBuffer
         pendingPinsBuffer.removeAll()
         do {
-            _ = try await pinServiceObj.createPinsBulk(toFlush)
+            let created = try await pinServiceObj.createPinsBulk(toFlush.map { $0.pin })
+            // POST /pins/bulk returns created rows in submission order — correlate positionally
+            // to learn each pin's server-assigned id (needed later for delete).
+            for (index, serverPin) in created.enumerated() where index < toFlush.count {
+                serverIdByLocalId[toFlush[index].localId] = serverPin.id
+            }
         } catch {
             // Put them back for the next attempt rather than dropping data silently.
             pendingPinsBuffer.append(contentsOf: toFlush)
@@ -179,26 +254,132 @@ extension RepairARSessionView {
         }
     }
 
-    // MARK: - Tap-to-delete (nice-to-have, §5.7)
+    // MARK: - Tap-to-select-then-delete (§5.7)
+    //
+    // Tapping a pin no longer deletes it immediately (too easy to trigger by accident while
+    // walking around with the phone). First tap highlights the pin and shows a confirm bar;
+    // a second tap on the SAME pin, or tapping empty space, deselects it without deleting.
 
     func handleTap(at point: CGPoint) {
         guard let arView else { return }
-        let hits = arView.entity(at: point)
-        guard let hitEntity = hits else { return }
-        guard let pinId = pinRenderer.pinId(containingEntity: hitEntity) else { return }
+
+        guard let hitEntity = arView.entity(at: point),
+              let pinId = pinRenderer.pinId(containingEntity: hitEntity) else {
+            // Tapped empty space — deselect whatever was selected, if anything.
+            if selectedPinId != nil { deselectPin() }
+            return
+        }
+
+        if selectedPinId == pinId {
+            deselectPin()
+        } else {
+            selectPin(pinId)
+        }
+    }
+
+    func selectPin(_ pinId: UUID) {
+        if let previous = selectedPinId, previous != pinId {
+            pinRenderer.setSelected(id: previous, selected: false)
+        }
+        selectedPinId = pinId
+        pinRenderer.setSelected(id: pinId, selected: true)
+    }
+
+    func deselectPin() {
+        guard let pinId = selectedPinId else { return }
+        pinRenderer.setSelected(id: pinId, selected: false)
+        selectedPinId = nil
+    }
+
+    func confirmDeleteSelectedPin() {
+        guard let pinId = selectedPinId else { return }
+        selectedPinId = nil
 
         pinRenderer.removePin(id: pinId)
         autoPlacer.removePlacedPin(id: pinId)
         placedPinCount = autoPlacer.placedPins.count
 
+        // Not flushed to the server yet — nothing to delete remotely, just drop it locally.
+        pendingPinsBuffer.removeAll { $0.localId == pinId }
+
+        guard let serverId = serverIdByLocalId.removeValue(forKey: pinId) else { return }
         Task {
             do {
-                try await pinServiceObj.deletePin(pinId)
+                try await pinServiceObj.deletePin(serverId)
             } catch {
                 await MainActor.run {
                     errorMessage = "Failed to delete pin on server: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    // MARK: - Clear scene
+
+    /// Removes every pin in this session — rendered entities, local placement/dedup state, and
+    /// (best-effort) their server-side records. Triggered from the settings sheet with its own
+    /// confirmation alert, so no confirmation is repeated here.
+    @MainActor
+    func clearScene() async {
+        // Snapshot before mutating so a slow network call can't race a second tap.
+        let serverIdsToDelete = Array(serverIdByLocalId.values)
+
+        pinRenderer.removeAll()
+        autoPlacer.reset()
+        pendingPinsBuffer.removeAll()
+        serverIdByLocalId.removeAll()
+        selectedPinId = nil
+        placedPinCount = 0
+        withAnimation(.easeOut(duration: 0.25)) {
+            maturingCandidates = []
+        }
+
+        guard !serverIdsToDelete.isEmpty else { return }
+        var deleteFailures = 0
+        for id in serverIdsToDelete {
+            do {
+                try await pinServiceObj.deletePin(id)
+            } catch {
+                deleteFailures += 1
+            }
+        }
+        if deleteFailures > 0 {
+            errorMessage = "Cleared locally, but \(deleteFailures) pin(s) may not have been deleted from the server."
+        }
+    }
+
+    // MARK: - Manual photo capture (session-level "take picture" button)
+
+    /// Saves two images: the raw camera frame at (ideally) 4K — see `preferredHighResVideoFormat`
+    /// — and a second image with the current pins baked in. The latter uses RealityKit's own
+    /// live-rendered composite (`ARView.snapshotAsync`), which already includes the pin spheres
+    /// as real scene entities, rather than re-projecting each pin's 3D position by hand; the
+    /// trade-off is that this second image is captured at screen resolution, not the raw
+    /// buffer's forced-4K resolution.
+    @MainActor
+    func captureSessionPhoto() async {
+        guard !isCapturingPhoto, let arView, let frame = arView.session.currentFrame else { return }
+        isCapturingPhoto = true
+        defer { isCapturingPhoto = false }
+
+        let interfaceOrientation = arView.window?.windowScene?.effectiveGeometry.interfaceOrientation ?? .portrait
+        let orientation = Self.cgImageOrientation(for: interfaceOrientation)
+
+        guard let rawImage = RepairPhotoStore.shared.image(from: frame.capturedImage, orientation: orientation) else {
+            errorMessage = "Failed to capture photo."
+            return
+        }
+
+        let bakedImage = await arView.snapshotAsync(saveToHDR: false)
+
+        do {
+            try await RepairPhotoStore.shared.saveManualCapture(sessionId: session.id, raw: rawImage, baked: bakedImage)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            withAnimation(.easeOut(duration: 0.12)) { photoFlash = true }
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            withAnimation(.easeOut(duration: 0.3)) { photoFlash = false }
+        } catch {
+            errorMessage = "Failed to save photo: \(error.localizedDescription)"
         }
     }
 

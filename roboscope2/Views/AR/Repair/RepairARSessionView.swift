@@ -39,9 +39,56 @@ struct RepairARSessionView: View {
     /// SwiftUI directly) — its output drives @State mutations below instead.
     let autoPlacer: RepairAutoPlacer
 
+    // MARK: - View state
+
+    @State var arView: ARView?
+    @State var isSessionActive = false
+    @State var imageToViewTransform: CGAffineTransform = .identity
+    @State var viewportSize: CGSize = .zero
+
+    @State var isLoadingModel = false
+    @State var modelLoadError: String? = nil
+    @State var errorMessage: String? = nil
+
+    @State var placedPinCount: Int = 0
+    /// Pins confirmed locally but not yet flushed to the API, paired with the client-local id
+    /// (RepairPlacedPin.id) used by pinRenderer/autoPlacer, so the server-assigned id can be
+    /// correlated back to it once the flush succeeds (see `serverIdByLocalId`).
+    @State var pendingPinsBuffer: [(localId: UUID, pin: CreatePin)] = []
+    /// Server-assigned Pin.id for each locally-tracked pin, populated once its bulk-create flush
+    /// succeeds. Required for delete: `DELETE /pins/{id}` needs the server's id, which is NOT
+    /// the same as the client-generated id used for on-screen tracking (the create endpoint
+    /// does not accept/echo a client-supplied id).
+    @State var serverIdByLocalId: [UUID: UUID] = [:]
+    @State var flushTimer: Timer? = nil
+    @State var isClosing = false
+
+    /// The model actually driving live detection right now. Starts as the session's launch
+    /// model but can be swapped in-session from RepairSessionSettingsView; the server-side
+    /// session record's coreml_model_id is NOT updated (no endpoint for that).
+    @State var activeModel: CoremlModel
+    @State var showSettingsSheet = false
+    @State var isSwappingModel = false
+
+    /// Manual "take picture" capture (session-level, not tied to a specific pin).
+    @State var isCapturingPhoto = false
+    /// Brief white flash shown over the AR view as capture feedback.
+    @State var photoFlash = false
+
+    /// Candidates currently accumulating hits toward confirmation (not yet a pin) — drives the
+    /// always-visible "maturing" progress ring, independent of the debug overlay toggle.
+    @State var maturingCandidates: [(id: UUID, bbox: CGRect, progress: Float)] = []
+
+    /// Tap-to-select-then-delete: selecting a pin highlights it and shows a confirm bar instead
+    /// of deleting immediately.
+    @State var selectedPinId: UUID? = nil
+
+    @State var cancellables = Set<AnyCancellable>()
+
     init(session: RepairSession, model: CoremlModel) {
         self.session = session
         self.model = model
+        self._activeModel = State(initialValue: model)
 
         let capture = CaptureSession()
         _captureSession = StateObject(wrappedValue: capture)
@@ -65,32 +112,12 @@ struct RepairARSessionView: View {
         )
     }
 
-    // MARK: - View state
-
-    @State var arView: ARView?
-    @State var isSessionActive = false
-    @State var imageToViewTransform: CGAffineTransform = .identity
-    @State var viewportSize: CGSize = .zero
-
-    @State var isLoadingModel = false
-    @State var modelLoadError: String? = nil
-    @State var errorMessage: String? = nil
-
-    @State var placedPinCount: Int = 0
-    /// Pins confirmed locally but not yet flushed to the API. Flushed on a timer and on close.
-    @State var pendingPinsBuffer: [CreatePin] = []
-    @State var flushTimer: Timer? = nil
-    @State var isClosing = false
-    @State var showDebugOverlay = false
-
-    @State var cancellables = Set<AnyCancellable>()
-
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 arViewLayer(geometry: geometry)
 
-                if showDebugOverlay {
+                if settings.repairShowDetectionOverlay {
                     RepairDetectionOverlay(
                         detections: mlDetection.detections,
                         viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
@@ -99,10 +126,30 @@ struct RepairARSessionView: View {
                     .allowsHitTesting(false)
                 }
 
+                RepairMaturingOverlay(
+                    candidates: maturingCandidates,
+                    viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
+                    imageToViewTransform: imageToViewTransform
+                )
+
                 topBar
 
                 if isLoadingModel || modelLoadError != nil {
                     modelStatusHUD
+                }
+
+                if isSwappingModel {
+                    modelSwapHUD
+                }
+
+                if selectedPinId != nil {
+                    deleteConfirmBar
+                }
+
+                if photoFlash {
+                    Color.white
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
                 }
             }
         }
@@ -115,6 +162,27 @@ struct RepairARSessionView: View {
         }
         .onChange(of: mlDetection.detections) { _, rawDetections in
             processDetections(rawDetections)
+        }
+        .onChange(of: settings.repairConfidenceThreshold) { _, newValue in
+            mlDetection.confidenceThreshold = newValue
+        }
+        .onChange(of: settings.repairDedupRadiusMeters) { _, newValue in
+            autoPlacer.dedupRadiusMeters = newValue
+        }
+        .onChange(of: settings.repairPinRadiusMeters) { _, newValue in
+            pinRenderer.updateAllPinSizes(to: newValue)
+        }
+        .sheet(isPresented: $showSettingsSheet) {
+            RepairSessionSettingsView(
+                settings: settings,
+                activeModel: activeModel,
+                onSelectModel: { newModel in
+                    Task { await swapActiveModel(to: newModel) }
+                },
+                onClearScene: {
+                    Task { await clearScene() }
+                }
+            )
         }
     }
 
@@ -179,9 +247,26 @@ struct RepairARSessionView: View {
                 Spacer()
 
                 Button {
-                    showDebugOverlay.toggle()
+                    Task { await captureSessionPhoto() }
                 } label: {
-                    Image(systemName: showDebugOverlay ? "eye.fill" : "eye.slash.fill")
+                    Group {
+                        if isCapturingPhoto {
+                            ProgressView().tint(.white)
+                        } else {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(.black.opacity(0.35)))
+                }
+                .disabled(isCapturingPhoto)
+
+                Button {
+                    showSettingsSheet = true
+                } label: {
+                    Image(systemName: "gearshape.fill")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.white)
                         .frame(width: 44, height: 44)
@@ -216,5 +301,49 @@ struct RepairARSessionView: View {
         .padding(20)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, 40)
+    }
+
+    @ViewBuilder
+    private var modelSwapHUD: some View {
+        VStack(spacing: 12) {
+            ProgressView().progressViewStyle(.circular).tint(.white)
+            Text("Switching detector model…")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white)
+        }
+        .padding(20)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 40)
+    }
+
+    @ViewBuilder
+    private var deleteConfirmBar: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 12) {
+                Text("Delete this pin?")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Button("Cancel") {
+                    deselectPin()
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white)
+
+                Button("Delete") {
+                    confirmDeleteSelectedPin()
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.red)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 20)
+            .padding(.bottom, 32)
+        }
     }
 }

@@ -49,19 +49,30 @@ extension RepairMLDetectionService {
         guard pred.dataType == .float32 else { return [] }
         guard pred.shape.count >= 3 else { return [] }
 
-        let now = CACurrentMediaTime()
-        if now - lastStatsLogTime >= 1.5 {
-            log("Decode tensors: pred.shape=\(pred.shape)")
-        }
-
         // Expected layout (from Ultralytics iOS): [1, numFeatures, numAnchors]
         let numFeatures = pred.shape[1].intValue
         let numAnchors = pred.shape[2].intValue
         guard numAnchors > 0, numFeatures > 4 else { return [] }
 
-        // Repair models are plain detectors (no mask coefficients) — all remaining
-        // features beyond the 4 bbox values are per-class scores.
-        let numClasses = max(1, numFeatures - 4)
+        // Class count MUST come from the model's registered class_labels metadata, not from
+        // the raw tensor width. A YOLOv8-SEGMENTATION export (e.g. "chips1") appends 32 extra
+        // mask-coefficient channels after the per-class scores: [4 bbox, numClasses scores,
+        // 32 mask coeffs]. Those coefficients are unconstrained (not sigmoid-bounded like a
+        // real class score) and can exceed any real class's confidence, so deriving numClasses
+        // as numFeatures-4 silently treats them as bogus extra "classes" and corrupts/starves
+        // every real detection's argmax. Falls back to numFeatures-4 only if the class_labels
+        // metadata looks unusable (empty or larger than the tensor could actually hold).
+        let numClasses: Int
+        if !classLabels.isEmpty, classLabels.count <= numFeatures - 4 {
+            numClasses = classLabels.count
+        } else {
+            numClasses = max(1, numFeatures - 4)
+        }
+
+        let now = CACurrentMediaTime()
+        if now - lastStatsLogTime >= 1.5 {
+            log("Decode tensors: pred.shape=\(pred.shape) classLabels=\(classLabels) numClasses=\(numClasses) (maskCoeffChannels=\(max(0, numFeatures - 4 - numClasses)))")
+        }
 
         let inputSize = modelInputSize ?? CGSize(width: 640, height: 640)
         let inputW = inputSize.width
@@ -85,22 +96,26 @@ extension RepairMLDetectionService {
         xPadding = (inputW - scaledW) / 2.0
         yPadding = (inputH - scaledH) / 2.0
 
+        // Use the array's actual strides rather than assuming a tightly-packed
+        // [numFeatures, numAnchors] layout — matches the known-good sister-app decoder and
+        // is robust to any non-default memory layout CoreML may hand back.
+        let featureStride = pred.strides[1].intValue
+        let anchorStride = pred.strides[2].intValue
         let ptr = pred.dataPointer.assumingMemoryBound(to: Float.self)
 
         var candidates: [DecodeCandidate] = []
         candidates.reserveCapacity(min(512, numAnchors))
 
         for j in 0..<numAnchors {
-            let x = CGFloat(ptr[j])
-            let y = CGFloat(ptr[numAnchors + j])
-            let w = CGFloat(ptr[2 * numAnchors + j])
-            let h = CGFloat(ptr[3 * numAnchors + j])
+            let x = CGFloat(ptr[0 * featureStride + j * anchorStride])
+            let y = CGFloat(ptr[1 * featureStride + j * anchorStride])
+            let w = CGFloat(ptr[2 * featureStride + j * anchorStride])
+            let h = CGFloat(ptr[3 * featureStride + j * anchorStride])
 
             var bestScore: Float = 0
             var bestClass: Int = 0
-            let classBase = (4 * numAnchors) + j
             for c in 0..<numClasses {
-                let score = ptr[classBase + (c * numAnchors)]
+                let score = ptr[(4 + c) * featureStride + j * anchorStride]
                 if score > bestScore {
                     bestScore = score
                     bestClass = c

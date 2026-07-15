@@ -45,7 +45,7 @@ enum RepairModelDownloadState: Equatable {
 // MARK: - Service
 
 /// Singleton that downloads, installs, and caches CoreML models for Repair, keyed globally
-/// by `file_hash`. Call `ensureModel(for:)` when a CoremlModel is selected in RepairDashboardView.
+/// by `file_hash`. Call `ensureModel(for:)` once a session's CoremlModel is resolved (RepairView).
 @MainActor
 final class RepairModelDownloadService: ObservableObject {
 
