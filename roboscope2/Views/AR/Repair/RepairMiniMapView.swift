@@ -100,6 +100,42 @@ struct RepairMiniMapView: View {
         Self.buildCornerSheets(pins: pins, classStyles: classStyles, centroid: centroid)
     }
 
+    /// ARKit world space is session-relative with no shared absolute frame (00 §0.4), so there's
+    /// no "true" orientation to align to — but the operator still wants the picture to *look*
+    /// like a plan view where `top_left`-flagged pins (e.g. `l1`) sit toward the top-left of the
+    /// screen, matching the physical reference sheet's own labeling. This computes the rotation
+    /// that best achieves that: average the recentered position of every `top_left` pin, then
+    /// solve for the angle that rotates that average vector to point toward the screen's
+    /// top-left diagonal (up and to the left). Best-effort/approximate by nature — with only 1-2
+    /// `top_left` pins and no real compass reference, this is a bias, not a guarantee, and it's
+    /// exactly what was asked for ("I know we don't have proper orientation there, but...").
+    /// Returns 0 (no bias) when there's no `top_left` pin to anchor on.
+    private var topLeftBiasDegrees: Double {
+        let c = centroid
+        let topLeftOffsets = pins.compactMap { pin -> SIMD3<Float>? in
+            guard classStyles?[pin.detectionClass]?.corner == .topLeft else { return nil }
+            return pin.position - c
+        }
+        guard !topLeftOffsets.isEmpty else { return 0 }
+
+        let sum = topLeftOffsets.reduce(SIMD3<Float>.zero, +)
+        let avg = sum / Float(topLeftOffsets.count)
+        let magnitude = sqrt(avg.x * avg.x + avg.z * avg.z)
+        guard magnitude > 1e-4 else { return 0 }
+
+        // Rotating the canvas by `rotationDeg` (via .rotationEffect) rotates every projected
+        // (x, z) pair by that same angle, which simply adds `rotationDeg` to the pair's own
+        // atan2 angle — so solving "what angle takes the current l1 direction to the top-left
+        // diagonal" is just target minus current.
+        let currentAngle = atan2(Double(avg.z), Double(avg.x))
+        let targetAngle = atan2(-1.0, -1.0) // up-and-left in canvas space (x right, z down)
+        var delta = (targetAngle - currentAngle) * 180 / .pi
+        delta = delta.truncatingRemainder(dividingBy: 360)
+        if delta > 180 { delta -= 360 }
+        if delta <= -180 { delta += 360 }
+        return delta
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottomLeading) {
@@ -137,18 +173,21 @@ struct RepairMiniMapView: View {
                         )
                     )
                     .onTapGesture(count: 2) {
+                        rotate(to: topLeftBiasDegrees)
                         withAnimation(.easeOut(duration: 0.2)) {
                             scale = 1
                             offset = .zero
-                            rotationDeg = 0
                         }
                         lastScale = 1
                         lastOffset = .zero
-                        lastRotationDeg = 0
                     }
                     .clipped()
                 }
                 .background(Color.white)
+                .onAppear {
+                    rotationDeg = topLeftBiasDegrees
+                    lastRotationDeg = rotationDeg
+                }
 
                 legend
                     .padding(12)
@@ -206,9 +245,9 @@ struct RepairMiniMapView: View {
             } label: {
                 Image(systemName: "rotate.right")
             }
-            if rotationDeg != 0 {
+            if abs(rotationDeg - topLeftBiasDegrees) > 0.5 {
                 Button("Reset") {
-                    rotate(to: 0)
+                    rotate(to: topLeftBiasDegrees)
                 }
                 .font(.system(size: 11, weight: .semibold))
             }
@@ -402,11 +441,23 @@ struct RepairMiniMapView: View {
         context.draw(resolved, at: point, anchor: .center)
     }
 
-    // MARK: - Corner-sheet grouping (ported from web pin-3d-viewer.tsx buildCornerSheets)
+    // MARK: - Corner-sheet grouping
 
-    /// Groups ALL corner-flagged pins into "sheets" via repeated greedy nearest matching — one
-    /// physical reference sheet's worth of corners per iteration, exactly matching the web
-    /// version's algorithm (same seed-role preference order, same nearest-distance matching).
+    /// Groups ALL corner-flagged pins into concentric "sheets", outermost first — e.g. if the
+    /// same two diagonal corners (say `l1`/`r1`) were each placed twice at different distances
+    /// from the reference point, this pairs the farthest `l1` with the farthest `r1` (the
+    /// outer/largest rectangle), then the next-farthest `l1` with the next-farthest `r1` (the
+    /// next rectangle in), and so on — rather than pairing whichever raw pins happen to be
+    /// nearest each other, which can cross rings and draw overlapping, non-concentric shapes
+    /// (the bug this replaced: two `l1`+two `r1` pins rendered as two crossed, arbitrarily-sized
+    /// rectangles instead of one rectangle nested inside the other).
+    ///
+    /// Concretely: each role's bucket is sorted by distance from `centroid` (farthest first),
+    /// then sheet `i` takes the `i`-th entry from every role bucket that still has one. Ranks
+    /// beyond the shortest non-empty bucket's length are simply not formed — "pair as many as
+    /// you can, then stop" — so a role with more duplicate placements than another leaves its
+    /// extra pins undrawn (still rendered as plain dots by the caller) rather than forcing a
+    /// mismatched pairing.
     private static func buildCornerSheets(
         pins: [RepairMiniMapPin],
         classStyles: [String: RepairClassStyle]?,
@@ -418,27 +469,24 @@ struct RepairMiniMapView: View {
             buckets[corner, default: []].append(CornerPin(pos: pin.position - centroid, boundingBox: pin.boundingBox))
         }
 
-        var sheets: [Sheet] = []
-        while cornerRoles.contains(where: { !(buckets[$0]?.isEmpty ?? true) }) {
-            guard let seedRole = cornerRoles.first(where: { !(buckets[$0]?.isEmpty ?? true) }) else { break }
-            let seed = buckets[seedRole]!.removeFirst()
-            var sheet: Sheet = [seedRole: seed]
+        for role in cornerRoles {
+            buckets[role]?.sort { simd_length($0.pos) > simd_length($1.pos) }
+        }
 
-            for role in cornerRoles where role != seedRole {
-                guard var candidates = buckets[role], !candidates.isEmpty else { continue }
-                var bestIdx = 0
-                var bestDistSq = Float.greatestFiniteMagnitude
-                for (i, candidate) in candidates.enumerated() {
-                    let d = seed.pos - candidate.pos
-                    let distSq = d.x * d.x + d.y * d.y + d.z * d.z
-                    if distSq < bestDistSq {
-                        bestDistSq = distSq
-                        bestIdx = i
-                    }
+        let nonEmptyCounts = cornerRoles.compactMap { role -> Int? in
+            let count = buckets[role]?.count ?? 0
+            return count > 0 ? count : nil
+        }
+        // Need at least 2 roles present to form any 2+-corner shape at all.
+        guard nonEmptyCounts.count >= 2, let ringCount = nonEmptyCounts.min() else { return [] }
+
+        var sheets: [Sheet] = []
+        for ring in 0..<ringCount {
+            var sheet: Sheet = [:]
+            for role in cornerRoles {
+                if let bucket = buckets[role], ring < bucket.count {
+                    sheet[role] = bucket[ring]
                 }
-                sheet[role] = candidates[bestIdx]
-                candidates.remove(at: bestIdx)
-                buckets[role] = candidates
             }
             sheets.append(sheet)
         }
