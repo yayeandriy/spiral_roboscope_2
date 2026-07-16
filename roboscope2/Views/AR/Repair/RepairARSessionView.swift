@@ -199,7 +199,8 @@ struct RepairARSessionView: View {
                         viewSize: viewportSize.width > 0 ? viewportSize : geometry.size,
                         imageToViewTransform: imageToViewTransform,
                         classStyles: validationModel?.classStyles,
-                        showMaskPolygon: true
+                        showMaskPolygon: true,
+                        autoColorByClass: true
                     )
                     .allowsHitTesting(false)
                 } else if settings.repairShowDetectionOverlay {

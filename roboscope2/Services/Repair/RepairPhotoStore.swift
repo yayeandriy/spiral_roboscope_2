@@ -167,11 +167,14 @@ final class RepairPhotoStore {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
+    /// Only ever called for Validation-mode captures (see call site in
+    /// RepairARSessionView+Logic.swift) — same auto-color-per-class fallback as the live
+    /// `RepairDetectionOverlay`, so a baked snapshot matches what the operator saw on screen.
     private static func resolvedColor(for label: String, classStyles: [String: RepairClassStyle]?) -> UIColor {
         if let hex = classStyles?[label]?.color, let color = UIColor(hex: hex) {
             return color
         }
-        return UIColor.systemGreen
+        return RepairClassStyle.autoColor(for: label)
     }
 
     // MARK: - Manual session-level captures ("take picture" button)

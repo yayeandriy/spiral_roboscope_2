@@ -31,6 +31,13 @@ struct RepairDetectionOverlay: View {
     /// Off by default so Planning's debug overlay keeps its existing plain-box look; Validation
     /// mode's passive overlay turns this on.
     var showMaskPolygon: Bool = false
+    /// When true, a class without an explicit `classStyles` color falls back to a deterministic
+    /// per-label color from a fixed palette (`RepairClassStyle.autoColor`) instead of plain
+    /// `boxColor` — so a multi-class Validation model still reads as visually distinct classes
+    /// even when the backend hasn't configured `class_styles` for it. Off by default so
+    /// Planning's debug overlay (usually few/no classes without an explicit color) keeps its
+    /// existing look.
+    var autoColorByClass: Bool = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -90,6 +97,9 @@ struct RepairDetectionOverlay: View {
     private func resolvedColor(for label: String) -> Color {
         if let hex = classStyles?[label]?.color, let uiColor = UIColor(hex: hex) {
             return Color(uiColor)
+        }
+        if autoColorByClass {
+            return Color(RepairClassStyle.autoColor(for: label))
         }
         return boxColor
     }

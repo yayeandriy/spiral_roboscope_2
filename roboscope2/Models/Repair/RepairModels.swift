@@ -15,6 +15,7 @@
 //
 
 import Foundation
+import UIKit
 
 // MARK: - CoremlModel (02-contracts.md §2.1)
 
@@ -104,6 +105,28 @@ enum RepairMarkerCorner: String, Codable {
     case topRight = "top_right"
     case bottomLeft = "bottom_left"
     case bottomRight = "bottom_right"
+}
+
+extension RepairClassStyle {
+    /// Deterministic fallback color keyed by class label, spread across a fixed palette — used
+    /// when a model's `class_styles` doesn't specify an explicit color for a class. Validation
+    /// models in particular usually aren't the corner-marker models `class_styles` was built
+    /// for (02-contracts.md v0.2 was scoped to Planning's l1/l2/r1/r2-style markers), so without
+    /// this every class in a multi-class Validation overlay would otherwise collapse onto the
+    /// same default green. Same label always maps to the same color within a run (Hasher's seed
+    /// is randomized per process launch, not per call), which is enough for "different classes
+    /// look different" — it doesn't need to be stable across app restarts.
+    static func autoColor(for label: String) -> UIColor {
+        var hasher = Hasher()
+        hasher.combine(label)
+        let index = abs(hasher.finalize()) % autoPalette.count
+        return autoPalette[index]
+    }
+
+    private static let autoPalette: [UIColor] = [
+        .systemGreen, .systemBlue, .systemOrange, .systemPurple, .systemPink,
+        .systemYellow, .systemTeal, .systemRed, .systemIndigo, .systemMint, .systemBrown, .systemCyan,
+    ]
 }
 
 // MARK: - RepairSession (02-contracts.md §2.1)
