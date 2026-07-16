@@ -35,8 +35,6 @@ struct RepairView: View {
     @State private var activeARSession: RepairSession?
     /// Covers both "creating a brand-new session" and "resuming an existing active one".
     @State private var isLaunchingAR = false
-    @State private var sessionToDelete: RepairSession?
-    @State private var showingDeleteAlert = false
 
     var body: some View {
         NavigationView {
@@ -89,14 +87,6 @@ struct RepairView: View {
                 if oldValue != nil && newValue == nil {
                     Task { await loadAllRepairSessions() }
                 }
-            }
-            .alert("Delete Repair Session", isPresented: $showingDeleteAlert, presenting: sessionToDelete) { session in
-                Button("Delete", role: .destructive) {
-                    Task { await deleteSession(session) }
-                }
-                Button("Cancel", role: .cancel) { }
-            } message: { _ in
-                Text("This will permanently delete this repair session and its pins. This action cannot be undone.")
             }
             .alert("Error", isPresented: .constant(errorMessage != nil)) {
                 Button("OK") { errorMessage = nil }
@@ -157,9 +147,11 @@ struct RepairView: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                // No confirmation here — swipe-to-delete is already a deliberate,
+                                // two-step gesture (swipe + tap), unlike the AR viewport's
+                                // "Clear All Pins" button which needed its own confirmation.
                                 Button(role: .destructive) {
-                                    sessionToDelete = session
-                                    showingDeleteAlert = true
+                                    Task { await deleteSession(session) }
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }

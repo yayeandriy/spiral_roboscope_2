@@ -421,6 +421,9 @@ extension RepairARSessionView {
             )
             pendingPinsBuffer.append((localId: pin.id, pin: body))
             placedClasses.insert(pin.detectionClass)
+            allPins.append(
+                RepairMiniMapPin(id: pin.id, position: pin.world, detectionClass: pin.detectionClass, boundingBox: pin.boundingBox)
+            )
         }
         placedPinCount = autoPlacer.placedPins.count
     }
@@ -600,6 +603,7 @@ extension RepairARSessionView {
         pinRenderer.removePin(id: pinId)
         autoPlacer.removePlacedPin(id: pinId)
         placedPinCount = autoPlacer.placedPins.count
+        allPins.removeAll { $0.id == pinId }
 
         // Not flushed to the server yet — nothing to delete remotely, just drop it locally.
         pendingPinsBuffer.removeAll { $0.localId == pinId }
@@ -637,6 +641,7 @@ extension RepairARSessionView {
         selectedPinId = nil
         placedPinCount = 0
         placedClasses.removeAll()
+        allPins.removeAll()
         withAnimation(.easeOut(duration: 0.25)) {
             maturingCandidates = []
         }

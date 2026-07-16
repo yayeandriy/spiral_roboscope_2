@@ -125,6 +125,13 @@ struct RepairARSessionView: View {
     /// known defect location becomes identifiable in this session.
     @State var showDefectPanel = false
 
+    /// Full pin data (position + class + bounding box) for every pin currently placed this
+    /// session, kept in sync as pins are added/deleted/cleared — unlike `placedClasses`, this
+    /// DOES shrink on delete, since the minimap should reflect what's actually still there.
+    /// Feeds RepairMiniMapView (map button in the top bar).
+    @State var allPins: [RepairMiniMapPin] = []
+    @State var showMiniMap = false
+
     @State var cancellables = Set<AnyCancellable>()
 
     init(session: RepairSession, model: CoremlModel) {
@@ -293,6 +300,9 @@ struct RepairARSessionView: View {
         .sheet(isPresented: $showDefectPanel) {
             RepairDefectPanelView()
         }
+        .sheet(isPresented: $showMiniMap) {
+            RepairMiniMapView(pins: allPins, classStyles: activeModel.classStyles)
+        }
     }
 
     @ViewBuilder
@@ -361,10 +371,22 @@ struct RepairARSessionView: View {
                     } label: {
                         Image(systemName: "trash.fill")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(allPins.isEmpty ? .white.opacity(0.4) : .white)
                             .frame(width: 44, height: 44)
                             .background(Circle().fill(.black.opacity(0.35)))
                     }
+                    .disabled(allPins.isEmpty)
+
+                    Button {
+                        showMiniMap = true
+                    } label: {
+                        Image(systemName: "map.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(allPins.isEmpty ? .white.opacity(0.4) : .white)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(.black.opacity(0.35)))
+                    }
+                    .disabled(allPins.isEmpty)
                 }
 
                 Button {

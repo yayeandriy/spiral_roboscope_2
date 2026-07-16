@@ -74,35 +74,35 @@ struct RepairDefectPanelView: View {
     /// Hard-coded placeholder layup, matching the ply numbers called out in the placeholder
     /// chamfering drawing (229 -> 208 -> 206 -> 204 -> 203 -> 174 -> 168, "7 plies" affected).
     private static let plies: [RepairMockLayupPly] = [
-        .init(stackOrder: 1, plyNumber: 3, group: "Biaxial", material: "Reinforced Mesh T450", widthMm: 1250),
-        .init(stackOrder: 2, plyNumber: 5, group: "Biaxial", material: "Reinforced Mesh T450", widthMm: 1250),
-        .init(stackOrder: 3, plyNumber: 12, group: "Biaxial", material: "Reinforced Mesh T450", widthMm: 1250),
-        .init(stackOrder: 4, plyNumber: 13, group: "Biaxial", material: "Reinforced Mesh T450", widthMm: 1250),
-        .init(stackOrder: 5, plyNumber: 17, group: "Biaxial", material: "Reinforced Mesh T450", widthMm: 1250),
-        .init(stackOrder: 6, plyNumber: 40, group: "Uniaxial", material: "Unidirectional Laminate U412", widthMm: 800),
-        .init(stackOrder: 7, plyNumber: 42, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 8, plyNumber: 44, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 9, plyNumber: 46, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 10, plyNumber: 48, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 11, plyNumber: 50, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 12, plyNumber: 58, group: "Uniaxial", material: "Unidirectional Laminate U412", widthMm: 800),
-        .init(stackOrder: 13, plyNumber: 78, group: "Uniaxial", material: "Unidirectional Laminate U412", widthMm: 800),
-        .init(stackOrder: 14, plyNumber: 102, group: "Uniaxial", material: "Unidirectional Laminate U412", widthMm: 800),
-        .init(stackOrder: 15, plyNumber: 136, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 16, plyNumber: 138, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 17, plyNumber: 140, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 18, plyNumber: 142, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 19, plyNumber: 144, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 20, plyNumber: 148, group: "Uniaxial", material: "Unidirectional Laminate U412", widthMm: 800),
-        .init(stackOrder: 21, plyNumber: 1640, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 22, plyNumber: 1660, group: "Uniaxial", material: "Linear-Fiber Sheet L871", widthMm: 800),
-        .init(stackOrder: 23, plyNumber: 168, group: "Uniaxial", material: "Unidirectional Laminate U412", widthMm: 800),
-        .init(stackOrder: 24, plyNumber: 174, group: "Uniaxial", material: "Unidirectional Laminate U412", widthMm: 800),
-        .init(stackOrder: 25, plyNumber: 203, group: "Biaxial", material: "Reinforced Mesh T450", widthMm: 1250),
-        .init(stackOrder: 26, plyNumber: 204, group: "Biaxial", material: "Reinforced Mesh T450", widthMm: 1250),
-        .init(stackOrder: 27, plyNumber: 206, group: "Biaxial", material: "Reinforced Mesh T450", widthMm: 1250),
-        .init(stackOrder: 28, plyNumber: 208, group: "Biaxial", material: "Reinforced Mesh T450", widthMm: 1250),
-        .init(stackOrder: 29, plyNumber: 229, group: "Biaxial", material: "Textile-Laminate F1280", widthMm: 920),
+        .init(stackOrder: 1, plyNumber: 3, group: "Biax", material: "Reinforced Mesh T450", widthMm: 1250),
+        .init(stackOrder: 2, plyNumber: 5, group: "Biax", material: "Reinforced Mesh T450", widthMm: 1250),
+        .init(stackOrder: 3, plyNumber: 12, group: "Biax", material: "Reinforced Mesh T450", widthMm: 1250),
+        .init(stackOrder: 4, plyNumber: 13, group: "Biax", material: "Reinforced Mesh T450", widthMm: 1250),
+        .init(stackOrder: 5, plyNumber: 17, group: "Biax", material: "Reinforced Mesh T450", widthMm: 1250),
+        .init(stackOrder: 6, plyNumber: 40, group: "UD", material: "Unidirectional Laminate U412", widthMm: 800),
+        .init(stackOrder: 7, plyNumber: 42, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 8, plyNumber: 44, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 9, plyNumber: 46, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 10, plyNumber: 48, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 11, plyNumber: 50, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 12, plyNumber: 58, group: "UD", material: "Unidirectional Laminate U412", widthMm: 800),
+        .init(stackOrder: 13, plyNumber: 78, group: "UD", material: "Unidirectional Laminate U412", widthMm: 800),
+        .init(stackOrder: 14, plyNumber: 102, group: "UD", material: "Unidirectional Laminate U412", widthMm: 800),
+        .init(stackOrder: 15, plyNumber: 136, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 16, plyNumber: 138, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 17, plyNumber: 140, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 18, plyNumber: 142, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 19, plyNumber: 144, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 20, plyNumber: 148, group: "UD", material: "Unidirectional Laminate U412", widthMm: 800),
+        .init(stackOrder: 21, plyNumber: 1640, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 22, plyNumber: 1660, group: "UD", material: "Linear-Fiber Sheet L871", widthMm: 800),
+        .init(stackOrder: 23, plyNumber: 168, group: "UD", material: "Unidirectional Laminate U412", widthMm: 800),
+        .init(stackOrder: 24, plyNumber: 174, group: "UD", material: "Unidirectional Laminate U412", widthMm: 800),
+        .init(stackOrder: 25, plyNumber: 203, group: "Biax", material: "Reinforced Mesh T450", widthMm: 1250),
+        .init(stackOrder: 26, plyNumber: 204, group: "Biax", material: "Reinforced Mesh T450", widthMm: 1250),
+        .init(stackOrder: 27, plyNumber: 206, group: "Biax", material: "Reinforced Mesh T450", widthMm: 1250),
+        .init(stackOrder: 28, plyNumber: 208, group: "Biax", material: "Reinforced Mesh T450", widthMm: 1250),
+        .init(stackOrder: 29, plyNumber: 229, group: "Biax", material: "Textile-Laminate F1280", widthMm: 920),
     ]
 
     var body: some View {
@@ -237,6 +237,22 @@ struct RepairDefectPanelView: View {
     }
 }
 
+/// Small, unobtrusive "this screen is mock data" marker for standalone reference screens
+/// (chamfering drawing, layup table) that don't carry the full yellow `placeholderBanner` —
+/// that banner's long explanatory note only lives on the main defect record screen; these two
+/// just need a quiet reminder, not a repeat of the same paragraph.
+private struct PlaceholderBadge: View {
+    var body: some View {
+        Text("Placeholder")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.thinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
+    }
+}
+
 /// Full-screen, pinch-to-zoom placeholder chamfering drawing (static PNG, `Assets.xcassets` ->
 /// `ChamferingDrawingZ32m`) — stands in for a future per-defect drawing lookup. Fits the whole
 /// drawing on screen by default (no cropping, no manual scroll needed), then lets the operator
@@ -247,6 +263,9 @@ struct RepairMockChamferingDrawingView: View {
             .navigationTitle("Chamfering Drawing")
             .navigationBarTitleDisplayMode(.inline)
             .ignoresSafeArea(edges: .bottom)
+            .overlay(alignment: .topTrailing) {
+                PlaceholderBadge().padding(12)
+            }
     }
 }
 
@@ -285,10 +304,13 @@ struct RepairMockLayupTableView: View {
         .listStyle(.plain)
         .navigationTitle("Layup · Z \(zMillimeters) mm")
         .navigationBarTitleDisplayMode(.inline)
+        .overlay(alignment: .topTrailing) {
+            PlaceholderBadge().padding(12)
+        }
     }
 
     private func groupColor(for group: String) -> Color {
-        group == "Biaxial" ? .red : .blue
+        group == "Biax" ? .red : .blue
     }
 }
 
