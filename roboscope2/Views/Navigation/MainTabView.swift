@@ -20,14 +20,6 @@ struct MainTabView: View {
                 }
                 .tag(0)
 
-            // Repair Tab — independent AR inspection workflow (own space picker + session list),
-            // does not share state with the Sessions/Laser Guide flow above.
-            RepairView()
-                .tabItem {
-                    Label("Repair", systemImage: "wrench.and.screwdriver")
-                }
-                .tag(1)
-
             // Record Tab
             NavigationView {
                 RecordView()
@@ -36,14 +28,14 @@ struct MainTabView: View {
                 .tabItem {
                     Label("Record", systemImage: "video.fill")
                 }
-                .tag(2)
+                .tag(1)
 
             // Settings Tab
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
-                .tag(3)
+                .tag(2)
         }
     }
 }

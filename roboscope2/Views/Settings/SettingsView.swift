@@ -76,9 +76,6 @@ struct SettingsView: View {
                     Text("Y-delta check rejects lines whose world-Y differs from the locked dot by more than the configured threshold. Segment tolerance controls how closely the measured dot↔line distance must match a laser guide segment.")
                 }
 
-                // Repair module — additive, does not affect the sections above.
-                RepairModelPickerSection()
-
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showVideoModePicker) {
