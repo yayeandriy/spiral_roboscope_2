@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  # main is covered by Deploy App Store (full archive); avoid a second macOS build.
+  push:
+    branches: [dev]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild -project roboscope2.xcodeproj -scheme roboscope2 \
+            -destination 'generic/platform=iOS Simulator' build \
+            CODE_SIGNING_ALLOWED=NO

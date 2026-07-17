@@ -1,0 +1,294 @@
+name: Deploy App Store
+
+# Archives a Release IPA and uploads it to App Store Connect (TestFlight).
+# Promoting a build to a public App Store release / submitting for review
+# stays a manual step in App Store Connect.
+#
+# Required secrets — see README "App Store deploy":
+#   APPSTORE_CERTIFICATE_P12, APPSTORE_CERTIFICATE_P12_PASSWORD,
+#   APPSTORE_ISSUER_ID, APPSTORE_KEY_ID, APPSTORE_PRIVATE_KEY
+#
+# Signing strategy:
+# - Archive uses Automatic + ASC API auth so SPM package bundles are not
+#   forced onto a manually specified provisioning profile.
+# - Export uses a manually managed App Store profile (created/fetched via
+#   ASC API) + the imported Apple Distribution certificate.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-app-store-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUNDLE_ID: spiral-technology.yayeandriy.roboscope2
+  TEAM_ID: 2JL868AT85
+  SCHEME: roboscope2
+  PROJECT: roboscope2.xcodeproj
+  ARCHIVE_NAME: roboscope2
+  MANUAL_PROFILE_NAME: Roboscope2 App Store CI
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message || '', '[skip ci]') }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump patch version + build
+        id: bump
+        run: |
+          set -euo pipefail
+          PROJECT_FILE="roboscope2.xcodeproj/project.pbxproj"
+          VER=$(grep -E 'MARKETING_VERSION = [0-9]+\.[0-9]+\.[0-9]+;' "$PROJECT_FILE" | head -1 | sed 's/.*= \(.*\);/\1/')
+          BUILD=$(grep -E 'CURRENT_PROJECT_VERSION = [0-9]+;' "$PROJECT_FILE" | grep -v 'CURRENT_PROJECT_VERSION = 1;' | head -1 | sed 's/.*= \(.*\);/\1/')
+          MAJOR=$(echo "$VER" | cut -d. -f1)
+          MINOR=$(echo "$VER" | cut -d. -f2)
+          PATCH=$(echo "$VER" | cut -d. -f3)
+          NEW="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          NEW_BUILD=$((BUILD + 1))
+          sed -i '' "s/MARKETING_VERSION = ${VER};/MARKETING_VERSION = ${NEW};/g" "$PROJECT_FILE"
+          sed -i '' "s/CURRENT_PROJECT_VERSION = ${BUILD};/CURRENT_PROJECT_VERSION = ${NEW_BUILD};/g" "$PROJECT_FILE"
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "build=$NEW_BUILD" >> "$GITHUB_OUTPUT"
+          echo "Bumped $VER ($BUILD) → $NEW ($NEW_BUILD)"
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Import Apple Distribution certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          create-keychain: true
+          keychain-password: ${{ secrets.APPSTORE_CERTIFICATE_P12_PASSWORD }}
+          p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATE_P12 }}
+          p12-password: ${{ secrets.APPSTORE_CERTIFICATE_P12_PASSWORD }}
+
+      - name: Write App Store Connect API key
+        env:
+          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/private_keys" "$HOME/.appstoreconnect/private_keys"
+          KEY_PATH="$HOME/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8"
+          printf '%s\n' "$APPSTORE_PRIVATE_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          cp "$KEY_PATH" "$HOME/.appstoreconnect/private_keys/"
+          echo "ASC_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Archive Release
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "build/${ARCHIVE_NAME}.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_API_KEY_PATH" \
+            -authenticationKeyID "${{ secrets.APPSTORE_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.APPSTORE_ISSUER_ID }}" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID"
+
+      - name: Ensure manual App Store provisioning profile
+        id: profile
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/asc-venv
+          /tmp/asc-venv/bin/pip install --quiet PyJWT cryptography
+          /tmp/asc-venv/bin/python <<'PY'
+          import base64, json, os, time, uuid, urllib.error, urllib.request
+          from pathlib import Path
+          import jwt
+
+          key_id = os.environ["APPSTORE_KEY_ID"]
+          issuer_id = os.environ["APPSTORE_ISSUER_ID"]
+          private_key = os.environ["APPSTORE_PRIVATE_KEY"]
+          bundle_id = os.environ["BUNDLE_ID"]
+          profile_name = os.environ["MANUAL_PROFILE_NAME"]
+
+          def token():
+              now = int(time.time())
+              return jwt.encode(
+                  {"iss": issuer_id, "iat": now, "exp": now + 1100, "aud": "appstoreconnect-v1"},
+                  private_key,
+                  algorithm="ES256",
+                  headers={"kid": key_id, "typ": "JWT"},
+              )
+
+          def api(method, path, body=None):
+              data = None if body is None else json.dumps(body).encode()
+              req = urllib.request.Request(
+                  f"https://api.appstoreconnect.apple.com{path}",
+                  data=data,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {token()}",
+                      "Content-Type": "application/json",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req) as resp:
+                      raw = resp.read()
+                      return resp.status, json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as e:
+                  err = e.read().decode()
+                  raise SystemExit(f"ASC API {method} {path} failed ({e.code}): {err}") from e
+
+          status, data = api("GET", f"/v1/bundleIds?filter[identifier]={bundle_id}&limit=5")
+          bundles = data.get("data") or []
+          if not bundles:
+              raise SystemExit(f"bundle id not found: {bundle_id}")
+          bundle_res_id = bundles[0]["id"]
+
+          status, data = api("GET", "/v1/certificates?filter[certificateType]=DISTRIBUTION&limit=50")
+          certs = data.get("data") or []
+          if not certs:
+              status, data = api("GET", "/v1/certificates?filter[certificateType]=IOS_DISTRIBUTION&limit=50")
+              certs = data.get("data") or []
+          if not certs:
+              raise SystemExit("no DISTRIBUTION / IOS_DISTRIBUTION certificates found")
+          cert_id = certs[0]["id"]
+
+          status, data = api("GET", "/v1/profiles?filter[profileType]=IOS_APP_STORE&limit=200")
+          profiles = [
+              p for p in (data.get("data") or [])
+              if p.get("attributes", {}).get("name") == profile_name
+              and p.get("attributes", {}).get("profileState") == "ACTIVE"
+          ]
+
+          if not profiles:
+              print(f"Creating manual profile: {profile_name}")
+              status, data = api(
+                  "POST",
+                  "/v1/profiles",
+                  {
+                      "data": {
+                          "type": "profiles",
+                          "attributes": {
+                              "name": profile_name,
+                              "profileType": "IOS_APP_STORE",
+                          },
+                          "relationships": {
+                              "bundleId": {"data": {"type": "bundleIds", "id": bundle_res_id}},
+                              "certificates": {
+                                  "data": [{"type": "certificates", "id": cert_id}]
+                              },
+                          },
+                      }
+                  },
+              )
+              profiles = [data["data"]]
+          else:
+              print(f"Reusing manual profile: {profile_name}")
+
+          profile = profiles[0]
+          content_b64 = profile["attributes"]["profileContent"]
+          if not content_b64:
+              status, data = api("GET", f"/v1/profiles/{profile['id']}")
+              content_b64 = data["data"]["attributes"]["profileContent"]
+
+          raw = base64.b64decode(content_b64)
+          uuid_str = None
+          try:
+              import plistlib
+              text = raw.decode("utf-8", errors="ignore")
+              start = text.find("<?xml")
+              end = text.rfind("</plist>")
+              if start != -1 and end != -1:
+                  plist = plistlib.loads(text[start : end + len("</plist>")].encode())
+                  uuid_str = plist.get("UUID")
+          except Exception:
+              pass
+          if not uuid_str:
+              uuid_str = str(uuid.uuid4()).upper()
+
+          dest_dir = Path.home() / "Library/MobileDevice/Provisioning Profiles"
+          dest_dir.mkdir(parents=True, exist_ok=True)
+          dest = dest_dir / f"{uuid_str}.mobileprovision"
+          dest.write_bytes(raw)
+          print(f"Installed profile UUID={uuid_str}")
+
+          out = os.environ["GITHUB_OUTPUT"]
+          with open(out, "a") as f:
+              f.write(f"name={profile_name}\n")
+          PY
+
+      - name: Export IPA
+        run: |
+          set -euo pipefail
+          PROFILE_NAME='${{ steps.profile.outputs.name }}'
+          cat > build/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>destination</key>
+            <string>export</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+          sed -i '' 's/^[[:space:]]*//' build/ExportOptions.plist
+          xcodebuild -exportArchive \
+            -archivePath "build/${ARCHIVE_NAME}.xcarchive" \
+            -exportPath build/export \
+            -exportOptionsPlist build/ExportOptions.plist
+          ls -la build/export
+          test -f "build/export/${ARCHIVE_NAME}.ipa"
+
+      - name: Upload to TestFlight
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          xcrun altool --upload-app \
+            --type ios \
+            --file "build/export/${ARCHIVE_NAME}.ipa" \
+            --apiKey "$APPSTORE_KEY_ID" \
+            --apiIssuer "$APPSTORE_ISSUER_ID"
+
+      - name: Commit version bump
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add roboscope2.xcodeproj/project.pbxproj
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.version }} (build ${{ steps.bump.outputs.build }}) [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
