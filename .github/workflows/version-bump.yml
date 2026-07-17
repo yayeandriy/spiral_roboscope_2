@@ -1,0 +1,47 @@
+name: Version Bump
+# Feature / dev branches only. On main, Deploy App Store bumps the version
+# in the same job that archives (avoids a second push + CI/Deploy race).
+on:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  bump:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump patch version + build
+        run: |
+          set -euo pipefail
+          PROJECT="roboscope2.xcodeproj/project.pbxproj"
+          # App target only (test targets stay at 1.0 / 1).
+          VER=$(grep -E 'MARKETING_VERSION = [0-9]+\.[0-9]+\.[0-9]+;' "$PROJECT" | head -1 | sed 's/.*= \(.*\);/\1/')
+          BUILD=$(grep -E 'CURRENT_PROJECT_VERSION = [0-9]+;' "$PROJECT" | grep -v 'CURRENT_PROJECT_VERSION = 1;' | head -1 | sed 's/.*= \(.*\);/\1/')
+          echo "Current: $VER (build $BUILD)"
+          MAJOR=$(echo "$VER" | cut -d. -f1)
+          MINOR=$(echo "$VER" | cut -d. -f2)
+          PATCH=$(echo "$VER" | cut -d. -f3)
+          NEW="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          NEW_BUILD=$((BUILD + 1))
+          echo "New: $NEW (build $NEW_BUILD)"
+          sed -i "s/MARKETING_VERSION = ${VER};/MARKETING_VERSION = ${NEW};/g" "$PROJECT"
+          sed -i "s/CURRENT_PROJECT_VERSION = ${BUILD};/CURRENT_PROJECT_VERSION = ${NEW_BUILD};/g" "$PROJECT"
+
+      - name: Commit & push
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          PROJECT="roboscope2.xcodeproj/project.pbxproj"
+          NEW=$(grep -E 'MARKETING_VERSION = [0-9]+\.[0-9]+\.[0-9]+;' "$PROJECT" | head -1 | sed 's/.*= \(.*\);/\1/')
+          BUILD=$(grep -E 'CURRENT_PROJECT_VERSION = [0-9]+;' "$PROJECT" | grep -v 'CURRENT_PROJECT_VERSION = 1;' | head -1 | sed 's/.*= \(.*\);/\1/')
+          git add "$PROJECT"
+          git commit -m "chore: bump version to ${NEW} (build ${BUILD}) [skip ci]" || true
+          git push

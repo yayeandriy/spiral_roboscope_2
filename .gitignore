@@ -1,2 +1,8 @@
 .DS_Store
 graphify-out/
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.p8
+*.p12
