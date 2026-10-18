@@ -8,6 +8,7 @@
 import SwiftUI
 import RealityKit
 import ARKit
+import AVKit
 import UIKit
 import SceneKit
 import Combine
@@ -143,24 +144,16 @@ extension LaserGuideARSessionView {
                 VStack {
                     Spacer()
 
-                    if hasAutoScoped, let info = markerService.selectedMarkerInfo {
+                    if pendingMarkerDelete != nil {
+                        markerDeleteConfirmation
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 20)
+                            .transition(.opacity.combined(with: .scale))
+                    } else if hasAutoScoped, !markerService.isDraggingEdge, let info = markerService.selectedMarkerInfo {
                         MarkerBadgeView(
                             info: info,
                             details: markerService.selectedMarkerDetails,
-                            onDelete: {
-                                if let backendId = markerService.selectedBackendId {
-                                    Task {
-                                        do {
-                                            try await markerApi.deleteMarker(id: backendId)
-                                            markerService.removeMarkerByBackendId(backendId)
-                                        } catch {
-                                            errorMessage = "Failed to delete marker: \(error.localizedDescription)"
-                                        }
-                                    }
-                                } else {
-                                    markerService.removeSelectedMarkerLocal()
-                                }
-                            }
+                            onDelete: { armMarkerDelete() }
                         )
                         .padding(.horizontal, 16)
                         .padding(.bottom, 20)
@@ -176,6 +169,8 @@ extension LaserGuideARSessionView {
                     .padding(.bottom, manualPlacementState != .inactive ? 280 : 50)
                 }
                 .animation(.easeInOut(duration: 0.2), value: markerService.selectedMarkerID)
+                .animation(.easeInOut(duration: 0.2), value: pendingMarkerDelete)
+                .animation(.easeInOut(duration: 0.2), value: markerService.isDraggingEdge)
 
                 if !hasAutoScoped && emptyDetectionFrames <= 2 * max(1, settings.videoModeAccumulatorFrames) {
                     LaserMLDetectionOverlay(
@@ -276,6 +271,33 @@ extension LaserGuideARSessionView {
             )
         }
         .navigationBarBackButtonHidden()
+        .onAppear {
+            bindSelfieStick()
+            selfieStick.start()
+            selfieStick.setAcceptsInput(selfieStickEnabled)
+        }
+        .onDisappear {
+            releaseStickEdgeGrab()
+            cancelMarkerDelete()
+            selfieStick.stop()
+        }
+        .onChange(of: selfieStickEnabled) { _, enabled in
+            if !enabled { releaseStickEdgeGrab() }
+            bindSelfieStick()
+            selfieStick.setAcceptsInput(enabled)
+        }
+        .onChange(of: hasAutoScoped) { _, _ in
+            bindSelfieStick()
+        }
+        .onCameraCaptureEvent(isEnabled: selfieStickEnabled, defaultSoundDisabled: true) { event in
+            // AirPods stem clicks expect a tone once the default one is off.
+            // A selfie-stick shutter does not, so this stays silent for the stick.
+            if event.phase == .ended, event.shouldPlaySound {
+                _ = event.play(.cameraShutter)
+            }
+            bindSelfieStick()
+            selfieStick.handleCapturePhase(event.phase)
+        }
         .onChange(of: mlDetection.detections) { _, rawDetections in
             processDetections(rawDetections)
         }
@@ -441,6 +463,42 @@ extension LaserGuideARSessionView {
                     )
             )
         }
+    }
+
+    @ViewBuilder
+    var markerDeleteConfirmation: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Delete this marker")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+            Text("Click accepts, double-click cancels")
+                .font(.system(size: 16, weight: .regular))
+                .foregroundColor(.white.opacity(0.7))
+            HStack(spacing: 12) {
+                Button { cancelMarkerDelete() } label: {
+                    Text("Cancel")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(minWidth: 120, minHeight: 48)
+                }
+                .buttonStyle(.plain)
+                .lgCapsule(tint: .white)
+
+                Spacer(minLength: 12)
+
+                Button { acceptMarkerDelete() } label: {
+                    Text("Delete")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(minWidth: 120, minHeight: 48)
+                }
+                .buttonStyle(.plain)
+                .lgCapsule(tint: .red)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
     }
 
     @ViewBuilder

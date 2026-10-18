@@ -94,6 +94,7 @@ extension SpatialMarkerService {
             lastWorldNodePositions.removeAll()
             movingEdgeIndices = nil
             updateCounter = 0
+            isDraggingEdge = false
         }
         guard let idx = movingMarkerIndex, idx < markers.count else { return nil }
         let marker = markers[idx]

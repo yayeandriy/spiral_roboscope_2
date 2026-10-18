@@ -88,6 +88,27 @@ struct LaserGuideARSessionView: View {
 
     // Hold-to-place origin button state
     @State var isPlacementButtonHeld: Bool = false
+    /// True while the selfie-stick shutter, not a finger, is holding origin detection.
+    @State var remoteOriginHoldActive = false
+    /// Double-click latched the origin button. A later click releases it.
+    /// A physical hold still releases on button-up.
+    @State var originLatched = false
+    /// Marker chosen for deletion. Click accepts, double-click cancels.
+    @State var pendingMarkerDelete: PendingMarkerDelete?
+    @State var selfieStick = SelfieStickButtonController()
+    /// What the current stick hold is driving. Nil when the button is up.
+    @State var stickHoldAction: StickHoldAction?
+    @State var stickFollowTimer: Timer?
+
+    enum StickHoldAction {
+        case origin
+        case markerEdge
+    }
+
+    struct PendingMarkerDelete: Equatable {
+        let localID: UUID
+        let backendID: UUID?
+    }
     @State var savedHasAutoScoped: Bool = false
     @State var savedFrameOriginTransform: simd_float4x4 = matrix_identity_float4x4
 
@@ -591,6 +612,205 @@ struct LaserGuideARSessionView: View {
             // No previous origin and placement didn't succeed — stay idle
             // Nothing to restore; user can hold again to retry
         }
+    }
+
+    /// Stick input is live while the operator can use the origin and marker buttons.
+    var selfieStickEnabled: Bool {
+        manualPlacementState == .inactive
+            && !showActionsDialog
+            && !showSpaceInfo
+            && !showScanView
+            && !showMinimap
+    }
+
+    func bindSelfieStick() {
+        selfieStick.immediateHold = manualPlacementState == .inactive && !hasAutoScoped
+        selfieStick.onEvent = { event in
+            handleSelfieStick(event)
+        }
+    }
+
+    /// Bluetooth shutter.
+    /// A tap places a marker when the reticle is clear. A tap on a selected
+    /// edge grabs that edge until the next tap. A double tap asks to delete
+    /// the hovered marker, or presses the origin button when nothing is
+    /// hovered. Holding, with the reticle clear, keeps origin detection on
+    /// until the button stays up.
+    func handleSelfieStick(_ event: SelfieStickButtonEvent) {
+        switch event {
+        case .holdBegan:
+            beginStickHold()
+        case .holdEnded:
+            endPhysicalOriginHold()
+        case .click:
+            handleStickClick()
+        case .doubleClick:
+            handleStickDoubleClick()
+        }
+    }
+
+    /// True while the reticle is on a marker edge. That edge is the grab target.
+    private var edgeIsHovered: Bool {
+        hasAutoScoped
+            && markerService.selectedMarkerID != nil
+            && markerService.selectedEdgeIndex != nil
+    }
+
+    private func handleStickClick() {
+        if pendingMarkerDelete != nil {
+            acceptMarkerDelete()
+            return
+        }
+        if stickHoldAction == .origin {
+            guard originLatched else { return }
+            endOriginHold()
+            return
+        }
+        if stickHoldAction == .markerEdge {
+            releaseStickEdgeGrab()
+            return
+        }
+        if edgeIsHovered {
+            beginEdgeGrab()
+            return
+        }
+        guard stickHoldAction == nil else { return }
+        guard hasAutoScoped, !isPlacementButtonHeld, !markerService.targetCrossesEdge else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        createAndPersistMarker()
+    }
+
+    /// Double click asks to delete the hovered marker. With a clear reticle it
+    /// presses the origin button and leaves it down until the next click.
+    private func handleStickDoubleClick() {
+        if pendingMarkerDelete != nil {
+            cancelMarkerDelete()
+            return
+        }
+        if stickHoldAction == .origin {
+            guard originLatched else { return }
+            endOriginHold()
+            return
+        }
+        guard stickHoldAction == nil, manualPlacementState == .inactive, !isPlacementButtonHeld else { return }
+        if markerService.selectedMarkerID != nil {
+            armMarkerDelete()
+            return
+        }
+        latchOriginPlacement()
+    }
+
+    func armMarkerDelete() {
+        guard let localID = markerService.selectedMarkerID else { return }
+        pendingMarkerDelete = PendingMarkerDelete(
+            localID: localID,
+            backendID: markerService.selectedBackendId
+        )
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    func acceptMarkerDelete() {
+        guard let pending = pendingMarkerDelete else { return }
+        pendingMarkerDelete = nil
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if let backendId = pending.backendID {
+            Task {
+                do {
+                    try await markerApi.deleteMarker(id: backendId)
+                    markerService.removeMarkerByBackendId(backendId)
+                } catch {
+                    errorMessage = "Failed to delete marker: \(error.localizedDescription)"
+                }
+            }
+        } else {
+            markerService.removeMarker(localId: pending.localID)
+        }
+    }
+
+    func cancelMarkerDelete() {
+        guard pendingMarkerDelete != nil else { return }
+        pendingMarkerDelete = nil
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func beginStickHold() {
+        guard pendingMarkerDelete == nil else { return }
+        guard manualPlacementState == .inactive, stickHoldAction == nil else { return }
+        guard !edgeIsHovered, !isPlacementButtonHeld else { return }
+        originLatched = false
+        stickHoldAction = .origin
+        remoteOriginHoldActive = true
+        isPlacementButtonHeld = true
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        startPlacement()
+    }
+
+    /// Presses the origin button and leaves it down. The next click releases it.
+    private func latchOriginPlacement() {
+        guard pendingMarkerDelete == nil else { return }
+        guard manualPlacementState == .inactive, stickHoldAction == nil, !isPlacementButtonHeld else { return }
+        originLatched = true
+        stickHoldAction = .origin
+        remoteOriginHoldActive = true
+        isPlacementButtonHeld = true
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        startPlacement()
+    }
+
+    /// A physical hold releases when the button comes up. A latched press stays.
+    private func endPhysicalOriginHold() {
+        guard !originLatched else { return }
+        endOriginHold()
+    }
+
+    /// Ends an origin hold. An edge grab stays until the next click.
+    private func endOriginHold() {
+        guard stickHoldAction == .origin else { return }
+        originLatched = false
+        remoteOriginHoldActive = false
+        isPlacementButtonHeld = false
+        stopPlacement()
+        stickHoldAction = nil
+    }
+
+    private func beginEdgeGrab() {
+        stickHoldAction = .markerEdge
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        viewModel.oneFingerStart()
+        startStickEdgeFollow()
+    }
+
+    /// Drops a grabbed edge. Safe to call when nothing is grabbed.
+    func releaseStickEdgeGrab() {
+        guard stickHoldAction == .markerEdge else { return }
+        stopStickEdgeFollow()
+        viewModel.oneFingerEnd(transformToFrameOrigin: { transformPointsToFrameOrigin($0) })
+        stickHoldAction = nil
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// Keeps the grabbed edge pinned to the reticle until the next stick click.
+    /// Moving the phone moves that edge, the same way a finger drag does.
+    private func startStickEdgeFollow() {
+        stickFollowTimer?.invalidate()
+        applyStickEdgeDrag()
+        let timer = Timer(timeInterval: 0.033, repeats: true) { _ in
+            applyStickEdgeDrag()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        stickFollowTimer = timer
+    }
+
+    private func stopStickEdgeFollow() {
+        stickFollowTimer?.invalidate()
+        stickFollowTimer = nil
+    }
+
+    private func applyStickEdgeDrag() {
+        let rect = getTargetRect()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        guard let drag = markerService.dragTranslationToMoveSelectedEdge(toward: center) else { return }
+        viewModel.gestureChanged(translation: drag, scale: 1)
     }
 
     /// Determines the run index for this AR session launch.

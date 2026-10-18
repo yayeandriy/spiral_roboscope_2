@@ -35,6 +35,8 @@ final class SpatialMarkerService: ObservableObject {
     @Published var targetCrossesEdge: Bool = false
     
     // Moving state
+    /// True while a marker edge is being dragged. The badge hides and that edge is blue.
+    @Published var isDraggingEdge: Bool = false
     var movingMarkerIndex: Int?
     var nodeScreenPositions: [CGPoint] = []
     var updateCounter: Int = 0
@@ -170,6 +172,15 @@ final class SpatialMarkerService: ObservableObject {
         guard let selId = selectedMarkerID,
               let m = markers.first(where: { $0.id == selId }) else { return nil }
         return m.backendId
+    }
+
+    /// Remove a marker that has not been saved yet.
+    func removeMarker(localId: UUID) {
+        guard let arView = arView,
+              let idx = markers.firstIndex(where: { $0.id == localId }) else { return }
+        arView.scene.removeAnchor(markers[idx].anchorEntity)
+        markers.remove(at: idx)
+        if selectedMarkerID == localId { selectedMarkerID = nil }
     }
 
     /// Remove selected marker locally (by local id)
@@ -438,7 +449,19 @@ extension SpatialMarkerService {
         lastWorldNodePositions = [marker.nodes[i], marker.nodes[j]]
         movingEdgeIndices = (i, j)
         updateCounter = 0
+        isDraggingEdge = true
+        tintDraggedEdgeBlue()
         return true
+    }
+
+    /// The edge being dragged stays blue until the move ends and tracking repaints it.
+    private func tintDraggedEdgeBlue() {
+        guard let markerIdx = movingMarkerIndex,
+              markerIdx < markers.count,
+              let (i, j) = movingEdgeIndices,
+              let edgeEntity = markers[markerIdx].anchorEntity.children.first(where: { $0.name == "edge_\(i)_\(j)" }) as? ModelEntity
+        else { return }
+        edgeEntity.model?.materials = [UnlitMaterial(color: .systemBlue)]
     }
 
     /// Update the moving edge by raycasting the two adjusted screen points
@@ -510,7 +533,16 @@ extension SpatialMarkerService {
         applyNodePositions(markerIndex: markerIdx, newNodePositions: allNodes)
         refreshHandlers(markerIndex: markerIdx)
     }
-    
+
+    /// Screen drag that slides the edge captured at the start of a move so its midpoint lands on `target`.
+    /// Used by the selfie-stick hold, which has no finger travel: the reticle is the drag.
+    func dragTranslationToMoveSelectedEdge(toward target: CGPoint) -> CGSize? {
+        guard originalNodeScreenPositions.count == 2 else { return nil }
+        let midX = (originalNodeScreenPositions[0].x + originalNodeScreenPositions[1].x) / 2
+        let midY = (originalNodeScreenPositions[0].y + originalNodeScreenPositions[1].y) / 2
+        return CGSize(width: target.x - midX, height: target.y - midY)
+    }
+
     /// End edge movement and return the modified marker for persistence
     func endMoveSelectedEdge() -> (UUID, Int64, [SIMD3<Float>])? {
         return stopMovingMarker()
